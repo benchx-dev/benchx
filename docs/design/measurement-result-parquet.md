@@ -116,13 +116,21 @@ The checksum matters while 0.1.0 is a draft that changes under one URI.
 
 ## 4. Writing and reading
 
-The program validates each message against the JSON Schema, derives the Arrow schema, and writes all messages given to it as the rows of one file:
+The program reads each message strictly, validates it against the JSON Schema, derives the Arrow schema, and writes all messages given to it as the rows of one file:
 
 ```bash
 pip install jsonschema pyarrow rfc8785
 python tools/json_to_parquet.py schemas/measurement-result/0.1.0/schema.json \
     results.parquet schemas/measurement-result/0.1.0/examples/*.json
 ```
+
+Input is strict because JSON Schema validation only sees a message after it has been parsed, when some defects are already invisible. Messages use the I-JSON data model (RFC 7493), and the program rejects what falls outside it before validating:
+
+- **Duplicate object keys.** A parser keeps one of them silently, so two readers could store different values for the same message.
+- **`NaN`, `Infinity`, and `-Infinity`.** Python's parser accepts these tokens although JSON does not, and they have no place in a finite observation.
+- **Numbers outside the RFC 8785 domain.** Every message is passed through RFC 8785 serialization, which refuses integers beyond ±2^53, the I-JSON safe-integer range. A larger value is read differently by parsers that hold numbers as binary64, so it would not mean the same thing to every reader.
+
+The same canonical form is what the `json` columns hold and what the schema checksum is computed over. One rejected message fails the run and nothing is written.
 
 Any Arrow-capable engine reads the result directly. In DuckDB, structs are addressed with dots, the observation list with list functions, and JSON columns with JSON paths:
 

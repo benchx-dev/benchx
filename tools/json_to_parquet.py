@@ -71,14 +71,32 @@ def to_row(data_type, value):
     return value
 
 
+def unique_keys(pairs):
+    # jsonschema only sees the parsed mapping, after duplicate keys are lost.
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError(f"duplicate JSON key in {[key for key, _ in pairs]}")
+    return result
+
+
+def non_finite(token):
+    # Python's JSON parser accepts NaN and Infinity even though JSON does not.
+    raise ValueError(f"invalid JSON number: {token}")
+
+
+def load_json(path):
+    """Load strict I-JSON: UTF-8, unique keys, finite numbers, safe integers."""
+    with open(path, encoding="utf-8") as f:
+        value = json.load(f, object_pairs_hook=unique_keys, parse_constant=non_finite)
+    rfc8785.dumps(value)  # rejects numbers outside the RFC 8785 domain, such as integers beyond 2**53
+    return value
+
+
 def main(schema_path, output, *message_paths):
-    with open(schema_path) as f:
-        message_schema = json.load(f)
-    messages = []
-    for path in message_paths:
-        with open(path) as f:
-            messages.append(json.load(f))
-        jsonschema.validate(messages[-1], message_schema)
+    message_schema = load_json(schema_path)
+    messages = [load_json(path) for path in message_paths]
+    for message in messages:
+        jsonschema.validate(message, message_schema)
 
     defs = message_schema["$defs"]
     # Build with strings, then cast: PyArrow cannot fill nested JSON fields
