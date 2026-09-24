@@ -2,7 +2,7 @@
 
 **Status:** Draft for review; exploratory example
 
-**Companion to:** `benchmark-result-schema.md` §5 (the message; where this document and the schema differ, the schema wins)
+**Companion to:** `benchmark-result-schema.md` §5 (the message; where this document and the schema differ, the schema wins), `prototype-design.md` §4 (the prototype store whose `results/` table this row defines)
 
 **Author:** Rok Mihevc
 
@@ -10,7 +10,7 @@
 
 This document shows the schema under which a validated measurement result (§5.2 ingest object) is stored in a Parquet file, and a small PyArrow program that writes one: [`tools/json_to_parquet.py`](../../tools/json_to_parquet.py). It defines nothing about the message itself.
 
-One row is one result, that is one attempt and one quantity. A row holds the reported facts only. Series fingerprints, derived estimates, and entity tables are computed by a store at ingest (§4.3, §5.3) and would sit beside these columns; they are not part of a message and so not part of this schema. The mapping is not byte-preserving, so a store that needs the original document keeps it separately.
+One row is one result, that is one attempt and one quantity. A row holds the reported facts only. Series fingerprints, derived estimates, and entity tables are computed by a store at ingest (§4.3, §5.3) and sit beside these columns (§4 below); they are not part of a message. The mapping is not byte-preserving, so a store that needs the original document keeps it separately, as the prototype store does under `raw/`.
 
 ## 2. Mapping
 
@@ -20,13 +20,15 @@ The Arrow schema is derived from [`schema.json`](../../schemas/measurement-resul
 |---|---|
 | closed object (`additionalProperties: false`) | `struct` with the same field order; required properties are non-nullable |
 | open object, or a value of mixed primitive types | `json`: the Arrow JSON extension type, written with the Parquet JSON logical type, holding RFC 8785 canonical text |
-| `oneOf` of closed objects (`summaries`) | one `struct` with every property any alternative declares, in first-appearance order; non-nullable only when every alternative requires it |
+| `oneOf` of closed objects (`summaries`) | one `struct` with every property any alternative declares, in first-appearance order; non-nullable only when every alternative requires it; alternatives that give one property different types are an error, not a silent choice |
 | `oneOf` of number and structured observation (`observations`) | the structured observation's `struct`; a bare number is stored with only `value` set |
 | `allOf` of a reference and extra assertions (`derivation`) | the referenced type |
 | array | `list` |
 | string with `format: date-time` | `timestamp[us, UTC]` |
-| string, enum, string const | `string` |
-| integer, integer const | `int64` |
+| `const` or `enum` | by its values: all strings `string`, all integers `int64`, other numbers `float64`, all booleans `bool`, mixed `json` |
+| `oneOf` of primitives only | `json` |
+| string | `string` |
+| integer | `int64` |
 | number | `float64` |
 | boolean | `bool` |
 
@@ -34,7 +36,7 @@ Open objects stay JSON because their keys are project-defined: workload paramete
 
 ## 3. Resulting schema
 
-For message schema 0.1.0; `*` marks a non-nullable field.
+For message schema 0.1.0, whose messages carry `schema_version: 5`: the file name and `$id` version the schema document, the integer versions the message contract. `*` marks a non-nullable field.
 
 ```text
 schema_version*: int64
@@ -70,7 +72,8 @@ measurement*: struct
     kind*: string, lower: float64, upper: float64,
     lower_inclusive: bool, upper_inclusive: bool, cause*: string
   observations: list of struct
-    value*: float64, ordinal: int64, slot: int64, time: timestamp[us, UTC],
+    value*: float64, ordinal: int64, inner_iterations: int64, slot: int64,
+    time: timestamp[us, UTC],
     group: string, pair: string, included: bool, exclusion_reason: string
   derivation: struct                    (as estimator)
   summaries: list of struct
@@ -114,12 +117,30 @@ benchx.message_schema_sha256 = <SHA-256 of the RFC 8785 form of schema.json>
 
 The checksum matters while 0.1.0 is a draft that changes under one URI.
 
-## 4. Writing and reading
+## 4. Columns a store adds
+
+The prototype store (`prototype-design.md` §4) writes this row as its `results/` table and adds, beside the message columns and outside the `coordinates`, `measurement`, and `provenance` structs, the columns it derives at ingest:
+
+```text
+reported_coordinates_fingerprint*: string   schema §4.3
+series_fingerprint: string                  per identity-policy schema; absent for thin results
+estimate: float64, estimate_source: string  the series point's value and whether producer or derived
+payload_sha256*: string                     of the RFC 8785 form, for idempotency checks
+ingested_at*: timestamp[us, UTC]
+round: int64, slot: int64                   promoted from procedure
+inner_iterations: int64                     promoted from procedure
+```
+
+The last three are promoted because the comparator's run mode pairs attempts by `procedure.round` and checks the schedule by `procedure.slot` (schema §5.5), and per-iteration values need the loop count; reading them from a JSON column would parse it on every row of every comparison. They are copies: the `procedure` column keeps the message's value, and a promoted column is rebuilt from it. Other `procedure` or `comparison_context` keys are promoted the same way when a query needs them, never by changing the message schema.
+
+**Appending and schema changes.** A store appends one file per ingest call. Because the Arrow schema is derived, a change to `schema.json` changes the file schema, and a dataset then holds files written under several message schemas, told apart by `benchx.message_schema_sha256`. Additive changes, a new optional field such as `inner_iterations` on observations, are read together with PyArrow's permissive schema unification (`pyarrow.dataset` with `unify_schemas(..., promote_options="permissive")`), where missing fields read as null. A change that removes a field or changes its type is a new message contract version (`schema_version`) and is written to a separate dataset or rewritten on migration, never mixed.
+
+## 5. Writing and reading
 
 The program reads each message strictly, validates it against the JSON Schema, derives the Arrow schema, and writes all messages given to it as the rows of one file:
 
 ```bash
-pip install jsonschema pyarrow rfc8785
+pip install jsonschema 'pyarrow>=19' rfc8785   # Python 3.11 or newer
 python tools/json_to_parquet.py schemas/measurement-result/0.1.0/schema.json \
     results.parquet schemas/measurement-result/0.1.0/examples/*.json
 ```
@@ -155,9 +176,15 @@ truncate      wall-time       5     0.000128  perf_counter
 
 The overhead ratio is an aggregate-only compound result, so it has no observations.
 
-## 5. Not covered
+`tests/test_json_to_parquet.py` converts the examples and checks row count, nullability, canonical JSON, observation values, file metadata, strict input, and the type-mapping rules:
+
+```bash
+python -m unittest tests/test_json_to_parquet.py
+```
+
+## 6. Not covered
 
 - The rules the message schema leaves to the ingest server or comparator: idempotency and conflicts on `(producer, ingest_key)`, unit immutability, attempt integrity, comparison profiles.
-- Derived columns and tables, appending to a dataset, partitioning, and compaction.
+- Entity tables, partitioning, and compaction; the prototype store rewrites its small entity tables and compacts on request.
 - Reading a message back out of Parquet. Member order, number spelling, and whether an observation was a bare number are not kept.
 - Timestamps finer than microseconds are truncated to the column's precision.
