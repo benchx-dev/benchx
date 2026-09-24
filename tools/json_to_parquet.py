@@ -25,19 +25,6 @@ TIMESTAMP = pa.timestamp("us", tz="UTC")
 SCALARS = {"string": pa.string(), "integer": pa.int64(), "number": pa.float64(), "boolean": pa.bool_()}
 
 
-def literal_type(values, json_type):
-    """Map the values of a const or enum to one Arrow type."""
-    if all(isinstance(v, bool) for v in values):
-        return pa.bool_()
-    if all(isinstance(v, int) and not isinstance(v, bool) for v in values):
-        return pa.int64()
-    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
-        return pa.float64()
-    if all(isinstance(v, str) for v in values):
-        return pa.string()
-    return json_type  # mixed literals stay JSON
-
-
 def arrow_type(node, defs, json_type):
     """Map one JSON Schema node to an Arrow type."""
     if "$ref" in node:
@@ -48,8 +35,8 @@ def arrow_type(node, defs, json_type):
     if "oneOf" in node:  # union of closed objects, or number-or-object observation
         branches = [defs[b["$ref"].rsplit("/", 1)[-1]] if "$ref" in b else b for b in node["oneOf"]]
         objects = [b for b in branches if b.get("type") == "object"]
-        if not objects:  # a union of primitives
-            return json_type
+        if not objects:
+            raise ValueError(f"unsupported oneOf without an object alternative: {node}")
         required = set.intersection(*(set(b.get("required", [])) for b in objects))
         types = {}  # in first-appearance order
         for b in objects:
@@ -58,10 +45,11 @@ def arrow_type(node, defs, json_type):
                 if types.setdefault(k, t) != t:
                     raise ValueError(f"oneOf alternatives disagree on the type of {k!r}: {types[k]} and {t}")
         return pa.struct([pa.field(k, t, k not in required) for k, t in types.items()])
-    if "const" in node:
-        return literal_type([node["const"]], json_type)
-    if "enum" in node:
-        return literal_type(node["enum"], json_type)
+    if "const" in node or "enum" in node:
+        literals = {type(v) for v in node.get("enum", [node.get("const")])}
+        if literals not in ({str}, {int}):  # bool is not int here: type(True) is bool
+            raise ValueError(f"unsupported const or enum: {node}")
+        return pa.string() if literals == {str} else pa.int64()
     if node.get("type") == "array":
         return pa.list_(pa.field("element", nested(node["items"]), False))
     if node.get("type") == "object":
@@ -133,6 +121,4 @@ def main(schema_path, output, *message_paths):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        sys.exit("usage: json_to_parquet.py SCHEMA OUTPUT MESSAGE...")
     main(*sys.argv[1:])

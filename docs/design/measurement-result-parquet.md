@@ -25,12 +25,11 @@ The Arrow schema is derived from [`schema.json`](../../schemas/measurement-resul
 | `allOf` of a reference and extra assertions (`derivation`) | the referenced type |
 | array | `list` |
 | string with `format: date-time` | `timestamp[us, UTC]` |
-| `const` or `enum` | by its values: all strings `string`, all integers `int64`, other numbers `float64`, all booleans `bool`, mixed `json` |
-| `oneOf` of primitives only | `json` |
-| string | `string` |
-| integer | `int64` |
+| string, enum, string const | `string` |
+| integer, integer const | `int64` |
 | number | `float64` |
 | boolean | `bool` |
+| any other `const`, `enum`, or `oneOf` | an error, so that a schema change the rules do not cover is noticed rather than stored loosely |
 
 Open objects stay JSON because their keys are project-defined: workload parameters, subject configuration, comparison context, environment identity, resource selection, observed context, and procedure. Canonical text makes equal values equal strings. A store promotes a key to a typed column only when a query needs it.
 
@@ -72,8 +71,7 @@ measurement*: struct
     kind*: string, lower: float64, upper: float64,
     lower_inclusive: bool, upper_inclusive: bool, cause*: string
   observations: list of struct
-    value*: float64, ordinal: int64, inner_iterations: int64, slot: int64,
-    time: timestamp[us, UTC],
+    value*: float64, ordinal: int64, slot: int64, time: timestamp[us, UTC],
     group: string, pair: string, included: bool, exclusion_reason: string
   derivation: struct                    (as estimator)
   summaries: list of struct
@@ -117,23 +115,11 @@ benchx.message_schema_sha256 = <SHA-256 of the RFC 8785 form of schema.json>
 
 The checksum matters while 0.1.0 is a draft that changes under one URI.
 
-## 4. Columns a store adds
+## 4. Beside the message columns
 
-The prototype store (`prototype-design.md` §4) writes this row as its `results/` table and adds, beside the message columns and outside the `coordinates`, `measurement`, and `provenance` structs, the columns it derives at ingest:
+A store adds the columns it derives at ingest, such as fingerprints, the series point's estimate, and the ingest time, and may copy a key out of an open object into a typed column when a query needs it, `procedure.round` for the comparator's run mode for instance. Those columns and the store's layout belong to the store's design (`prototype-design.md` §4), not to this document.
 
-```text
-reported_coordinates_fingerprint*: string   schema §4.3
-series_fingerprint: string                  per identity-policy schema; absent for thin results
-estimate: float64, estimate_source: string  the series point's value and whether producer or derived
-payload_sha256*: string                     of the RFC 8785 form, for idempotency checks
-ingested_at*: timestamp[us, UTC]
-round: int64, slot: int64                   promoted from procedure
-inner_iterations: int64                     promoted from procedure
-```
-
-The last three are promoted because the comparator's run mode pairs attempts by `procedure.round` and checks the schedule by `procedure.slot` (schema §5.5), and per-iteration values need the loop count; reading them from a JSON column would parse it on every row of every comparison. They are copies: the `procedure` column keeps the message's value, and a promoted column is rebuilt from it. Other `procedure` or `comparison_context` keys are promoted the same way when a query needs them, never by changing the message schema.
-
-**Appending and schema changes.** A store appends one file per ingest call. Because the Arrow schema is derived, a change to `schema.json` changes the file schema, and a dataset then holds files written under several message schemas, told apart by `benchx.message_schema_sha256`. Additive changes, a new optional field such as `inner_iterations` on observations, are read together with PyArrow's permissive schema unification (`pyarrow.dataset` with `unify_schemas(..., promote_options="permissive")`), where missing fields read as null. A change that removes a field or changes its type is a new message contract version (`schema_version`) and is written to a separate dataset or rewritten on migration, never mixed.
+Because the Arrow schema is derived, a change to `schema.json` changes the file schema, and files written under different message schemas are told apart by `benchx.message_schema_sha256`. An added optional field reads as null from older files under PyArrow's permissive schema unification; removing a field or changing its type is a new `schema_version` and is not mixed into one dataset.
 
 ## 5. Writing and reading
 

@@ -574,11 +574,6 @@
       "properties": {
         "value": { "$ref": "#/$defs/finiteNumber" },
         "ordinal": { "type": "integer", "minimum": 0 },
-        "inner_iterations": {
-          "description": "Inner iterations this value was normalized by, when the count differs between observations of one batch; a count shared by the whole batch is procedure.inner_iterations.",
-          "type": "integer",
-          "minimum": 1
-        },
         "slot": {
           "description": "Position of this observation in the run's realized order across all sides, for observation-level interleaving.",
           "type": "integer",
