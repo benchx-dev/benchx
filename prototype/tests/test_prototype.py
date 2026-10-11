@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from benchx import compare, core, identity, runner
+from benchx.core.errors import StructureError
 from benchx.store import Store
 from conftest import NOISY, QUIET, cases, make_build, order, run_rounds
 
@@ -205,7 +206,7 @@ def test_failures_are_results(repo, tmp):
     (lambda o: o.update(target={"kind": "python_env", "python": "/usr/bin/python3"}), "build_dir"),
     (lambda o: o.update(suite="missing-binary"), "not found"),
     (lambda o: o.update(quantities=["peak-rss"]), "quantities"),
-    (lambda o: o.update(surprise=1), "work order invalid"),
+    (lambda o: o.update(surprise=1), "'surprise' was unexpected"),
 ])
 def test_refusals(repo, tmp, change, message):
     build = make_build(tmp / "b", repo["wt-head"], cases())
@@ -216,6 +217,43 @@ def test_refusals(repo, tmp, change, message):
     with pytest.raises(runner.Refused, match=message):
         runner.run(path, tmp / "refused")
     assert not list((tmp / "refused").glob("*.json")) if (tmp / "refused").exists() else True
+
+
+def refused(tmp, document) -> list:
+    path = tmp / "o.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(runner.Refused) as raised:
+        runner.run(path, tmp / "refused")
+    return list(raised.value.problems)
+
+
+def test_every_refusal_is_reported(repo, tmp):
+    document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
+    document.update(quantities=["peak-rss"], workload_parameters={"size": 1})
+    document["protocol"].update(gc="disabled", warmup={"mode": "fixed", "n_warmup": 3})
+    assert [str(problem) for problem in refused(tmp, document)] == [
+        "google-benchmark takes no workload_parameters",
+        "quantities not supported: ['peak-rss']",
+        "protocol keys not supported by google-benchmark: ['gc']",
+        "google-benchmark warms up by time only",
+    ]
+
+
+def test_missing_build_is_refused_for_every_reason(tmp):
+    problems = refused(tmp, order(tmp / "absent", None, "refused"))
+    assert all(type(problem) is core.Refusal for problem in problems)
+    assert [str(problem).split(":")[0] for problem in problems] == [
+        "suite binary not found",
+        "cannot locate the checkout the target was built from; set target.source_dir",
+    ]
+
+
+def test_invalid_order_is_refused_with_its_document_errors(repo, tmp):
+    document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
+    document.update(surprise=1, suite="")
+    problems = refused(tmp, document)
+    assert {type(problem) for problem in problems} == {StructureError}
+    assert {problem.path for problem in problems} == {(), ("suite",)}
 
 
 def test_source_found_through_cmake_cache(repo, tmp):

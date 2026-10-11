@@ -25,7 +25,8 @@ def cmd_run(args):
     try:
         summary = runner.run(args.order, out)
     except runner.Refused as e:
-        print(f"refused: {e}", file=sys.stderr)
+        for problem in e.problems:
+            print(f"refused: {problem}", file=sys.stderr)
         return 2
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")

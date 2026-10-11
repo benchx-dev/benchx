@@ -7,16 +7,18 @@ of a case it did run is a result.
 
 import os
 import urllib.parse
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__, core, snapshot
 from .adapters import gbench
+from .core import Refusal, Rejected
 
 RUNNER = {"name": "benchx-prototype", "version": __version__}
 
 
-class Refused(Exception):
+class Refused(Rejected):
     """The order cannot be carried out as written; nothing was run."""
 
 
@@ -52,44 +54,47 @@ def _artifact(kind, media_type, path: Path) -> dict:
             "sha256": core.sha256_hex(path.read_bytes())}
 
 
-def check(order: dict) -> None:
-    """Refuse what the prototype cannot apply exactly (#35 W5)."""
+def check(order: dict) -> Iterator[Refusal]:
+    """Everything in a valid order the prototype cannot apply exactly (#35 W5)."""
     if order["harness"]["name"] != "google-benchmark":
-        raise Refused(f"no adapter for harness {order['harness']['name']!r}")
+        yield Refusal(f"no adapter for harness {order['harness']['name']!r}")
     if order["target"]["kind"] != "build_dir":
-        raise Refused("only build_dir targets are supported; python_env is deferred")
+        yield Refusal("only build_dir targets are supported; python_env is deferred")
     if order["benchmark"]["kind"] != "subject":
-        raise Refused("only benchmarks in the subject's own checkout are supported")
+        yield Refusal("only benchmarks in the subject's own checkout are supported")
     if "workload_parameters" in order:
-        raise Refused("google-benchmark takes no workload_parameters")
+        yield Refusal("google-benchmark takes no workload_parameters")
     unknown = set(order["quantities"]) - set(gbench.QUANTITIES)
     if unknown:
-        raise Refused(f"quantities not supported: {sorted(unknown)}")
+        yield Refusal(f"quantities not supported: {sorted(unknown)}")
     try:
         gbench.protocol(order.get("protocol"))
     except gbench.Unsupported as e:
-        raise Refused(str(e)) from None
+        yield from e.problems
 
 
 def run(order_path, out_dir) -> dict:
     """Execute one order; write results and the order into out_dir."""
     inspection = core.inspect(Path(order_path), "work-order")
     if inspection.data is None:
-        problems = "; ".join(str(error) for error in inspection.errors)
-        raise Refused(f"work order invalid: {problems}")
+        raise Refused(inspection.errors)
     order = inspection.data
-    check(order)
+    refusals = list(check(order))
+    if refusals:
+        raise Refused(refusals)
     applied_protocol, flags = gbench.protocol(order.get("protocol"))
 
     build_dir = Path(order["target"]["build_dir"])
     binary = build_dir / order["suite"]
     if not (binary.is_file() and os.access(binary, os.X_OK)):
-        raise Refused(f"suite binary not found: {binary}")
+        refusals.append(Refusal(f"suite binary not found: {binary}"))
     source_dir = order["target"].get("source_dir") or snapshot.cmake_source_dir(build_dir)
     source = snapshot.git_identity(source_dir) if source_dir else None
     if source is None:
         # runner.md §2: a result that cannot state its revision is a defect.
-        raise Refused("cannot locate the checkout the target was built from; set target.source_dir")
+        refusals.append(Refusal("cannot locate the checkout the target was built from; set target.source_dir"))
+    if refusals:
+        raise Refused(refusals)
 
     child_env = {**os.environ, **order.get("environment_variables", {})}
     parameters = dict(order.get("environment_variables", {}))

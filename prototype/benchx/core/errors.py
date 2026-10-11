@@ -1,5 +1,6 @@
 """Problems found in documents. Match on class; `code` is what leaves benchx."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
@@ -218,3 +219,22 @@ class AttemptConflict(Conflict):
     @property
     def message(self) -> str:
         return f"results of attempt {self.attempt_key} disagree (schema §5.3)"
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """A valid document that one component cannot act on, such as an order for a
+    harness the runner has no adapter for."""
+
+    reason: str
+
+    def __str__(self) -> str:
+        return self.reason
+
+
+class Rejected(Exception):
+    """Raised when asked to act on a document that has problems; carries all of them."""
+
+    def __init__(self, problems: Sequence[DocumentError | Refusal]) -> None:
+        super().__init__("; ".join(str(problem) for problem in problems))
+        self.problems = problems

@@ -51,7 +51,7 @@ bx validate <file>… [--kind measurement-result|work-order|comparison-document]
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 130 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 133 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 

@@ -11,6 +11,8 @@ import re
 import subprocess
 import time
 
+from ..core import Refusal, Rejected
+
 PRODUCER = {"name": "benchx/gbench-adapter", "version": "0.1.0", "mapping_version": "gbench-to-benchx/v1"}
 
 # Native field, canonical quantity (Appendix A), and direction.
@@ -29,23 +31,25 @@ DEFAULT_PROTOCOL = {
 }
 
 
-class Unsupported(Exception):
+class Unsupported(Rejected):
     """An order this adapter cannot apply exactly; the runner refuses it."""
 
 
 def protocol(order_protocol: dict | None) -> tuple[dict, list[str]]:
     """The full protocol that will apply, and the flags that apply it."""
     requested = dict(order_protocol or {})
+    problems = []
     unknown = set(requested) - set(DEFAULT_PROTOCOL)
     if unknown:
-        raise Unsupported(f"protocol keys not supported by google-benchmark: {sorted(unknown)}")
+        problems.append(Refusal(f"protocol keys not supported by google-benchmark: {sorted(unknown)}"))
     applied = {**DEFAULT_PROTOCOL, **requested}
     flags = []
 
     levels = applied["repetitions"]["levels"]
     if len(levels) != 1 or levels[0]["unit"] != "repetition":
-        raise Unsupported("google-benchmark repeats at one level, unit 'repetition'")
-    flags.append(f"--benchmark_repetitions={levels[0]['n']}")
+        problems.append(Refusal("google-benchmark repeats at one level, unit 'repetition'"))
+    else:
+        flags.append(f"--benchmark_repetitions={levels[0]['n']}")
 
     calibration = applied["calibration"]
     if calibration["mode"] == "adaptive":
@@ -57,7 +61,9 @@ def protocol(order_protocol: dict | None) -> tuple[dict, list[str]]:
     if warmup["mode"] == "time":
         flags.append(f"--benchmark_min_warmup_time={warmup['seconds']}")
     elif warmup["mode"] != "none":
-        raise Unsupported("google-benchmark warms up by time only")
+        problems.append(Refusal("google-benchmark warms up by time only"))
+    if problems:
+        raise Unsupported(problems)
     return applied, flags
 
 

@@ -1,7 +1,8 @@
 """Read, schema-check, and rule-check benchx documents.
 
 Stages return problems with the document rather than raising them, report every
-one they find, and may assume earlier stages found none.
+one they find, and may assume earlier stages found none. A caller asked to act
+on a document, not to judge it, raises `Rejected` once, with every problem.
 """
 
 from collections.abc import Sequence
@@ -10,11 +11,20 @@ from pathlib import Path
 from typing import Any
 
 from . import loader, rules, validation
-from .errors import DocumentError
+from .errors import DocumentError, Refusal, Rejected
 from .hashing import canonical, order_ref, sha256_hex
 from .validation import Kind
 
-__all__ = ["Inspection", "canonical", "check", "inspect", "order_ref", "sha256_hex"]
+__all__ = [
+    "Inspection",
+    "Refusal",
+    "Rejected",
+    "canonical",
+    "check",
+    "inspect",
+    "order_ref",
+    "sha256_hex",
+]
 
 
 @dataclass
