@@ -378,9 +378,9 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
     assert default_path() == tmp / "benchx-home" / "store.parquet"
-    assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == 0
+    assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
     assert "ingested 2, duplicate 0" in capsys.readouterr().out  # this run's files only
-    assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == 0
+    assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store().head()
     assert total == 2 and {load(tmp / "o1.json")["provenance"]["run_key"]} == {r["run_key"] for r in rows}

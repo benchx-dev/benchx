@@ -16,6 +16,10 @@ from . import core, runner
 from .core.validation import Kind
 from .store import Store
 
+EXIT_OK = 0
+EXIT_INVALID = 1  # a document was invalid or a result rejected
+EXIT_REFUSED = 2  # bx run refused the order, or bx compare could not compare
+
 
 def cmd_run(args):
     """Run one order, write its result files, and deliver them to the local
@@ -27,11 +31,11 @@ def cmd_run(args):
     except runner.Refused as e:
         for problem in e.problems:
             print(f"refused: {problem}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
     if args.no_ingest:
-        return 0
+        return EXIT_OK
     store = Store()
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
@@ -45,7 +49,7 @@ def _report(outcome):
         codes = sorted({r["code"] for r in outcome["rejected"]})
         counts += f", rejected {len(outcome['rejected'])} ({', '.join(codes)})"
     print(counts)
-    return 1 if outcome["rejected"] else 0
+    return EXIT_INVALID if outcome["rejected"] else EXIT_OK
 
 
 def cmd_ingest(args):
@@ -57,7 +61,7 @@ def cmd_series(args):
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_history(args):
@@ -65,7 +69,7 @@ def cmd_history(args):
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_head(args):
@@ -74,7 +78,7 @@ def cmd_head(args):
     if args.json:
         for row in rows:
             print(row["document"])
-        return 0
+        return EXIT_OK
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
     for r in rows:
         median = f"{r['median']:.6g} {r['unit']}" if r["median"] is not None else "-"
@@ -82,7 +86,7 @@ def cmd_head(args):
         labels = f"  {r['labels']}" if r["labels"] else ""
         print(f"{r['row']:>5}  {started}  {r['run_key']:<24} {r['workload']:<16} {r['quantity']:<9} "
               f"{r['status']:<8} {median:<14} {r['revision'][:10]}  {r['project']}{labels}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_compare(args):
@@ -103,9 +107,9 @@ def _compare(store, args):
                                   min_rounds=args.min_rounds)
     except compare_mod.CompareError as e:
         print(f"cannot compare: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
-    return 0
+    return EXIT_OK
 
 
 def cmd_validate(args):
@@ -116,7 +120,7 @@ def cmd_validate(args):
             print(f"{path}: {error}", file=sys.stderr)
         valid += inspection.valid
     print(f"{valid}/{len(args.files)} valid", file=sys.stderr)
-    return 0 if valid == len(args.files) else 1
+    return EXIT_OK if valid == len(args.files) else EXIT_INVALID
 
 
 def main(argv=None):
