@@ -158,16 +158,6 @@ class CompletedExceedsAttempted(RuleViolation):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RelativeTargetPath(RuleViolation):
-    rule: ClassVar[str] = "absolute-target-paths"
-    value: str
-
-    @property
-    def message(self) -> str:
-        return f"target path {self.value!r} is not absolute"
-
-
-@dataclass(frozen=True, kw_only=True)
 class SharedParameterName(RuleViolation):
     rule: ClassVar[str] = "distinct-parameter-names"
     name: str

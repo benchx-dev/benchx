@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end demonstration of prototype-design.md §6: both profiles, both shapes.
 #
-# The script plays two roles. First the user, who prepares the environment
-# with their own tools: a git repository with two commits, and three CMake
-# build directories (benchx builds nothing). Then the calling script, which
-# alternates the sides and assigns round and slot, since that loop belongs to
-# the caller (benchmark-environments.md §5.7).
+# The script plays the user, and in that role the target provider: it prepares
+# the environment with its own tools, a git repository with two commits and
+# three CMake build directories (benchx builds nothing). Then `bx compare` in
+# measure mode does the workbench's part (system-decomposition.md §3.4): it
+# alternates the sides over the rounds, assigns round and slot, delivers every
+# result to the local store, and compares.
 #
 # Every command is printed before it runs, as you would type it: `bx` stands
 # for `$PYTHON -m benchx.cli`, and $WORK for the scratch directory.
@@ -13,7 +14,7 @@
 # Needs cmake, a C++ compiler, and network access the first time, to fetch
 # Google Benchmark unless it is installed. ROUNDS=5 by default.
 #
-# `bx run` delivers every result to the one local store,
+# `bx compare` (measure mode) and `bx run` deliver every result to the one local store,
 # ~/.benchx/store.parquet (BENCHX_HOME=... relocates it), so the store and
 # each series' history grow from run to run. `bx head` shows the latest rows
 # at any time.
@@ -79,65 +80,21 @@ build "$WORK/wt-base" "$WORK/build-base"
 build "$WORK/wt-head" "$WORK/build-head"
 build "$WORK/wt-head" "$WORK/build-hardened" -DDEMO_HARDENED=ON
 
-# order <file> <build> <source> <run key> <round> <slot> <labels JSON> [project]
-order() {
-  "$PYTHON" - "$@" <<'EOF'
-import json, sys
-path, build, source, run_key, round_, slot, labels, *project = sys.argv[1:]
-order = {
-    "workorder_version": 1,
-    "source": {"uri": "https://example.org/benchx-demo.git", "type": "git"},
-    "benchmark": {"kind": "subject"},
-    "harness": {"name": "google-benchmark"},
-    "target": {"kind": "build_dir", "build_dir": build, "source_dir": source},
-    "suite": "demo-bench",
-    "quantities": ["wall-time"],
-    "protocol": {"repetitions": {"mode": "fixed", "levels": [{"unit": "repetition", "n": 5}]},
-                 "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.05}},
-    "round": int(round_),
-    "slot": int(slot),
-    "provenance": {"run_key": run_key, "requested_by": "demo.sh"},
-}
-if json.loads(labels):
-    order["provenance"]["labels"] = json.loads(labels)
-if project:
-    order["project"] = project[0]
-open(path, "w").write(json.dumps(order, indent=1))
-EOF
-}
-
-# interleave <run key> <results dir> <project or ""> then per side: <build> <source> <labels JSON>
-interleave() {
-  local run_key=$1 out=$2 project=$3 slot=0; shift 3
-  local sides=("$@")
-  mkdir -p "$WORK/orders"
-  for ((r = 0; r < ROUNDS; r++)); do
-    for ((i = 0; i < ${#sides[@]}; i += 3)); do
-      local file="$WORK/orders/$run_key-$slot.json"
-      order "$file" "${sides[i]}" "${sides[i+1]}" "$run_key" "$r" "$slot" "${sides[i+2]}" ${project:+"$project"}
-      if ((slot == 0)); then
-        echo "# the script writes one work order per side and round; the first one:"
-        show cat "$file"
-        echo
-      fi
-      bx run "$file" --out "$out"
-      slot=$((slot + 1))
-    done
-  done
-  echo "# $run_key: $ROUNDS rounds × $((${#sides[@]} / 3)) sides -> ${out//"$WORK"/\$WORK}"
-}
-
-step "revisions, ad hoc: no project, compared through a throwaway store"
-interleave "$RUN_REV" "$WORK/results-rev" "" \
-  "$WORK/build-base" "$WORK/wt-base" '{}' \
-  "$WORK/build-head" "$WORK/wt-head" '{}'
+step "revisions, ad hoc: no project, measured and compared in one command"
+echo "# measure mode: the sides alternate over $ROUNDS rounds, one work order each"
+bx compare "$WORK/build-base:$WORK/wt-base" "$WORK/build-head:$WORK/wt-head" --profile revisions \
+  --suite demo-bench --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"
+echo "# the first work order it wrote:"
+show cat "$WORK/results-rev/orders/order-0000.json"
+echo
+echo "# read mode: the same run key, compared again through a throwaway store"
 bx compare --run "$RUN_REV" --profile revisions --baseline "${BASE:0:10}" --results "$WORK/results-rev"
-echo "# bx run also delivered these to the local store, as thin results of project local/<hostname>"
+echo "# bx compare also delivered these to the local store, as thin results of project local/<hostname>"
 
 step "environments, tracked: project demo, into the local store"
-interleave "$RUN_ENV" "$WORK/results-env" demo \
-  "$WORK/build-head" "$WORK/wt-head" '{"build": "plain"}' \
-  "$WORK/build-hardened" "$WORK/wt-head" '{"build": "hardened"}'
+bx compare "$WORK/build-head:$WORK/wt-head" "$WORK/build-hardened:$WORK/wt-head" --profile environments \
+  --label build=plain,hardened --suite demo-bench --rounds "$ROUNDS" --project demo \
+  --run-key "$RUN_ENV" --out "$WORK/results-env"
 
 step "re-ingest is a visible no-op"
 bx ingest "$WORK/results-env"

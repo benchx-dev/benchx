@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:observed-context-record:0.1.0",
+  "title": "BenchX observed-context record",
+  "description": "The shape of one entry in a result's observed_context object (docs/design/runner-schema.md §5.3). observed_context itself stays an open object in schemas/measurement-result/0.1.0; this schema validates that every value in it is an observation record, never a bare value.",
+  "$comment": "Answers benchmark-environments.md §9 open question 1 (how a fact's source is represented): one record per key, not one provenance map from field path to source. Not referenced by $ref from the result schema, since observed_context has no per-value constraint there (schema §9 open question 4 asks whether it should); a producer or validator applies this schema to coordinates.observed_context directly to check the convention. Not part of the §7 hash table in runner-schema.md: it validates a value shape, not an identity artifact.",
+  "type": "object",
+  "additionalProperties": { "$ref": "#/$defs/observationRecord" },
+  "$defs": {
+    "observationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "when"],
+      "properties": {
+        "value": {
+          "description": "Absent when status is unavailable or error. A sampled, observed record's value is {min, max, mean, n}.",
+          "oneOf": [
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "boolean" },
+            { "$ref": "#/$defs/sampledValue" }
+          ]
+        },
+        "unit": {
+          "description": "UCUM, as in the result schema.",
+          "type": "string",
+          "minLength": 1
+        },
+        "status": { "enum": ["observed", "unavailable", "error"] },
+        "when": { "enum": ["before", "after", "sampled"] },
+        "source": {
+          "description": "Where the value came from, such as a sysfs path or a collector name.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "unavailable" } } },
+          "then": { "not": { "required": ["value"] } }
+        },
+        {
+          "if": {
+            "required": ["status", "when"],
+            "properties": {
+              "status": { "const": "observed" },
+              "when": { "const": "sampled" }
+            }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": { "value": { "$ref": "#/$defs/sampledValue" } }
+          }
+        }
+      ]
+    },
+    "sampledValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max", "mean", "n"],
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "n": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

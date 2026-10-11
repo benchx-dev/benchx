@@ -4,6 +4,7 @@ Every reader returns only what it could read; an unreadable value is absent,
 never a placeholder (§3.1). Nothing here changes the machine.
 """
 
+import hashlib
 import json
 import os
 import platform
@@ -13,11 +14,24 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-# §3.1: never the whole environment; only variables that shape execution.
+# §3.1: never the whole environment; only variables that shape execution: the
+# thread and device variables, and the dynamic loader's search variables. No
+# build or environment management tool is named; a project extends the list
+# with $BENCHX_ENV_ALLOWLIST (comma-separated names), and an adapter adds the
+# variables its ecosystem cares about (its ENV_ALLOWLIST).
 ENV_ALLOWLIST = (
     "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
     "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "CUDA_VISIBLE_DEVICES",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LD_PRELOAD",
 )
+
+
+def env_allowlist(env: dict, adapter_names=()) -> tuple:
+    """Core default, then the project's names from `env`, then the adapter's."""
+    extra = [n.strip() for n in env.get("BENCHX_ENV_ALLOWLIST", "").split(",") if n.strip()]
+    names = list(ENV_ALLOWLIST)
+    names += [n for n in (*extra, *adapter_names) if n not in names]
+    return tuple(names)
 
 
 def _run(args, cwd=None):
@@ -54,7 +68,7 @@ def environment() -> dict:
             "metadata": {"architecture": platform.machine()}}
 
 
-def observed_context(child_env: dict) -> dict:
+def observed_context(child_env: dict, env_names=None) -> dict:
     """Conditions allowed to vary within a series (§3.4)."""
     facts = {"os": platform.system(), "kernel": platform.release()}
     libc, version = platform.libc_ver()
@@ -66,7 +80,7 @@ def observed_context(child_env: dict) -> dict:
         facts["load_avg_1m"] = round(os.getloadavg()[0], 2)
     except OSError:
         pass
-    env = {k: child_env[k] for k in ENV_ALLOWLIST if k in child_env}
+    env = {k: child_env[k] for k in (env_names or env_allowlist(child_env)) if k in child_env}
     if env:
         facts["env"] = env
     return facts
@@ -96,6 +110,33 @@ def git_identity(path) -> dict | None:
     else:
         identity["dirty"] = "unknown"
     return identity
+
+
+_SKIPPED_DIRS = {".git", ".benchx", "__pycache__"}
+
+
+def directory_identity(path) -> dict | None:
+    """Identity of a checkout that is not under git (schema §4.1, non-git sources).
+
+    The tree id is a SHA-1 over the sorted relative paths and file contents,
+    shaped like a git tree id. There is no commit, so the revision key is
+    derived from the tree, and the state is `dirty`: nothing says this content
+    was ever committed, so a comparator must not treat it as a clean revision.
+    """
+    root = Path(path)
+    if not root.is_dir():
+        return None
+    digest = hashlib.sha1()
+    for file in sorted(p for p in root.rglob("*") if p.is_file()
+                       and not _SKIPPED_DIRS.intersection(p.relative_to(root).parts)):
+        try:
+            content = file.read_bytes()
+        except OSError:
+            return None
+        name = file.relative_to(root).as_posix().encode()
+        digest.update(b"%d:%s:%d:" % (len(name), name, len(content)) + content)
+    tree = digest.hexdigest()
+    return {"path": str(root.resolve()), "revision": f"directory-{tree}", "dirty": "dirty", "tree": tree}
 
 
 def _cmake_cache(build_dir) -> dict:

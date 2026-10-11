@@ -7,7 +7,6 @@ is that runner's refusal, not a rule.
 import json
 from collections.abc import Iterator
 from datetime import datetime
-from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, assert_never
 
 from .errors import (
@@ -17,7 +16,6 @@ from .errors import (
     EndedBeforeStarted,
     PathParts,
     PrimarySourceMismatch,
-    RelativeTargetPath,
     RuleViolation,
     SharedParameterName,
 )
@@ -29,6 +27,8 @@ def check(data: dict[str, Any], kind: Kind) -> Iterator[RuleViolation]:
         yield from check_result(data)
     elif kind == "work-order":
         yield from check_order(data)
+    elif kind == "target-description" or kind == "target-provider-request":
+        return  # nothing beyond what their schemas say
     elif kind == "comparison-document":
         raise NotImplementedError(f"no rules for {kind} yet")
     else:
@@ -143,21 +143,7 @@ def repetition_counts(data: dict[str, Any]) -> Iterator[RuleViolation]:
 
 
 def check_order(data: dict[str, Any]) -> Iterator[RuleViolation]:
-    for rule in [absolute_target_paths, distinct_parameter_names]:
-        yield from rule(data)
-
-
-def absolute_target_paths(data: dict[str, Any]) -> Iterator[RuleViolation]:
-    for field in ("build_dir", "python", "source_dir"):
-        value = data["target"].get(field)
-        if value is None:
-            continue
-
-        # Absolute on either kind of system: validity must not depend on this machine.
-        if not (
-            PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute()
-        ):
-            yield RelativeTargetPath(path=("target", field), value=value)
+    yield from distinct_parameter_names(data)
 
 
 def distinct_parameter_names(data: dict[str, Any]) -> Iterator[RuleViolation]:

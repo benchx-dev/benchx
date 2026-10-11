@@ -11,7 +11,10 @@
 
 A contributor wants to benchmark two revisions in a fixed environment and
 compare the results to check if performance improved or there is a regression.
-This can be run locally or in CI.
+This can be run locally or in CI. The project's target provider (for NumPy,
+`spin`) builds both revisions and hands benchx two prepared targets; benchx
+does not check out or build revisions, so the setup has the same shape as
+UC-04.
 
 ### 2. Motivation
 
@@ -69,6 +72,16 @@ a parametrized `Sort.time_argsort` benchmark with parameters (at that time)
 
 The `spin bench` command runs in an existing environment and may set environment
 variables before the benchmark run, abstracted by the CLI interface.
+
+In this design `spin` is the target provider and the front end: it builds the
+current checkout and `main` (each cached by commit and configuration), then
+calls benchx with the two prepared targets. benchx's session loop issues one
+work order per side per round, alternating the sides under one `run_key`, runs
+the comparator with the `revisions` profile, and returns the comparison
+document for `spin` to render (`system-decomposition.md` §3.4). Environment
+variables such as thread caps go in the work order's environment policy, not
+in `spin`'s shell. Plain `spin bench` (UC-01) is the same path with one target
+and no comparison.
 
 ---
 
@@ -143,7 +156,14 @@ possible ensures reliability.
 - Missing data: if the process is stopped before all interleaved runs are complete,
   the series cannot claim the profile.
 - Reject dirty trees - the comparison is invalid if there is no way to validate either
-  revision. The schema should make `dirty` non-nullable in this profile.
+  revision. The schema should make `dirty` non-nullable in this profile: the
+  `revisions` profile's `clean-tree` invariant fails a dirty or unknown side.
+  The comparison's environment policy carries a `tree.clean` verify rule with
+  `refuse`, so the run is refused before any measurement. This applies to comparisons only: a single-revision run (UC-01)
+  may be dirty and is recorded as dirty.
+- Build failure of either revision happens in the target provider, before any
+  work order exists, and is reported to the caller; there is no result to
+  compare.
 
 ### 11. Non-goals
 
@@ -155,3 +175,7 @@ possible ensures reliability.
 1. For storing interleaving positions / other data, do we create pair
    identities under the comparison context?
 2. For the future CI path, do we need a shared store for validation?
+3. Should `--compare` allow a dirty tree as a local-only comparison keyed on
+   working-tree ids, so a contributor can compare uncommitted work on the
+   current branch without committing? This use case rejects it (§10); the
+   schema would permit it (`benchmark-result-schema.md` §5.5).

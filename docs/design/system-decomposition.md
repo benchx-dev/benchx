@@ -87,11 +87,15 @@ harness did not report.
 **Role:** Execute benchmark work on one compute node and report what happened.
 
 - Takes a work order — which benchmarks, at which revision or build, with
-  which parameters — and carries it out: obtains or builds the target,
-  invokes the harness, collects output through the adapter.
-- Controls and records the execution environment: thread caps, CPU pinning,
-  device selection and synchronization, warmup and JIT state. What it cannot
-  control, it records as observed context so no setting is lost from results.
+  which parameters — and carries it out: runs against a prepared target,
+  which it never builds, invokes the harness, collects output through the
+  adapter.
+- Controls and records the execution environment of the process it launches:
+  thread caps, CPU pinning, device selection and synchronization, warmup and
+  JIT state. It verifies that the hardware and conditions the order requests
+  are present, and refuses the run when they are not. What it does not control,
+  such as machine tuning, it records as observed context so no setting is lost
+  from results.
 - Captures identity honestly: machine, build configuration, compiler, source
   revision, dirty working tree. A result that cannot state where it came from
   is a defect.
@@ -108,8 +112,19 @@ harness did not report.
 - Runs and compares benchmarks on the developer's own machine, entirely
   offline: current workspace against a baseline build, one build configuration
   against another at the same commit, a checkout against a release tag.
+- Obtains targets through the project's **target provider** (below) and drives
+  the session loop for a comparison: one work order per side per round,
+  alternating the sides, then the comparator. The runner takes one order per
+  invocation, and two builds are two invocations, so this loop is the
+  workbench's, not the harness's and not the runner's.
 - Saves any run as a self-describing result file and replays it later as a
-  comparison target, so expensive baselines are measured once.
+  comparison target, so expensive baselines are measured once. A replayed
+  baseline suits unpaired comparisons; a paired, interleaved comparison
+  (UC-03) needs both sides measured fresh in one session.
+- Allows a single-revision run on a dirty tree, recorded as dirty (UC-01); a
+  two-revision comparison refuses a dirty tree (UC-03 §10), before running, by a
+  `tree.clean` verify rule where an environment policy applies, and again in
+  the comparator by the `revisions` profile's `clean-tree` invariant.
 - Refuses, or loudly warns about, invalid comparisons: different machine,
   different build configuration, unknown provenance.
 - Supports the iteration loop: scoping by filter, quick low-precision runs
@@ -117,8 +132,79 @@ harness did not report.
 - Can promote a kept local result into the result store unchanged — the local
   file and the stored result are the same schema object.
 
-**Does not:** require a server, an account, or any part of the fleet.
-It is the runner plus comparator wrapped for human, interactive use.
+**Does not:** require a server, an account, or any part of the fleet, or
+build anything itself.
+It is the runner plus comparator wrapped for human, interactive use, plus the
+session loop and the call to a target provider.
+
+**Target provider (extension point, not a component).** The runner never
+builds, so something must turn a source ref such as `main` into a prepared
+target before any work order exists. That is the project's own tool: `spin`
+for NumPy, `archery` or CMake for Arrow, or a build script the user wrote.
+Orchestrators call it: the workbench locally, a CI job or the scheduler on a
+fleet. Providers are a per-project catalog like the harness adapters, and they
+build before measurement starts, never on the benchmark cores during it. A
+failed build happens before any work order exists, so it is reported to the
+caller by the orchestrator, not as a runner result; the runner's "every
+outcome is a result" principle covers only orders it was given.
+
+What a provider hands back is a **target description**
+(`schemas/target-description/0.1.0`): the work-order `target` (`build`,
+`working_tree`, or `artifact`), an optional declared `build`, and three
+optional pieces of user-owned text.
+
+- `how_built`: what the user did to build the target, such as the cmake
+  commands or the build script's name. Provenance only; it is never executed.
+  It is what turns two opaque build directories into "hardening on" and
+  "hardening off" in a result.
+- `activation`: what the user ran to enter the target's environment, such as
+  sourcing an activate script, loading modules, or exporting library paths.
+  Provenance only; it is never executed. The user activates the environment
+  before invoking benchx, and the runner records the process environment it
+  inherited (`benchmark-environments.md` §3.1) beside this declaration. The
+  two are kept as they are and never compared by the runner.
+- `shell`: the shell `activation` is written for, so a reader knows how to
+  read it. Never invoked.
+
+Absent, null, or empty `how_built` or `activation` means not declared. Neither
+text enters identity, and both are recorded verbatim in the work order and in
+each result, so neither may hold secrets. The
+description cannot set suites, precision, environment variables, an
+environment policy, quantities, or timeouts; those belong to the workbench and
+the user.
+
+The same document reaches the workbench by three routes:
+
+1. **A sidecar file**, `.benchx-target.json` in a build directory, written by
+   the user's own build script. It stays with a long-lived build directory
+   instead of with one invocation.
+2. **A provider command**, named in the project file `.benchx/provider.json`
+   as `{"command": [...]}`, which prints the description on stdout.
+3. **The workbench's own input**, when the user prepared everything by hand
+   and there is no provider.
+
+For a provider the contract is:
+
+- The workbench writes one request
+  (`schemas/target-provider-request/0.1.0`) to the provider's stdin: an
+  `operation`, a `source_ref` (a revision, the token `WORKSPACE`, or a path),
+  and an opaque project-defined `configuration` such as `hardened`.
+- One request is one target. A comparison is two independent requests.
+- `prepare` may build. It must be incremental and repeatable, finish before
+  any work order exists, and leave nothing running. `describe` changes
+  nothing: it reports a target that already exists, and exits nonzero when
+  there is none. The workbench uses it to describe long-lived build
+  directories without rebuilding them.
+- The description goes to stdout and nothing else does; progress and messages
+  go to stderr, which the workbench shows as it arrives.
+- Failure is a nonzero exit with the reason on stderr. The workbench stops and
+  names the side that failed. No order and no result exist.
+- The provider runs in the user's current environment as an ordinary child
+  process. That environment is not captured; what the runner will do is what
+  the description says.
+- All paths are absolute.
+- The workbench checks the description's shape. It does not check that
+  `how_built` or `activation` is true, and neither does the runner.
 
 ### 3.5 Scheduler
 
@@ -135,6 +221,10 @@ It is the runner plus comparator wrapped for human, interactive use.
   who asked for benchmarks can see where their request stands.
 
 **Does not:** interpret results. Its output is runs, not verdicts.
+
+When a request needs a revision that is not yet built, the scheduler (or CI
+job) obtains the target through the project's target provider (§3.4) before it
+issues the work order; it does not ask the runner to build.
 
 **Optional.** A deployment is complete without a scheduler: any person, CI
 job, or script may author work orders directly. The scheduler exists for
@@ -233,7 +323,7 @@ Traceability, in brief — the pains each component exists to remove:
 |---|---|
 | Result store | history fragmenting on renames, machine swaps, parameter changes; raw samples discarded; no provenance for pasted numbers; failed vs. skipped vs. missing indistinguishable |
 | Harness adapters | seven languages landing in seven shapes; statistics lost in translation; workload parameters buried in counter blobs |
-| Runner | environment settings set by hand and recorded nowhere; GPU sync and JIT warmup done manually; build configuration invisible in results |
+| Runner | launch settings applied by hand and recorded nowhere; GPU sync and JIT warmup done manually; build configuration invisible in results |
 | Workbench | local comparisons that cannot describe themselves; baselines rebuilt for every question; results printed and lost; stale-binary comparisons going unnoticed; no path from local finding to project history |
 | Scheduler | hours-long queues with no visibility; benchmark requests learned by word of mouth; culprit-narrowing by manual re-runs; no `/perf`-style trigger |
 | Comparator | flat 5% thresholds on 0.2%-noise benchmarks; wrong baselines; local and CI verdicts that disagree; incomparable results compared silently |
@@ -261,8 +351,20 @@ Not components of this system:
 2. *Resolved:* the store records identity; the comparator enforces
    comparability (see `comparator.md` §3).
 3. Is the workbench a distinct deliverable or a thin skin over runner +
-   comparator? Treated here as a skin with its own UX obligations.
-4. How thin can the minimum viable deployment be? Partially answered: the
+   comparator? Treated here as a skin with its own UX obligations, plus the
+   session loop and target-provider calls of §3.4.
+4. Dirty trees in comparisons. UC-03 rejects them; a single-revision run
+   accepts them. Should `--compare` also allow a dirty tree as a local-only
+   comparison, keyed on working-tree ids (`benchmark-result-schema.md` §5.5),
+   so a contributor can compare uncommitted work without committing first?
+5. *Partly resolved:* the target-provider contract is in §3.4: its input is
+   a request, its output a target description, a build failure is a nonzero
+   exit reported by the caller, and `describe` reports without building. Still
+   open: how cached builds are named and expired (a provider's own business
+   while the workbench is local), and whether a provider may return an
+   artifact whose revision the runner cannot inspect (deferred with UC-03 and
+   fleet use).
+6. How thin can the minimum viable deployment be? Partially answered: the
    scheduler is optional, and runner + adapter + result files form a complete
    producing deployment; the open part is the minimum consuming side.
 

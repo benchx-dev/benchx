@@ -87,6 +87,10 @@ manual and error-prone management of benchmark results.
 - A clear and simple way to specify either build instructions or a predefined build
   environment.
 
+> **Design note:** benchx does not build. Build instructions stay with the
+> caller's own tools, and benchx is handed the resulting builds and records them
+> (`docs/design/benchmark-environments.md` §2.3). The wish is a non-goal for benchx itself.
+
 ## Scale and constraints
 
 Typically these are relatively microbenchmarks to be run locally.

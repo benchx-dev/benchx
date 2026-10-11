@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:work-order:0.1.0",
+  "title": "BenchX work order",
+  "description": "The runner's single input: what to run, at what, how, and for whom (docs/design/runner-schema.md §3). A work order is plain JSON, written by hand, a scheduler, a CI job, or the workbench. The runner reads nothing else.",
+  "$comment": "Shared primitives ($defs/token, $defs/nonEmptyString, $defs/uri, $defs/sha256, $defs/sourceRef, $defs/parameterValue) are $refs into urn:benchx:schema:measurement-result:0.1.0#/$defs; a validator must register both schemas together (e.g. a referencing.Registry in Python, addSchema in ajv). The `benchmark` field is not in the original runner-schema.md draft: it closes a gap found while planning this schema (see runner-schema.md §3.3) — every non-thin result requires benchmark.source/revision, and nothing in §3's original field table supplied them. `plan` is required exactly when state is resolved (see the allOf below); this schema cannot express the rest of §3.2's resolution rules (a resolved order never differs from what its draft would resolve to; the runner refuses a draft with an unpinned branch name or a versionless policy). A name may not appear in both environment_variables and workload_parameters; the runner enforces this, not the schema. suites[].filter is mutually exclusive with include/exclude; which an adapter supports is its own capability, not a schema promise. The runner never builds: the former `revision` target kind and `build.cache` were removed as unimplemented draft fields, and `build` now only declares the prebuilt target's configuration. The three kinds of target also take the optional provenance text how_built, activation, shell and provider ($defs/provenanceText): declared by the user, recorded as given, never executed or checked. An earlier revision loosened environment_policy from required to optional and widens precision, adding no breaking change, so it stays at 0.1.0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "work_order_id",
+    "state",
+    "suites",
+    "quantities",
+    "target",
+    "precision",
+    "timeouts",
+    "run_key",
+    "requester"
+  ],
+  "properties": {
+    "schema_version": { "const": "benchx/work-order/0.1.0" },
+    "work_order_id": {
+      "description": "Stable name for this order: a URI or UUID.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "state": {
+      "description": "Only a resolved order executes (§3.2).",
+      "enum": ["draft", "resolved"]
+    },
+    "project": {
+      "description": "Project in the store. Omit for an ad hoc run; results are then thin (result schema §4.1).",
+      "$ref": "#/$defs/token"
+    },
+    "suites": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/suite" }
+    },
+    "quantities": {
+      "description": "Quantities to collect, e.g. wall-time, peak-rss.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/token" }
+    },
+    "target": {
+      "description": "What code to measure (§3.1): always something already built or present. No kind checks out or builds a revision.",
+      "oneOf": [
+        { "$ref": "#/$defs/targetWorkingTree" },
+        { "$ref": "#/$defs/targetBuild" },
+        { "$ref": "#/$defs/targetArtifact" }
+      ]
+    },
+    "benchmark": {
+      "description": "Where the benchmark suite's own code lives, when different from target (§3.3 addendum). Absent means the benchmarks live in the same checkout as target.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "revision"],
+      "properties": {
+        "source": { "$ref": "#/$defs/sourceRef" },
+        "revision": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "components": {
+      "description": "Pinned non-primary components.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "source", "revision"],
+        "properties": {
+          "name": { "$ref": "#/$defs/token" },
+          "role": { "$ref": "#/$defs/token" },
+          "source": { "$ref": "#/$defs/sourceRef" },
+          "revision": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "build": {
+      "description": "The declared configuration of the prebuilt target, for facts the runner cannot read from it. Never an instruction to build.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "profile": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "$ref": "#/$defs/nonEmptyString" },
+        "compiler": { "$ref": "#/$defs/nonEmptyString" },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "options": { "type": "object" }
+      }
+    },
+    "precision": {
+      "description": "Harness-neutral precision settings, spelled per the result schema's Appendix B (comparison_context.protocol.{repetitions,calibration,warmup}).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repetitions"],
+      "properties": {
+        "repetitions": {
+          "description": "How many observations to take. A bare integer is shorthand for one level at unit 'repetition'; the object form supports harnesses that repeat at more than one level (e.g. a process count outside a per-process repetition count).",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "$ref": "#/$defs/repetitionLevels" }
+          ]
+        },
+        "calibration": {
+          "description": "How the inner iteration count inside one repetition is chosen.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["adaptive", "fixed"] },
+            "minimum_sample_seconds": { "type": "number", "exclusiveMinimum": 0 },
+            "n_iterations": { "type": "integer", "minimum": 1 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "mode": { "const": "adaptive" } }, "required": ["mode"] },
+              "then": { "required": ["minimum_sample_seconds"], "not": { "required": ["n_iterations"] } }
+            },
+            {
+              "if": { "properties": { "mode": { "const": "fixed" } }, "required": ["mode"] },
+              "then": { "required": ["n_iterations"], "not": { "required": ["minimum_sample_seconds"] } }
+            }
+          ]
+        },
+        "warmup": {
+          "description": "Discarded measurements before the recorded ones. mode distinguishes a count-based warmup (a number of repetitions) from a duration-based one, since harnesses split on this (e.g. Google Benchmark warms up by time only).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["none", "count", "time"] },
+            "n_warmup": { "type": "integer", "minimum": 0 },
+            "seconds": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "mode": { "const": "count" } }, "required": ["mode"] },
+              "then": { "required": ["n_warmup"], "not": { "required": ["seconds"] } }
+            },
+            {
+              "if": { "properties": { "mode": { "const": "time" } }, "required": ["mode"] },
+              "then": { "required": ["seconds"], "not": { "required": ["n_warmup"] } }
+            },
+            {
+              "if": { "properties": { "mode": { "const": "none" } }, "required": ["mode"] },
+              "then": { "not": { "anyOf": [ { "required": ["n_warmup"] }, { "required": ["seconds"] } ] } }
+            }
+          ]
+        }
+      }
+    },
+    "schedule": {
+      "description": "Interleaving across sides of a comparison.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["sequential", "alternating", "random"] },
+        "seed": { "type": "integer" }
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_s", "order_s"],
+      "properties": {
+        "case_s": { "type": "number", "exclusiveMinimum": 0 },
+        "order_s": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "environment_policy": {
+      "description": "Named policy (schemas/environment-policy/0.1.0). Optional: absent means the runner applies no policy and only records observed context, the default `benchmark-environments.md`'s laptop scenario describes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/token" },
+        "version": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "environment_variables": {
+      "description": "Environment variables set for the measured process, on top of the environment the runner inherited. Workload coordinates, not machine facts: each name and value is copied into coordinates.workload.parameters, so a run at OMP_NUM_THREADS=1 and one at 10 are different, non-pooling workload variants. Values are strings; one order carries one assignment.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "type": "string" }
+    },
+    "workload_parameters": {
+      "description": "Parameters passed to the runner or the harness, never as environment variables. Copied into coordinates.workload.parameters alongside environment_variables; a name may not appear in both.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/parameterValue" }
+    },
+    "run_key": {
+      "description": "Groups this order with sibling orders in one comparison.",
+      "$ref": "#/$defs/token"
+    },
+    "round": {
+      "description": "Position in an interleaved run; set by the run author.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "labels": {
+      "description": "Caller labels, e.g. {\"env\": \"numpy-2.0\"}.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "requester": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "enum": ["scheduler", "ci", "workbench", "person"] },
+        "name": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "reason": {
+      "description": "Free text: why this run exists.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "plan": {
+      "description": "Every case x quantity the run will attempt. Required exactly when state is resolved (§3.2, §6). For a harness whose cases are only enumerable from the prebuilt target (e.g. by filter against a compiled binary), the runner fills this in as part of resolving a draft order: it runs the harness's own case-listing step, writes the filled plan into a new resolved order, hashes and records that as the provenance artifact, and only then executes. A hand-authored resolved order (e.g. from a scheduler that already knows the case list) skips that step.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "case", "quantity"],
+        "properties": {
+          "id": { "$ref": "#/$defs/token" },
+          "case": { "$ref": "#/$defs/nonEmptyString" },
+          "quantity": { "$ref": "#/$defs/token" },
+          "from": {
+            "description": "The suite's include pattern (or filter) this entry was expanded from, when the plan was filled in by the runner rather than hand-authored.",
+            "$ref": "#/$defs/token"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "resolved" } }, "required": ["state"] },
+      "then": { "required": ["plan"] }
+    },
+    {
+      "if": { "properties": { "state": { "const": "draft" } }, "required": ["state"] },
+      "then": { "not": { "required": ["plan"] } }
+    }
+  ],
+  "$defs": {
+    "token": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/token" },
+    "nonEmptyString": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/nonEmptyString" },
+    "uri": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/uri" },
+    "sha256": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/sha256" },
+    "sourceRef": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/sourceRef" },
+    "parameterValue": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/parameterValue" },
+    "repetitionLevels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "levels"],
+      "properties": {
+        "mode": { "const": "fixed" },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["unit", "n"],
+            "properties": {
+              "unit": { "$ref": "#/$defs/token" },
+              "n": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter", "suite"],
+      "properties": {
+        "adapter": { "$ref": "#/$defs/token" },
+        "suite": { "$ref": "#/$defs/nonEmptyString" },
+        "filter": {
+          "description": "Harness-native filter string, passed through unchanged (e.g. a Google Benchmark --benchmark_filter regular expression). An alternative to include/exclude for adapters with only single-pattern, no-exclude selection; mutually exclusive with them.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "include": { "type": "array", "items": { "type": "string" } },
+        "exclude": { "type": "array", "items": { "type": "string" } },
+        "parameters": { "type": "object" }
+      }
+    },
+    "targetWorkingTree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "source"],
+      "properties": {
+        "kind": { "const": "working_tree" },
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "source": { "$ref": "#/$defs/sourceRef" },
+        "source_dir": { "$ref": "#/$defs/sourceDir" },
+        "how_built": { "$ref": "#/$defs/provenanceText/properties/how_built" },
+        "activation": { "$ref": "#/$defs/provenanceText/properties/activation" },
+        "shell": { "$ref": "#/$defs/provenanceText/properties/shell" },
+        "provider": { "$ref": "#/$defs/provenanceText/properties/provider" }
+      }
+    },
+    "targetBuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "source"],
+      "properties": {
+        "kind": { "const": "build" },
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "source": { "$ref": "#/$defs/sourceRef" },
+        "source_dir": { "$ref": "#/$defs/sourceDir" },
+        "how_built": { "$ref": "#/$defs/provenanceText/properties/how_built" },
+        "activation": { "$ref": "#/$defs/provenanceText/properties/activation" },
+        "shell": { "$ref": "#/$defs/provenanceText/properties/shell" },
+        "provider": { "$ref": "#/$defs/provenanceText/properties/provider" }
+      }
+    },
+    "targetArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "sha256", "source", "revision"],
+      "properties": {
+        "kind": { "const": "artifact" },
+        "uri": { "$ref": "#/$defs/uri" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "source": { "$ref": "#/$defs/sourceRef" },
+        "revision": { "$ref": "#/$defs/nonEmptyString" },
+        "how_built": { "$ref": "#/$defs/provenanceText/properties/how_built" },
+        "activation": { "$ref": "#/$defs/provenanceText/properties/activation" },
+        "shell": { "$ref": "#/$defs/provenanceText/properties/shell" },
+        "provider": { "$ref": "#/$defs/provenanceText/properties/provider" }
+      }
+    },
+    "provenanceText": {
+      "description": "User-owned text about how a target was prepared, declared and recorded as given (benchmark-environments.md §3.2). Never executed and never checked; the runner copies it into provenance.info of every result. Absent, null, empty, or whitespace-only means not declared. None of it enters identity. It is copied verbatim into results that may reach a shared store, so none of it may hold secrets.",
+      "type": "object",
+      "properties": {
+        "how_built": {
+          "description": "What the user did to build the target, such as the cmake commands or the name of the build script.",
+          "type": ["string", "null"],
+          "maxLength": 8192
+        },
+        "activation": {
+          "description": "What the user ran to enter the target's environment, such as sourcing an activate script, loading modules, or exporting library paths. The user activates before invoking benchx; the runner records the environment it inherited beside this declaration.",
+          "type": ["string", "null"],
+          "maxLength": 8192
+        },
+        "shell": {
+          "description": "The shell the activation text is written for, such as bash: a bare name or an absolute path. Never invoked.",
+          "type": ["string", "null"],
+          "pattern": "^$|^[A-Za-z0-9_.+-]+$|^/\\S+$"
+        },
+        "provider": {
+          "description": "Audit-only identity of the target provider that produced the description.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "sourceDir": {
+      "description": "Local checkout path to inspect for revision, dirty state, and tree id, when it differs from what the target itself records (e.g. a build directory's own CMAKE_HOME_DIRECTORY). Optional; falls back to the target's own record when absent.",
+      "$ref": "#/$defs/nonEmptyString"
+    }
+  }
+}

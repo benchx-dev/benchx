@@ -1,0 +1,7 @@
+{
+  "os.kernel": { "value": "6.6.87.2-microsoft-standard-WSL2", "status": "observed", "when": "before" },
+  "load.avg_1m": { "value": 0.42, "unit": "1", "status": "observed", "when": "before" },
+  "cpu.governor": { "status": "unavailable", "when": "before" },
+  "thermal.temperature": { "status": "unavailable", "when": "sampled" },
+  "thermal.throttle_events": { "status": "unavailable", "when": "after" }
+}

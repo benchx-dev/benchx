@@ -107,6 +107,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         return doc
     contender = next(v for v in values if v != base)
     doc["contender"] = contender
+    doc["sides"] = {str(s): _declared(next(d for d, x in zip(documents, sides) if x == s))
+                    for s in (base, contender)}
 
     # Run-level invariants (schema §5.5, comparator.md §3).
     for path in _MUST_AGREE[profile]:
@@ -119,6 +121,13 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         if by_side[base] == by_side[contender]:
             doc["failed_invariants"].append({"invariant": "sides-differ",
                                              "detail": "the labeled sides report the same subject"})
+    if profile == "revisions":
+        # UC-03 §10: a dirty or unknown tree cannot be validated (schema §5.5).
+        unclean = sorted({s for d, s in zip(documents, sides)
+                          if any(d["provenance"].get(f) != "clean" for f in ("subject_dirty", "benchmark_dirty"))})
+        if unclean:
+            doc["failed_invariants"].append({"invariant": "clean-tree",
+                                             "detail": f"sides with a dirty or unknown tree: {unclean}"})
     slots = {}
     for d, s in zip(documents, sides):
         slot = d.get("procedure", {}).get("slot")
@@ -162,6 +171,16 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
                  if base in r and contender in r]
         doc["units"].append(_unit(where, pairs, by_side, base, contender, k, min_rounds))
     return doc
+
+
+def _declared(document) -> dict:
+    """What a side says about how it was built and entered, beside what the
+    runner saw: the declarations are recorded as given and never judged."""
+    info = document["provenance"].get("info", {})
+    side = {k: info[k] for k in ("how_built", "activation", "shell", "target_provider") if k in info}
+    if env := document.get("observed_context", {}).get("env"):
+        side["observed_env"] = env
+    return side
 
 
 def _unit(where, pairs, by_side, base, contender, k, min_rounds):
@@ -211,6 +230,12 @@ def render(doc: dict) -> str:
     lines = [f"run {doc['run_key']}  profile {doc['profile']}  "
              f"baseline {str(doc['baseline'])[:12]}  contender {str(doc['contender'])[:12]}"
              + ("  [local-only]" if doc["local_only"] else "")]
+    for name, side in doc.get("sides", {}).items():
+        for key in ("how_built", "activation", "observed_env"):
+            if key in side:
+                shown = side[key] if key != "observed_env" else ", ".join(f"{k}={v}" for k, v in side[key].items())
+                first, *rest = str(shown).splitlines() or [""]
+                lines.append(f"  {name}: {key.replace('_', ' ')}: {first}" + (f" (+{len(rest)} lines)" if rest else ""))
     for section in ("regressed", "improved", "changed", "no change detected", "indeterminate"):
         rows = [u for u in doc["units"] if u["verdict"] == section]
         if not rows:

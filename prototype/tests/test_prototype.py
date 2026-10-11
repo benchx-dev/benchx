@@ -8,7 +8,7 @@ import pytest
 from benchx import compare, core, identity, runner
 from benchx.core.errors import StructureError
 from benchx.store import Store
-from conftest import NOISY, QUIET, cases, make_build, order, run_rounds
+from conftest import NOISY, QUIET, SOURCE_URI, cases, make_build, order, run_rounds
 
 
 def load(path: Path) -> dict:
@@ -129,7 +129,7 @@ def test_traceability(revisions_run, tmp):
     store.ingest_paths([revisions_run])
     docs = store.documents("rev-1")
     for doc in docs:
-        assert store.order(doc["provenance"]["info"]["workorder_ref"])["provenance"]["run_key"] == "rev-1"
+        assert store.order(doc["provenance"]["info"]["workorder_ref"])["run_key"] == "rev-1"
     comparison = compare.compare(docs, run_key="rev-1", profile="revisions", baseline=docs[0]["revision"]["key"])
     assert {(i["producer"], i["ingest_key"]) for i in comparison["inputs"]} == \
         {(d["producer"]["name"], d["ingest_key"]) for d in docs}
@@ -159,20 +159,49 @@ def test_alternation_is_checked(repo, tmp):
     assert [f["invariant"] for f in doc["failed_invariants"]] == ["alternation"]
 
 
-def test_ad_hoc_is_thin_and_dirty_is_local_only(repo, tmp):
-    """Criterion 7: no project, no configuration; a dirty side is local-only."""
+def _dirty_run(repo, tmp, profile_sides, run_key):
     (repo["wt-head"] / "bench.cpp").write_text("// work = 103, uncommitted\n")
     base = make_build(tmp / "b1", repo["wt-base"], cases())
     head = make_build(tmp / "b2", repo["wt-head"], cases())
-    out = run_rounds(tmp, [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
-                     rounds=3, run_key="adhoc", out=tmp / "adhoc")
+    return run_rounds(tmp, profile_sides(base, head), rounds=3, run_key=run_key, out=tmp / run_key)
+
+
+def test_ad_hoc_is_thin_and_a_dirty_run_is_accepted(repo, tmp):
+    """Criterion 7: no project, no configuration; a dirty single run is recorded as dirty (UC-01)."""
+    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
+                                                     {"build": head, "source": repo["wt-head"]}], "adhoc")
     docs = results(out)
     assert all("project" not in d for d in docs)
+    assert {d["provenance"]["subject_dirty"] for d in docs} == {"clean", "dirty"}
+    store = Store(tmp / "store.parquet")
+    assert store.ingest_paths([out])["rejected"] == []
+    assert {s["project"] for s in store.series()} == {f"local/{docs[0]['coordinates']['environment']['identity']['runner']}"}
+
+
+def test_revisions_refuses_a_dirty_side(repo, tmp):
+    """Criterion 7, UC-03 §10: a revisions comparison with a dirty side gets no verdicts."""
+    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
+                                                     {"build": head, "source": repo["wt-head"]}], "dirty-rev")
     store = Store(tmp / "store.parquet")
     store.ingest_paths([out])
-    assert {s["project"] for s in store.series()} == {f"local/{docs[0]['coordinates']['environment']['identity']['runner']}"}
-    doc = compare.compare(store.documents("adhoc"), run_key="adhoc", profile="revisions", baseline=repo["base"])
-    assert doc["local_only"] is True
+    doc = compare.compare(store.documents("dirty-rev"), run_key="dirty-rev", profile="revisions",
+                          baseline=repo["base"])
+    assert [f["invariant"] for f in doc["failed_invariants"]] == ["clean-tree"]
+    assert doc["units"] == []
+
+
+def test_environments_labels_a_dirty_side_local_only(repo, tmp):
+    """Criterion 7, schema §5.5: the environments profile still allows a dirty side, labeled."""
+    out = _dirty_run(repo, tmp, lambda base, head: [
+        {"build": base, "source": repo["wt-head"], "labels": {"build": "a"}},
+        {"build": make_build(tmp / "b3", repo["wt-head"], cases(quiet=1.02e-3), hardened=True),
+         "source": repo["wt-head"], "labels": {"build": "b"}}], "dirty-env")
+    store = Store(tmp / "store.parquet")
+    store.ingest_paths([out])
+    doc = compare.compare(store.documents("dirty-env"), run_key="dirty-env", profile="environments",
+                          label="build", baseline="a")
+    assert doc["failed_invariants"] == [] and doc["local_only"] is True
+    assert doc["units"]
 
 
 def test_tracked_series_and_history(revisions_run, tmp):
@@ -202,9 +231,20 @@ def test_failures_are_results(repo, tmp):
 
 
 @pytest.mark.parametrize("change, message", [
-    (lambda o: o["protocol"].update(gc="disabled"), "protocol keys"),
-    (lambda o: o.update(target={"kind": "python_env", "python": "/usr/bin/python3"}), "build_dir"),
-    (lambda o: o.update(suite="missing-binary"), "not found"),
+    (lambda o: o["precision"].update(warmup={"mode": "count", "n_warmup": 2}), "warmup"),
+    (lambda o: o.update(target={"kind": "artifact", "uri": "file:///tmp/x", "sha256": "0" * 64,
+                                "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "abc"}),
+     "build and working_tree targets"),
+    (lambda o: o.update(target={"kind": "revision", "source": {"uri": SOURCE_URI, "type": "git"},
+                                "revision": "deadbeef"}), "malformed at /target"),  # the runner never builds
+    (lambda o: o.update(environment_policy={"name": "laptop-default", "version": "1.0.0"}),
+     "environment_policy is deferred"),
+    (lambda o: o.update(build={"type": "release"}), "build is deferred"),
+    (lambda o: o.update(components=[{"name": "numpy", "role": "dependency", "revision": "abc",
+                                     "source": {"uri": SOURCE_URI, "type": "git"}}]),
+     "components is deferred"),
+    (lambda o: o.update(schedule={"kind": "alternating"}), "schedule is deferred"),
+    (lambda o: o["suites"][0].update(suite="missing-binary"), "not found"),
     (lambda o: o.update(quantities=["peak-rss"]), "quantities"),
     (lambda o: o.update(surprise=1), "'surprise' was unexpected"),
 ])
@@ -229,13 +269,13 @@ def refused(tmp, document) -> list:
 
 def test_every_refusal_is_reported(repo, tmp):
     document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
-    document.update(quantities=["peak-rss"], workload_parameters={"size": 1})
-    document["protocol"].update(gc="disabled", warmup={"mode": "fixed", "n_warmup": 3})
+    document.update(quantities=["peak-rss"], workload_parameters={"size": 1}, schedule={"kind": "alternating"})
+    document["precision"].update(warmup={"mode": "count", "n_warmup": 2})
     assert [str(problem) for problem in refused(tmp, document)] == [
         "google-benchmark takes no workload_parameters",
         "quantities not supported: ['peak-rss']",
-        "protocol keys not supported by google-benchmark: ['gc']",
-        "google-benchmark warms up by time only",
+        "schedule is deferred in the prototype: side scheduling (the session loop alternates the sides)",
+        "google-benchmark warmup is time-based only, not count-based",
     ]
 
 
@@ -250,11 +290,10 @@ def test_missing_build_is_refused_for_every_reason(tmp):
 
 def test_invalid_order_is_refused_with_its_document_errors(repo, tmp):
     document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
-    document.update(surprise=1, suite="")
+    document.update(surprise=1, run_key="")
     problems = refused(tmp, document)
     assert {type(problem) for problem in problems} == {StructureError}
-    assert {problem.path for problem in problems} == {(), ("suite",)}
-
+    assert {problem.path for problem in problems} == {(), ("run_key",)}
 
 def test_source_found_through_cmake_cache(repo, tmp):
     build = make_build(tmp / "b", repo["wt-head"], cases())
@@ -280,7 +319,7 @@ def test_planned_case_never_reported(repo, tmp):
 
 
 def test_defaults_are_recorded(repo, tmp):
-    """R3: settings the order leaves out are recorded as applied (#35 W4a)."""
+    """R3: settings the order leaves out are recorded as applied."""
     doc = run_one(repo, tmp)[0]
     protocol = doc["coordinates"]["comparison_context"]["protocol"]
     assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.5}
@@ -383,6 +422,61 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store().head()
-    assert total == 2 and {load(tmp / "o1.json")["provenance"]["run_key"]} == {r["run_key"] for r in rows}
+    assert total == 2 and {load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
     ref = json.loads(rows[0]["document"])["provenance"]["info"]["workorder_ref"]
     assert Store().order(ref) == load(tmp / "o1.json")  # the order travelled with its results
+
+
+def _working_tree_order(path, run_key, **target):
+    document = order(path, None, run_key)
+    document["target"] = {"kind": "working_tree", "path": str(path),
+                          "source": {"uri": SOURCE_URI, "type": "git"}, **target}
+    return document
+
+
+def _run_working_tree(tmp, document, name):
+    path = tmp / f"{name}.json"
+    path.write_text(json.dumps(document))
+    runner.run(path, tmp / name)
+    return results(tmp / name)
+
+
+def test_working_tree_records_git_identity_dirty_and_untouched(repo, tmp):
+    """A working_tree target is measured as found: HEAD, dirty, and a tree no commit has."""
+    checkout = repo["wt-head"]
+    make_build(checkout / "bin", checkout, cases())  # untracked files make the tree dirty
+    identity_before = runner.snapshot.git_identity(checkout)
+    docs = _run_working_tree(tmp, _working_tree_order(checkout / "bin", "wt-git", source_dir=str(checkout)), "wt-git")
+    assert docs
+    for doc in docs:
+        assert core.check(doc, "measurement-result") == []
+        assert doc["revision"]["key"] == repo["head"]
+        assert doc["provenance"]["subject_dirty"] == "dirty"
+        assert doc["provenance"]["subject_tree"] == identity_before["tree"] != repo["head"]
+        assert "configuration" not in doc["coordinates"]["subject"]
+    # Never cleaned or checked out; the fake benchmark's own counter file is the only change.
+    assert runner.snapshot.git_identity(checkout)["revision"] == repo["head"]
+    assert (checkout / "bin" / "demo-bench").exists()
+
+
+def test_working_tree_defaults_to_the_target_path_for_identity(repo, tmp):
+    checkout = repo["wt-head"]
+    make_build(checkout / "bin", checkout, cases())
+    docs = _run_working_tree(tmp, _working_tree_order(checkout / "bin", "wt-default"), "wt-default")
+    assert {d["revision"]["key"] for d in docs} == {repo["head"]}
+
+
+def test_working_tree_outside_git_falls_back_to_a_directory_hash(tmp):
+    plain = tmp / "plain"
+    plain.mkdir()
+    (plain / "mod.py").write_text("x = 1\n")
+    make_build(plain / "bin", plain, cases())
+    tree = runner.snapshot.directory_identity(plain)["tree"]  # taken before the run, as the runner does
+    docs = _run_working_tree(tmp, _working_tree_order(plain / "bin", "wt-dir", source_dir=str(plain)), "wt-dir")
+    for doc in docs:
+        assert core.check(doc, "measurement-result") == []
+        assert doc["provenance"]["subject_dirty"] == "dirty"
+        assert doc["provenance"]["subject_tree"] == tree
+        assert doc["revision"]["key"] == f"directory-{tree}"
+    (plain / "mod.py").write_text("x = 2\n")
+    assert runner.snapshot.directory_identity(plain)["tree"] != tree  # content, not time, identifies it

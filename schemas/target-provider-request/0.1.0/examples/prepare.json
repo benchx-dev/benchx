@@ -1,0 +1,6 @@
+{
+  "schema_version": "benchx/target-provider-request/0.1.0",
+  "operation": "prepare",
+  "source_ref": "WORKSPACE",
+  "configuration": "hardened"
+}

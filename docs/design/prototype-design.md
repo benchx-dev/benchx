@@ -1,7 +1,7 @@
 # Prototype Design
 
 **Status:** Draft for review
-**Companion to:** `prototype-scope.md` (what's in the slice); `benchmark-result-schema.md` (the result); `work-order.md` and `schemas/work-order/0.1.0` (#35, the work order); `harness-adapter.md`; `benchmark-environments.md`; `comparator.md`; `runner.md`, as narrowed by `benchmark-environments.md` §8; `measurement-result-parquet.md` (#30, the result row)
+**Companion to:** `prototype-scope.md` (what's in the slice); `benchmark-result-schema.md` (the result); `runner-schema.md` and `schemas/work-order/0.1.0` (the work order); `harness-adapter.md`; `benchmark-environments.md`; `comparator.md`; `runner.md`; `system-decomposition.md` §3.4 (the workbench); `measurement-result-parquet.md` (#30, the result row)
 
 ## 1. Shape
 
@@ -22,11 +22,28 @@ bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--json]                 # the latest results in the store, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
+                                         # read mode: compare results already measured
+bx compare BASELINE CONTENDER --profile revisions|environments
+           --suite NAME [--filter REGEX] [--quantity wall-time]
+           --rounds R [--repetitions N] [--min-time S]
+           [--project P] [--label NAME=BASE,CONTENDER]
+           [--run-key KEY] [--out DIR] [--k 3] [--json]
+                                         # measure mode: run both sides, then compare
 ```
+
+`bx compare` has two modes, chosen by its arguments. Two positional targets
+(`BUILD_DIR[:SOURCE_DIR]`) mean measure mode; `--run` means read mode; giving
+both or neither is an error, as is a flag that belongs to the other mode
+(`--baseline` and `--results` are read mode only, since measure mode derives
+the baseline from its first target; `--suite`, `--rounds`, `--project`,
+`--run-key`, `--out`, `--repetitions`, and `--min-time` are measure mode
+only). `--label` names the label in read mode, and carries the two values in
+measure mode. §5 describes measure mode.
 
 The CLI is a thin layer: each command is one call into the `benchx` package,
 so the workbench, a CI script, or a notebook can do the same without a
-subprocess.
+subprocess. Measure mode is a call into the session function, which calls the
+runner for each order and then the comparator.
 
 The local store has one place, `~/.benchx/store.parquet`, and no command
 takes another; `$BENCHX_HOME` relocates benchx's home as a whole, for tests
@@ -42,53 +59,62 @@ not post to the original store.
 
 ## 2. The three documents
 
-**Work order.** The prototype reads the #35 work order
-(`schemas/work-order/0.1.0`, `workorder_version: 1`) and defines no format of
-its own. One order is one side of one round: the runner executes one order
-per invocation (`runner.md` §7), and #35 already restricts the target to what
-the prototype needs, an existing `build_dir` with an optional `source_dir`.
+**Work order.** The prototype reads the work order of `runner-schema.md`
+(`schemas/work-order/0.1.0`, `benchx/work-order/0.1.0`) and defines no format
+of its own. One order is one side of one round: the runner executes one order
+per invocation (`runner.md` §7), and the prototype accepts one target kind,
+`build`, an existing build directory with an optional `source_dir`. The runner
+never builds it (`runner.md` §1).
 
-Interleaving needs two fields #35 lists as an open question: `round`, which
-it proposes as an optional order field copied to `procedure.round`, and
-`slot`, which it says only whoever coordinates the sides can assign. #35's
-schema rejects unknown top-level fields, so the prototype validates orders
-against the #35 schema extended by exactly these two optional integers,
-copied to `procedure.round` and `procedure.slot`, and proposes them to #35;
-nothing else is added. The calling script is the coordinator: it writes one order per side and round and
-runs them alternately. That loop is the caller's, not benchx's
-(`benchmark-environments.md` §2.2 principle 4 and §5.7), since no harness can
-interleave two separate binaries.
+Interleaving needs two order fields. `round` is native to the schema and is
+copied to `procedure.round`. `slot`, the realized position across all sides,
+is one only whoever coordinates the sides can assign, and the schema rejects
+unknown top-level fields, so the prototype validates orders against the schema
+extended by exactly one optional integer, `slot`, copied to `procedure.slot`;
+nothing else is added, and `slot` is proposed to the schema. The session loop
+is the coordinator: `bx compare` in measure mode writes one order per side and
+round and runs them alternately (§5). That loop is the workbench's
+(`system-decomposition.md` §3.4), since no harness can interleave two separate
+binaries (`benchmark-environments.md` §5.7), and it sits above the runner,
+which takes one order per invocation.
 
-The smallest ad hoc order is #35's `examples/adhoc.json` with a round, a slot,
-and a label added:
+The smallest ad hoc order, as the session loop writes it:
 
 ```json
 {
-  "workorder_version": 1,
-  "source": {"uri": "https://github.com/apache/arrow", "type": "git"},
-  "benchmark": {"kind": "subject"},
-  "harness": {"name": "google-benchmark"},
-  "target": {"kind": "build_dir", "build_dir": "/tmp/bench-hardened",
-             "source_dir": "/home/rok/arrow"},
-  "suite": "arrow-compute-vector-selection-benchmark",
-  "filter": "TakeChunked.*",
+  "schema_version": "benchx/work-order/0.1.0",
+  "work_order_id": "urn:uuid:6f1c2b7e-3d4a-4e8b-9a51-0c2d7e9f4b13",
+  "state": "resolved",
+  "suites": [{"adapter": "google-benchmark",
+              "suite": "arrow-compute-vector-selection-benchmark",
+              "filter": "TakeChunked.*"}],
+  "target": {"kind": "build", "path": "/tmp/bench-hardened",
+             "source_dir": "/home/rok/arrow",
+             "source": {"uri": "https://github.com/apache/arrow", "type": "git"}},
   "quantities": ["wall-time"],
-  "protocol": {"repetitions": {"mode": "fixed",
-                               "levels": [{"unit": "repetition", "n": 10}]}},
+  "precision": {"repetitions": 10,
+                "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.01}},
+  "timeouts": {"case_s": 60, "order_s": 600},
+  "run_key": "urn:uuid:9b2e4f1a-6c3d-4e8f-a7b0-1c2d3e4f5a6b",
+  "requester": {"kind": "workbench", "name": "bx"},
+  "plan": [{"id": "p0", "case": "*", "quantity": "wall-time"}],
   "round": 0,
   "slot": 1,
-  "provenance": {"run_key": "urn:uuid:9b2e4f1a-6c3d-4e8f-a7b0-1c2d3e4f5a6b",
-                 "labels": {"build": "hardened"}}
+  "labels": {"build": "hardened"}
 }
 ```
 
-A tracked order adds `project` and, where it matters, `subject.name`; #35's
-`examples/arrow.json` is the full form.
+The `plan` entry is a placeholder: the runner does not yet cross-check it
+against the case list it discovers from the binary (`runner-schema.md` §3.2).
+
+A tracked order adds `project`; `schemas/work-order/0.1.0/examples/arrow-laptop.json`
+is the fuller form.
 
 **Result:** exactly the schema §5.2 ingest object, one file per attempt ×
-quantity, named by its `ingest_key`. The order is referenced as #35 §5 says:
-`provenance.info.workorder_ref` = `sha256:` over the order's RFC 8785 form,
-until the result schema gains a field for it. No prototype-only fields, so
+quantity, named by its `ingest_key`. The order is referenced by
+`provenance.info.workorder_ref` = `sha256:` over the order's RFC 8785 form;
+`runner-schema.md` §5.1 puts the resolved order in `provenance.artifacts`
+instead, which the prototype does not yet do. No prototype-only fields, so
 criterion 1 holds by construction.
 
 **Comparison document** (output of `bx compare`), following `comparator.md`
@@ -126,29 +152,38 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). A
-comparison in which either side is not `clean` has `local_only: true`
-(schema §5.5).
+the missing, failed-invariant, and excluded listings with counts). In
+the `environments` profile, a comparison in which either side is not `clean`
+has `local_only: true` (schema §5.5); the `revisions` profile refuses it
+instead (§5).
 
 ## 3. Runner and adapter (`bx run`)
 
-The runner validates the order against the #35 schema, resolves
-`target.build_dir/suite`, and refuses the order if the binary is absent. It
-changes nothing on the machine and passes its own environment through, with
-the order's `environment_variables` applied on top as #35 W6 requires.
+The runner validates the order against the work-order schema, resolves
+`target.path` and the suite name to a binary, and refuses the order if the
+binary is absent. It builds nothing and changes nothing on the machine; it
+passes its own environment through, with the order's `environment_variables`
+applied on top, to the launched process alone (`benchmark-environments.md`
+§2.2).
 
 The runner refuses, before running anything, an order it cannot apply
-exactly (#35 W5): another harness or target kind, `workload_parameters`
-(Google Benchmark takes none), a quantity other than `wall-time` or
-`cpu-time`, or a protocol key the adapter has no flag for. Protocol keys the
-order leaves out are recorded with Google Benchmark's defaults (#35 W4a).
+exactly, rather than dropping what it does not understand: another adapter or
+target kind, more than one suite, `include` or `exclude`, a `benchmark`
+object, `workload_parameters` (Google Benchmark takes none), a quantity other
+than `wall-time` or `cpu-time`, or a precision key the adapter has no flag
+for. It also refuses each field whose feature is deferred: `environment_policy`
+(enforcing launch settings, verifying requested hardware), a declared `build`,
+`components`, and `schedule`. A refusal names the field and says it is
+deferred. `timeouts.order_s` is required by the schema and not enforced.
+Precision keys the order leaves out are recorded with Google Benchmark's
+defaults.
 
 The Google Benchmark adapter's driving half lists the planned cases with
 `--benchmark_list_tests` and the order's filter, then runs each planned case
 in its own process, with `--benchmark_filter=^case$`,
 `--benchmark_repetitions`, `--benchmark_min_time`, and JSON output. One
 process per case is what lets `timeout_seconds` apply to a single workload
-variant, as #35 requires, and confines a crash to its case. Stdout, stderr,
+variant, as `timeouts.case_s` requires, and confines a crash to its case. Stdout, stderr,
 and the native JSON are kept as provenance artifacts. Its translating half follows
 `harness-adapter.md` §6.1: iteration rows become observations, aggregate rows
 producer summaries, encoded names and user counters are split only under
@@ -167,15 +202,15 @@ landing where its §3.4 puts it:
   ad hoc mode, so both profiles have a full environment identity (schema
   §5.5); OS, kernel, libc, governor, and load as observed context; an
   allowlist of thread-control environment variables as observed context,
-  which is the allowlist option among those #35 leaves open for recording the
-  inherited environment.
+  which is the allowlist of `benchmark-environments.md` §3.1.
 - **Source identity**, from `target.source_dir`, or from the
   `CMAKE_HOME_DIRECTORY` the build directory records when the order names
   none: revision, `subject_dirty`, and `subject_tree` (schema §4.1). When
   neither locates a checkout the runner refuses the order, because a result
-  must state its revision (`runner.md` §2) and #35 §3's `unknown` case leaves
-  none to state; that gap goes back to #35. The benchmark code is the
-  subject's own checkout (`benchmark.kind: subject`).
+  must state its revision (`runner.md` §2), and `runner-schema.md` §5.1 refuses
+  an order with no revision to record. The benchmark code is the subject's own
+  checkout, so the benchmark revision, dirty flag, and tree are the subject's
+  (`runner-schema.md` §3.3).
 - **Build configuration**, from a built-in plugin that reads
   `CMakeCache.txt` in the build directory: build type, compiler and version,
   flags, and the project's own options (cache entries prefixed with the
@@ -197,7 +232,7 @@ would read it.
 What the prototype does not detect is recorded as absent, never guessed. In
 particular a build directory can be stale against its `source_dir`; the
 prototype records the tree as it is at run time and does not detect staleness
-(`runner.md` §8 question 3).
+(`runner.md` §8 question 2).
 
 ## 4. Store (`bx ingest` + queries)
 
@@ -296,7 +331,8 @@ Before any verdict, the eligibility guard (§3) checks the profile's
 invariants over the run: exactly two sides that differ only in the varying
 coordinate, equal attempt counts per side, and sides alternating by
 `procedure.slot`. A failed invariant is recorded and the affected units get no
-verdict. A variant present on one side only is listed as missing
+verdict; under `revisions` a side that is not `clean` fails the `clean-tree`
+invariant the same way. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
 listed.
 
@@ -325,20 +361,53 @@ prototype's answer to `comparator.md` §7 question 1, open until reviewed.
 Comparison documents are recomputed on demand and not stored
 (`comparator.md` §5); the store keeps their inputs.
 
+**Measure mode.** `bx compare BASELINE CONTENDER …` runs both sides and then
+compares them; it is the workbench's session loop (`system-decomposition.md`
+§3.4) in the prototype's CLI. It:
+
+1. checks that both build directories and the suite binary exist, and locates
+   each side's source checkout, from `SOURCE_DIR` or the
+   `CMAKE_HOME_DIRECTORY` the build records. Under `revisions` it also checks
+   that both trees are clean, and refuses before running anything, so a dirty
+   tree fails at once and not after R rounds;
+2. fixes a run key, from `--run-key` or a timestamped default;
+3. for each of R rounds, for each side in order (baseline, then contender),
+   writes one work order with the shared run key, `round`, and a running
+   `slot`, and runs it through the same call `bx run` uses, which writes the
+   result files and delivers them to the local store;
+4. calls the comparator on that run key and profile. The baseline value is
+   derived from the first target: its subject tree id for `revisions`, and the
+   first value of `--label NAME=BASE,CONTENDER` for `environments`.
+
+It is exactly `bx run` 2R times followed by read-mode `bx compare`; it adds no
+document, schema, or contract. It builds nothing: both targets must exist,
+and whatever produced them plays the target-provider role
+(`system-decomposition.md` §3.4). If it stops partway, the results already
+delivered stay in the store, and a read-mode comparison of the run key reports
+missing results or a failed alternation invariant, as UC-03 §10 requires.
+Allowing a local-only `revisions` comparison of a dirty tree is open
+(`system-decomposition.md` §6 question 4).
+
 ## 6. Demonstration
 
 Both profiles use one shape: two prepared build directories, one run key, R
-rounds, and a calling script that alternates the sides and assigns `round`
-and `slot`.
+rounds, and `bx compare` in measure mode, which alternates the sides and
+assigns `round` and `slot`. The demo script plays the user, and in that role
+the target provider: it prepares the sources and build directories with git
+and CMake, since benchx builds nothing.
 
 - **Revisions:** two git worktrees of one source at the base and head
   commits, each built into its own directory with the same configuration.
-  The two orders differ only in `target`. Compare with
+  The two orders differ only in `target`. Measure and compare with
+  `bx compare BASE_BUILD:BASE_SRC HEAD_BUILD:HEAD_SRC --profile revisions --suite … --rounds R`;
+  the same run key compares again in read mode with
   `bx compare --run KEY --profile revisions --baseline <base commit>`.
 - **Environments:** one checkout configured twice with one option changed,
   as the Arrow local story does for hardening, into `/tmp/bench-plain` and
-  `/tmp/bench-hardened`. The orders differ in `target.build_dir` and in the
-  label `build: plain|hardened`. Compare with
+  `/tmp/bench-hardened`. The orders differ in `target.path` and in the
+  label `build: plain|hardened`. Measure and compare with
+  `bx compare PLAIN_BUILD:SRC HARDENED_BUILD:SRC --profile environments --label build=plain,hardened --suite … --rounds R`;
+  read mode repeats it with
   `bx compare --run KEY --profile environments --label build --baseline plain`.
 
 The demo runs the two shapes once each. Revisions run ad hoc: the orders
@@ -356,8 +425,12 @@ history grow from run to run, and the demo ends with `bx head`.
 
 ## 7. Deliberate simplifications
 
-- One harness, one target kind, no builds, no environment policy: the user
-  prepares both sides (`benchmark-environments.md` §2).
+- One harness and one target kind. The runner builds nothing, ever: the user
+  prepares both sides (`benchmark-environments.md` §2). The prototype applies
+  `environment_variables` and defers the rest of the environment policy, and it
+  refuses an order that names one rather than ignoring it (§3).
+- No target-provider hook: the demo prepares its builds by hand, and the
+  provider contract is open (`system-decomposition.md` §6 question 5).
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
 - One identity policy and one derived estimator, fixed in code.
@@ -379,7 +452,7 @@ settle:
 
 - `pyarrow` for the single-file Parquet store and nested list/struct columns;
 - `jsonschema` with a `referencing` registry, since the work-order schema
-  references the result schema (#35 §6);
+  references the result schema;
 - `rfc8785` for canonical JSON in fingerprints and the work-order hash;
 - the standard library elsewhere (`hashlib`, `subprocess`, `statistics`).
 

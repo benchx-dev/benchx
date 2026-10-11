@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:target-provider-request:0.1.0",
+  "title": "BenchX target provider request",
+  "description": "What the workbench writes to a target provider's stdin (docs/design/system-decomposition.md §3.4). One request is one target; a comparison is two independent requests. The provider answers with a target description on stdout, or exits nonzero with its message on stderr.",
+  "$comment": "prepare may build, incrementally and repeatably, and must finish before any work order exists. describe never builds or changes anything: it reports a target that already exists, and exits nonzero when there is none. configuration is a project-defined name that benchx treats as opaque.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "source_ref"],
+  "properties": {
+    "schema_version": { "const": "benchx/target-provider-request/0.1.0" },
+    "operation": { "enum": ["describe", "prepare"] },
+    "source_ref": {
+      "description": "What to provide a target for: a revision, the token WORKSPACE for the current checkout, or a path. Interpreted by the provider.",
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "description": "Project-defined configuration name, such as hardened or plain. Opaque to benchx; absent or null means the provider's default.",
+      "type": ["string", "null"]
+    }
+  }
+}

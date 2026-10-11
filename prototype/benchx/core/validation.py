@@ -6,18 +6,27 @@ from jsonschema import Draft202012Validator
 from . import catalog
 from .errors import SchemaNotFound, StructureError
 
-Kind = Literal["measurement-result", "work-order", "comparison-document"]
+Kind = Literal[
+    "measurement-result",
+    "work-order",
+    "comparison-document",
+    "target-description",
+    "target-provider-request",
+]
 
 
 def find_schema(
     data: dict[str, Any], kind: Kind
 ) -> tuple[Draft202012Validator | None, list[SchemaNotFound]]:
-    if kind == "measurement-result":
-        field = "schema_version"
-    elif kind == "work-order":
-        field = "workorder_version"
-    elif kind == "comparison-document":
+    if kind == "comparison-document":
         field = "comparison_version"
+    elif (
+        kind == "measurement-result"
+        or kind == "work-order"
+        or kind == "target-description"
+        or kind == "target-provider-request"
+    ):
+        field = "schema_version"
     else:
         assert_never(kind)
 
@@ -27,13 +36,13 @@ def find_schema(
     version = data[field]
 
     # bool is a subclass of int.
-    if not isinstance(version, int) or isinstance(version, bool):
-        reason = "version must be an integer"
+    if not isinstance(version, (int, str)) or isinstance(version, bool):
+        reason = "version must be an integer or a string"
         return None, [SchemaNotFound(path=(field,), reason=reason)]
 
     validator = catalog.lookup(kind, version)
     if validator is None:
-        reason = f"no schema for {kind} version {version}"
+        reason = f"no schema for {kind} version {version!r}"
         return None, [SchemaNotFound(path=(field,), reason=reason)]
 
     return validator, []

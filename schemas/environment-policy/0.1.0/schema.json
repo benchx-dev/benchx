@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:environment-policy:0.1.0",
+  "title": "BenchX environment policy",
+  "description": "A named, versioned list of rules the runner enforces, verifies, or records before and during a run (docs/design/runner-schema.md §4). Referenced by a work order's environment_policy {name, version} and by coordinates.environment.identity.policy as \"name@version\".",
+  "$comment": "The check vocabulary is open (core checks in §4.1 plus a namespaced x-<project>.* prefix), so `check` and `parameters` are not constrained to a closed set here; the runner rejects a check it has no handler for. `on_fail` is fixed by tier and therefore not a free choice: enforce always refuses on failure (§4's table), so it is omitted rather than restated; record never fails, so it is omitted too; only verify carries an explicit on_fail (refuse or warn, per rule). Every check token, and any detail appended to a reason built from one (e.g. policy-unsatisfied-<check>, runner-schema.md §6), must itself match the result schema's reason pattern (letters/digits joined by '.' or '-', no '_'), which is why gpu.clocks-locked replaces the original gpu.clocks_locked in §4.1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "rules"],
+  "properties": {
+    "name": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/token" },
+    "version": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/nonEmptyString" },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check", "tier"],
+      "properties": {
+        "check": {
+          "description": "Core vocabulary (runner-schema.md §4.1) or a namespaced project check (x-arrow.*, x-cupy.*).",
+          "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/token"
+        },
+        "tier": { "enum": ["enforce", "verify", "record"] },
+        "parameters": {
+          "description": "Check-specific parameters, such as {\"n\": 1} for threads.max or {\"cpus\": \"0-7\"} for cpu.affinity.",
+          "type": "object"
+        },
+        "on_fail": { "enum": ["refuse", "warn"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "tier": { "const": "enforce" } }, "required": ["tier"] },
+          "then": { "not": { "required": ["on_fail"] } }
+        },
+        {
+          "if": { "properties": { "tier": { "const": "verify" } }, "required": ["tier"] },
+          "then": { "required": ["on_fail"] }
+        },
+        {
+          "if": { "properties": { "tier": { "const": "record" } }, "required": ["tier"] },
+          "then": { "not": { "required": ["on_fail"] } }
+        }
+      ]
+    }
+  }
+}

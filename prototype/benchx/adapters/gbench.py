@@ -7,12 +7,17 @@ The runner supplies everything else a result needs (the context document).
 """
 
 import json
+import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
-from ..core import Refusal, Rejected
+from .base import Unsupported
 
+NAME = "google-benchmark"
+CONTEXT_KEY = "google_benchmark"
+WORKLOAD_PARAMETERS = False
 PRODUCER = {"name": "benchx/gbench-adapter", "version": "0.1.0", "mapping_version": "gbench-to-benchx/v1"}
 
 # Native field, canonical quantity (Appendix A), and direction.
@@ -23,33 +28,34 @@ QUANTITIES = {
 _TO_SECONDS = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1.0}
 
 # Google Benchmark's own defaults, recorded when the order leaves them out, so
-# no applied setting goes unrecorded (#35 W4a).
-DEFAULT_PROTOCOL = {
-    "repetitions": {"mode": "fixed", "levels": [{"unit": "repetition", "n": 1}]},
+# no applied setting goes unrecorded (work-order §3 "every applied setting is
+# recorded"). precision.repetitions has no default: it is required.
+DEFAULTS = {
     "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.5},
     "warmup": {"mode": "none"},
 }
 
 
-class Unsupported(Rejected):
-    """An order this adapter cannot apply exactly; the runner refuses it."""
+def protocol(precision: dict) -> tuple[dict, list[str]]:
+    """The full protocol that will apply, and the flags that apply it.
 
-
-def protocol(order_protocol: dict | None) -> tuple[dict, list[str]]:
-    """The full protocol that will apply, and the flags that apply it."""
-    requested = dict(order_protocol or {})
+    precision is already schema-valid (work-order §3): repetitions is a bare
+    int or {mode: fixed, levels[]}; calibration and warmup, when present, are
+    mode-tagged per the result schema's Appendix B. Unknown keys are already
+    rejected by the schema, so only gbench-specific unsupported shapes are
+    checked here.
+    """
     problems = []
-    unknown = set(requested) - set(DEFAULT_PROTOCOL)
-    if unknown:
-        problems.append(Refusal(f"protocol keys not supported by google-benchmark: {sorted(unknown)}"))
-    applied = {**DEFAULT_PROTOCOL, **requested}
-    flags = []
-
-    levels = applied["repetitions"]["levels"]
+    repetitions = precision["repetitions"]
+    levels = [{"unit": "repetition", "n": repetitions}] if isinstance(repetitions, int) else repetitions["levels"]
     if len(levels) != 1 or levels[0]["unit"] != "repetition":
-        problems.append(Refusal("google-benchmark repeats at one level, unit 'repetition'"))
-    else:
-        flags.append(f"--benchmark_repetitions={levels[0]['n']}")
+        problems.append("google-benchmark repeats at one level, unit 'repetition'")
+    applied = {
+        "repetitions": {"mode": "fixed", "levels": levels},
+        "calibration": precision.get("calibration", DEFAULTS["calibration"]),
+        "warmup": precision.get("warmup", DEFAULTS["warmup"]),
+    }
+    flags = [f"--benchmark_repetitions={levels[0]['n']}"]
 
     calibration = applied["calibration"]
     if calibration["mode"] == "adaptive":
@@ -60,11 +66,34 @@ def protocol(order_protocol: dict | None) -> tuple[dict, list[str]]:
     warmup = applied["warmup"]
     if warmup["mode"] == "time":
         flags.append(f"--benchmark_min_warmup_time={warmup['seconds']}")
+    elif warmup["mode"] == "count":
+        problems.append("google-benchmark warmup is time-based only, not count-based")
     elif warmup["mode"] != "none":
-        problems.append(Refusal("google-benchmark warms up by time only"))
+        problems.append(f"unknown warmup mode: {warmup['mode']}")
     if problems:
-        raise Unsupported(problems)
+        raise Unsupported(*problems)
     return applied, flags
+
+
+def locate(target_path, suite, env) -> Path:
+    """The benchmark binary: the suite's name inside the target's build directory."""
+    binary = Path(target_path) / suite
+    if not (binary.is_file() and os.access(binary, os.X_OK)):
+        raise Unsupported(f"suite binary not found: {binary}")
+    return binary
+
+
+def attempted(applied: dict) -> int:
+    """The repetitions asked for; protocol() already allows only one level."""
+    return applied["repetitions"]["levels"][0]["n"]
+
+
+def harness(info: dict) -> dict:
+    """comparison_context.harness, from the provenance info context_facts gave."""
+    out = {"name": NAME}
+    if info.get("library_version"):
+        out["version"] = info["library_version"]
+    return out
 
 
 def list_cases(binary, case_filter, env) -> list[str]:
@@ -76,7 +105,7 @@ def list_cases(binary, case_filter, env) -> list[str]:
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 
-def run_case(binary, case, flags, env, timeout, native_path) -> dict:
+def run_case(binary, case, flags, env, timeout, native_path, env_names=()) -> dict:
     """Run one case; never raises for harness failures, which become results."""
     args = [str(binary), f"--benchmark_filter=^{re.escape(case)}$",
             f"--benchmark_out={native_path}", "--benchmark_out_format=json", *flags]

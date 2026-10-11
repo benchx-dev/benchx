@@ -63,13 +63,13 @@ def test_finds_result_schema(adhoc):
             {"schema_version": "5"},
             "measurement-result",
             ("schema_version",),
-            "must be an integer",
+            "no schema for measurement-result version '5'",
         ),
         (
             {"schema_version": True},
             "measurement-result",
             ("schema_version",),
-            "must be an integer",
+            "must be an integer or a string",
         ),
         (
             {"schema_version": 4},
@@ -78,10 +78,16 @@ def test_finds_result_schema(adhoc):
             "no schema for measurement-result version 4",
         ),
         (
-            {"workorder_version": 2},
+            {"schema_version": "benchx/work-order/9.0.0"},
             "work-order",
-            ("workorder_version",),
-            "no schema for work-order version 2",
+            ("schema_version",),
+            "no schema for work-order version 'benchx/work-order/9.0.0'",
+        ),
+        (
+            {"schema_version": "benchx/work-order/../../measurement-result/0.1.0"},
+            "work-order",
+            ("schema_version",),
+            "no schema for work-order",
         ),
     ],
 )

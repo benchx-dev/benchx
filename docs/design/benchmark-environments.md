@@ -10,7 +10,7 @@
 
 A benchmark environment is everything a benchmark runs on and in: the machine and its tuning, the operating system, the libraries and the build under test, and the process settings the harness inherits. This document says who is responsible for that environment, what benchx does with it, and what we recommend to the people who set it up.
 
-The short version: **the user sets the environment up; benchx records it.** benchx is a utility for using a benchmark harness more productively. Its work starts where the harness adapter invokes the harness and ends when results are emitted. It does not provision, tune, build, install, verify, or clean up.
+The short version: **the user prepares the machine and the software, and benchx runs a prebuilt target in it, controls the process it launches, and records everything.** benchx is a utility for using a benchmark harness more productively. Its work starts where the runner identifies a target that already exists and ends when results are emitted. It does not provision, tune the machine, build, or install. What it does control is the process it launches: thread caps, CPU affinity, device selection, and the environment variables set on the measured process. It checks that what a work order asks for is present, and it refuses the run when it is not.
 
 The rest of the document has three parts. §2 and §3 are normative: the boundary, and what benchx records. §4 to §7 are recommendations, addressed to whoever prepares an environment, from a contributor's laptop to a dedicated fleet node. They are advice, not requirements; benchx works the same whether or not they are followed, and the only difference is how much the results can be trusted and how well they describe themselves.
 
@@ -22,25 +22,27 @@ The rest of the document has three parts. §2 and §3 are normative: the boundar
 |---|---|---|---|
 | **L0 Provisioning** | hardware, instance type, firmware settings, SMT, isolated cores, kernel | operator, at install or boot time | records what it can detect; records what is declared |
 | **L1 Machine session** | frequency governor, turbo, IRQ affinity, stopped services, a quiet machine | operator or user, usually privileged | records what it can detect; records what is declared |
-| **L2 Software environment** | virtualenv or conda environment, build directory, BLAS, dependency versions, container image | user, with their own tools (`spin`, `archery`, `uv`, `pixi`, CMake, a CI script) | **starts here**: runs inside it, configures none of it, records it |
-| **L3 Process** | `OMP_NUM_THREADS`, `taskset`, `numactl`, `CUDA_VISIBLE_DEVICES` | user, in the shell or CI step that calls benchx | passes it through untouched; records it |
+| **L2 Software environment** | virtualenv or conda environment, build directory, BLAS, dependency versions, container image | user, with their own tools (`spin`, `archery`, `uv`, `pixi`, CMake, a CI script) | **starts here**: runs against the prebuilt target, builds and installs none of it, records it |
+| **L3 Process** | `OMP_NUM_THREADS`, `taskset`, `numactl`, `CUDA_VISIBLE_DEVICES` | the work order, which the runner applies to the process it launches; or the user, in the shell or CI step that calls benchx | applies what the work order requests, passes through what it does not, records what the harness ran under |
 | **L4 Workload variant** | JIT and kernel caches, filesystem cache, per-variant device setup | the harness and the benchmark author | records what the harness reports |
 | **L5 In-harness** | timer, device synchronization, GC, warmup, calibration, interleaving | the harness | records what the harness reports and what the adapter's driving half requested |
 
 ### 2.2 Principles
 
-1. **The user prepares; benchx records.** Everything from L0 to L3 exists before benchx is invoked, and is provided with the user's own tools. benchx changes no setting on the machine, in the software environment, or in the process it inherits.
-2. **Record, never verify.** benchx does not refuse, gate, or warn about a run because of the state of its environment. An untuned machine, a dirty tree, a leftover environment variable, or a declared fact that contradicts a detected one is recorded as it is. Judging whether two results are comparable belongs to the comparator's eligibility guard (`comparator.md` §3) and to project policy.
-3. **No extra steps.** benchx adds nothing around the harness: no setup, no cache clearing, no teardown, no cleanup. When a harness cleans up after itself, that is the harness's behavior.
+1. **The user prepares the target and the machine; benchx controls only the process it launches.** Everything from L0 to L2 exists before benchx is invoked, and is provided with the user's own tools. benchx never builds or installs, and changes no setting of the machine or of the software environment. At L3 it applies what the work order requests (thread caps, affinity, device selection, environment variables) to the measured process alone, so nothing needs restoring afterwards.
+2. **Verify what was asked for; record the rest.** The environment policy a work order names has three tiers: `enforce` (applied to the launched process), `verify` (checked, and the run refused or warned per rule), and `record` (observed only). A run that asks for hardware the node lacks, or for a condition the runner cannot deliver, is refused visibly. State the order did not ask about, such as an untuned machine, a dirty tree, or a declared fact that contradicts a detected one, is recorded as it is and never gates the run. Judging whether two results are comparable belongs to the comparator's eligibility guard (`comparator.md` §3) and to project policy.
+3. **No extra steps.** benchx adds nothing around the harness beyond the launch settings above: no build, no setup, no cache clearing, no teardown, no cleanup. When a harness cleans up after itself, that is the harness's behavior.
 4. **The harness owns the measurement loop.** Warmup, calibration, repetition, and interleaving of sides are harness features. benchx does not wrap a loop of its own around the harness.
 5. **Declared and detected.** A fact reaches a result because the user declared it or because benchx or a plugin detected it. Both are recorded when both exist, each with its source (§3.4).
 6. **Tell environments apart, do not reproduce them.** The record is detailed enough to see that two environments differed and in what (schema §4.2). Rebuilding an environment from a result is not a goal.
 
 ### 2.3 What this rules out
 
-benchx has no notion of a revision to check out and build, no build cache, no environment policy to enforce, no privileged helper, no sandboxing of untrusted code, and no restore-after-run. The tools that already do these things well keep doing them, and call benchx last.
+benchx has no notion of a revision to check out and build, no build cache, no privileged helper that changes machine state (governor, boost, SMT, clock locks), no sandboxing of untrusted code, and no restore-after-run. A work order never names a revision to build, only a target that already exists. The tools that already do these things well keep doing them, and call benchx last.
 
-This moves some current behavior out of benchx's scope rather than dropping it. `archery benchmark diff WORKSPACE <tag>` clones and builds a revision itself (Arrow local story); in this design that build stays in `archery`, or `spin`, or a CI script, and benchx is handed the two resulting build directories. What benchx adds is that the two directories now describe themselves in the results, which is the pain that story actually reports.
+This moves some current behavior out of benchx's scope rather than dropping it. `archery benchmark diff WORKSPACE <tag>` clones and builds a revision itself (Arrow local story); in this design that build stays in `archery`, or `spin`, or a CI script, called as the project's target provider by the workbench or CI job (`system-decomposition.md` §3.4), and benchx is handed the two resulting build directories. What benchx adds is that the two directories now describe themselves in the results, which is the pain that story actually reports.
+
+Enforcement is not ruled out; it is limited to the launched process. The runner enforces thread caps, affinity, device selection, and accelerator synchronization discipline on the process it starts, and verifies that the node can satisfy what the order requests. Conditions that would need privileged, persistent changes to the machine are `verify` or `record` rules only.
 
 ## 3. What benchx records
 
@@ -54,15 +56,15 @@ With no configuration, benchx detects the following where the platform makes the
 |---|---|
 | **Host** | host name, CPU model, core and hardware-thread counts, memory, architecture, visible accelerators and their models |
 | **System** | OS and version, kernel, libc, frequency governor, turbo and SMT state, load average, temperature |
-| **Process** | CPU affinity mask, cgroup CPU and memory limits, and an allowlist of environment variables that shape execution: `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `CUDA_VISIBLE_DEVICES`, and similar |
+| **Process** | CPU affinity mask, cgroup CPU and memory limits, and an allowlist of environment variables that shape execution: the thread and device variables (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `CUDA_VISIBLE_DEVICES`, and similar) and the dynamic loader's search variables (`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`, `LD_PRELOAD`) |
 | **Runtime** | interpreter or VM and its version; installed package versions as a dependency manifest artifact |
 | **Source** | revision, dirty flags, and working-tree ids of the subject and benchmark checkouts (schema §4.1) |
 
-Three rules apply. A value that cannot be read is absent, never a placeholder. The process environment is never dumped wholesale, because CI environments carry secrets; only allowlisted variables are recorded, and a project can extend the allowlist. And because the harness runs as a child of benchx, the process-level facts benchx reads from itself are the ones the harness actually ran under, which is what makes recording without setting sufficient at L3.
+Three rules apply. A value that cannot be read is absent, never a placeholder. The process environment is never dumped wholesale, because CI environments carry secrets; only allowlisted variables are recorded, and a project can extend the allowlist. The default list names no build or environment management tool, so variables such as a virtual-environment or conda prefix are for the project to add; `how_built` and `activation` (§3.2) say how the environment was entered, whichever tool was used. And because the harness runs as a child of the runner, the process-level facts the runner reads from itself, after applying any launch settings from the work order, are the ones the harness actually ran under. Where the order applied a setting, the applied value is recorded as enforced; where it did not, the inherited value is recorded as observed.
 
 ### 3.2 Declared facts
 
-What cannot be detected is declared by the user: how a dependency was installed and built, which BLAS is linked, the build configuration of a directory benchx was pointed at, the playbook or image version a node was prepared with, an operator-assigned runner name, a cloud instance type. Declarations travel in the work order or project configuration and are recorded as given. They are not checked against anything.
+What cannot be detected is declared by the user: how a dependency was installed and built, which BLAS is linked, the build configuration of a directory benchx was pointed at, the playbook or image version a node was prepared with, an operator-assigned runner name, a cloud instance type. Declarations travel in the work order or project configuration and are recorded as given. They are not checked against anything. Two declarations come with every prepared target (`runner-schema.md` §3.1): `how_built`, what the user did to build it, and `activation`, what the user ran to enter its environment, with the `shell` it is written for. They are free text, recorded in `provenance.info` and never executed. The runner records the environment it inherited next to `activation`; when the two disagree, both stay.
 
 ### 3.3 Plugins
 
@@ -82,6 +84,7 @@ Placement follows the schema (§4.2); nothing new is introduced:
 | kernel, libc, driver, microcode, governor, turbo, load, temperature, image digest | `observed_context` |
 | full package inventory | dependency manifest artifact in `provenance` |
 | preparation playbook or image version | declared; `environment.metadata` by default, identity if the project's identity policy says so |
+| `how_built`, `activation`, `shell`, target provider | declared; `provenance.info`, never identity |
 
 Declared and detected map onto the schema's existing split between intended and realized. A declared setting is an intended value and lands in comparison context or the subject descriptor. The matching detected value is the realized one and lands in procedure or observed context. When a setting is detectable but nobody declared an intent, as with a thread cap inherited from the shell, the realized value is recorded as the intended one too. When declared and detected disagree, both are kept where this rule puts them; benchx picks no winner, and a comparator can see the disagreement.
 
@@ -93,7 +96,7 @@ Which conditions are identity and which are annotation is project policy, not a 
 
 1. **Hold everything fixed except the thing under test.** The use cases each vary one coordinate: parameters (UC-01, UC-02), revision (UC-03), one dependency or build option (UC-04). An environment difference that is not the one under test is a confound, whether or not anyone notices it.
 2. **Measure both sides of a comparison in the same environment, close together in time.** Same machine, same session, same shell. A baseline measured last month on another machine is a different experiment (Arrow local story, "Reuse a measurement"). benchx records enough for the comparator to see the difference, but the cheapest fix is not to create it.
-3. **Set thread counts explicitly.** Export `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, and their relatives rather than inheriting whatever the machine defaults to, and avoid oversubscription when the harness or the subject runs its own thread pool (Array API story). Set them in the script that calls benchx, so that they are the same every time; benchx records them from the inherited environment.
+3. **Set thread counts explicitly.** Export `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, and their relatives rather than inheriting whatever the machine defaults to, and avoid oversubscription when the harness or the subject runs its own thread pool (Array API story). Request them in the work order, or set them in the script that calls benchx, so that they are the same every time; benchx records what the harness ran under either way.
 4. **Pin what you compare across.** Use a lockfile or an explicit version for every dependency whose performance matters, and say how it was installed. A PyPI wheel and a local source build of the same version are different artifacts with different performance, and the version alone does not distinguish them.
 5. **Declare what benchx cannot see.** Build options behind a build directory, the BLAS vendor, the meaning of an environment label. The Arrow local story's first pain is a comparison of two opaque directory paths; a declaration is what turns `/tmp/bench-hardened` into "hardening on".
 6. **Give environments stable names.** A runner name assigned by a person survives reinstallation and cloud host-name churn. A name derived from the host does not.
@@ -144,7 +147,7 @@ A machine reserved for benchmarking, as in Apache Arrow's Conbench deployment, i
 - Disable unattended upgrades, periodic timers, indexing, and any monitoring agent heavier than a heartbeat. Apply upgrades deliberately, between runs.
 - On Linux, the usual tuning applies: a fixed frequency governor (`performance`); turbo either off, or accepted as a source of variance; SMT off, or benchmarks pinned to one hardware thread per core; cores isolated from the scheduler and from interrupts for the benchmark's use; a fixed transparent-huge-page setting; NUMA placement pinned on multi-socket machines. `pyperf system` is a good checklist and reference implementation. For address-space randomization either choice is defensible, randomized layouts averaged over processes or a fixed layout, as long as it stays the same.
 - Put the tuning in the provisioning playbook or image, give that a version, and declare the version. "Tuned per playbook v3" in every result is worth more than a list of settings nobody can vouch for.
-- Pin with `taskset` or `numactl` in the script that calls benchx. benchx inherits and records the mask.
+- Pin with the work order's affinity setting, or with `taskset` or `numactl` in the script that calls benchx. Either way benchx records the mask the harness ran under.
 
 **Builds**
 
@@ -174,7 +177,7 @@ Self-hosted runners provisioned on demand, as OpenBLAS does through cirun, are t
 
 ### 5.5 Accelerators
 
-- Select devices in the calling script with `CUDA_VISIBLE_DEVICES` or the vendor's equivalent. benchx records the selection as resource selection; on a multi-GPU host, results for GPU 0 and GPU 1 then share one host environment and differ in resource selection.
+- Select devices in the work order, or in the calling script with `CUDA_VISIBLE_DEVICES` or the vendor's equivalent. A work order that requests a device the node lacks is refused. benchx records the selection as resource selection; on a multi-GPU host, results for GPU 0 and GPU 1 then share one host environment and differ in resource selection.
 - Keep the device in a steady state across runs: driver persistence enabled, exclusive use by the benchmark, and clocks and power limits fixed where the hardware permits. Accelerators throttle thermally like laptops do, and the advice on interleaving and on distrusting long trends applies.
 - Driver and runtime versions are observed context by default. A project whose subject is sensitive to them, such as one tracking kernel launch overhead, promotes them to identity in its policy.
 - Device synchronization, JIT warmup, and on-disk kernel caches vary by array library and sometimes by workload variant. They belong to the harness and the timer (see the timer design), never to the environment setup. What matters for the environment is that the cache state is the same for both sides: either both cold or both warm, and declared.
@@ -229,20 +232,21 @@ Facts benchx cannot detect reliably, in rough order of how often their absence h
 
 ## 8. Consequences for other design documents
 
-This document narrows what earlier drafts assigned to the runner. The following need amending to agree with it:
+This document removes building from the runner and limits enforcement to the process the runner launches. The following agree with it, or are amended to:
 
-- **`runner.md`:** "resolve target" becomes read-only identification of an existing target; "prepare environment", the enforce and verify parts of the environment policy, build caches, and refusal of a run on unsatisfiable policy are removed; the work order names a prepared target, never a revision to build.
-- **`system-decomposition.md` §3.3:** "obtains or builds the target" and "controls … the execution environment" become "runs against a prepared target" and "records the execution environment".
-- **`harness-adapter.md` §3 and §5:** where the context-document table and the driving half say "the runner's environment policy", read "the environment description" of §3 here. The driving half's rule that it applies nothing itself and passes the environment through stands, and now holds for the runner too.
+- **`runner.md`:** "resolve target" becomes read-only identification of a prepared target: an existing build directory, working tree, environment, or artifact. Build caches and build failure as an outcome are removed. The environment policy stays: the runner applies its `enforce` rules to the launched process, verifies the `verify` rules, and refuses a run whose requested hardware or conditions are unavailable. The work order names a prepared target, never a revision to build.
+- **`runner-schema.md`:** target kind `revision`, `build.cache`, and the `build-failed` outcome are removed, and the `build` work-order field now only declares the prebuilt target's configuration; the environment-policy model (§4) stands, with `enforce` scoped to the launched process. The two documents no longer conflict.
+- **`system-decomposition.md` §3.3:** "obtains or builds the target" becomes "runs against a prepared target". "Controls and records the execution environment" stays, read as the launched process.
+- **`harness-adapter.md` §3 and §5:** the context-document table's "the runner's environment policy" stands. The driving half still applies nothing to the environment itself and passes it through; enforcement of launch settings is the runner's, around any adapter.
 - **`benchmark-result-schema.md` §4.2:** "the job of the runner or adapter that prepares the environment" becomes "the job of whoever prepares the environment; the runner or adapter records the facts".
-- **`prototype-scope.md`:** building revisions and environment policy enforcement move from *deferred* to *out of scope*.
-- **UC-03:** the two revisions are built by the caller (`spin`, a CI script); benchx receives two prepared targets, which makes UC-03's setup the same shape as UC-04's.
+- **`prototype-scope.md`:** building revisions moves to *out of scope*. Environment policy enforcement stays *deferred*.
+- **UC-03:** the two revisions are built by the project's target provider (`spin`, a CI script), called by the workbench or CI job; benchx receives two prepared targets, which makes UC-03's setup the same shape as UC-04's. `spin bench` without `--compare` (UC-01) is one prepared target, in the current environment, and may be dirty.
 
 ## 9. Open questions
 
 1. How is the source of a fact (§3.4) represented in the message: a marker per field, or one provenance map from field path to `declared`, `detected`, or a plugin name?
 2. Recording a realized value as the intended one lets an accidental setting, such as a leftover `OMP_NUM_THREADS`, enter comparison context and start a new series. That is visible, which is the point, but noisy. Should undeclared settings stay in observed context until a project's policy promotes them?
-3. Which harnesses can interleave sides on their own, and what do UC-02 and UC-03 look like on one that cannot? For UC-04 the loop is necessarily the caller's.
+3. Which harnesses can interleave sides on their own, and what do UC-02 and UC-03 look like on one that cannot? For UC-04 the loop is necessarily the caller's; for UC-03 it is the workbench's session loop (`system-decomposition.md` §3.4).
 4. Where do declarations live: in the work order, in a per-project configuration file, in a per-node file an operator maintains, or all three with a defined precedence?
-5. Is the default allowlist of environment variables (§3.1) part of the core, or does each adapter contribute the variables its ecosystem cares about?
+5. ~~Is the default allowlist of environment variables (§3.1) part of the core, or does each adapter contribute the variables its ecosystem cares about?~~ Both. The core holds the default, a project extends it, and an adapter adds the variables its ecosystem cares about; the runner composes one list and every record of the environment, including artifacts an adapter keeps, is limited to it.
 6. Should the zero-configuration snapshot be available as a stand-alone command, so an operator can see what benchx would record about a machine before running anything on it?

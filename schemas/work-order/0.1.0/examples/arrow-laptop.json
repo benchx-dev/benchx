@@ -1,0 +1,40 @@
+{
+  "schema_version": "benchx/work-order/0.1.0",
+  "work_order_id": "urn:uuid:6f1c2b7e-3d4a-4e8b-9a51-0c2d7e9f4b13",
+  "state": "resolved",
+  "project": "arrow",
+  "suites": [
+    {
+      "adapter": "google-benchmark",
+      "suite": "parquet-read",
+      "include": ["parquet-read/snappy"],
+      "parameters": {}
+    }
+  ],
+  "quantities": ["wall-time"],
+  "target": {
+    "kind": "working_tree",
+    "path": "~/arrow",
+    "source": { "uri": "https://github.com/apache/arrow", "type": "git" },
+    "source_dir": "~/arrow"
+  },
+  "build": {
+    "profile": "ninja-release",
+    "type": "release",
+    "compiler": "clang-18"
+  },
+  "precision": {
+    "repetitions": 5,
+    "calibration": { "mode": "adaptive", "minimum_sample_seconds": 0.01 },
+    "warmup": { "mode": "count", "n_warmup": 1 }
+  },
+  "timeouts": { "case_s": 60, "order_s": 1800 },
+  "environment_policy": { "name": "laptop-default", "version": "1.0.0" },
+  "environment_variables": { "OMP_NUM_THREADS": "1" },
+  "run_key": "local:parquet-snappy-2026-09-23",
+  "round": 1,
+  "labels": { "side": "contender" },
+  "requester": { "kind": "workbench", "name": "local" },
+  "reason": "check snappy decode change before opening PR",
+  "plan": [{ "id": "p0", "case": "parquet-read/snappy", "quantity": "wall-time" }]
+}

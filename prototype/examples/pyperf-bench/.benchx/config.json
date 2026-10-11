@@ -1,0 +1,14 @@
+{
+  "adapters": {
+    "pyperf": {
+      "precision": {
+        "repetitions": {
+          "mode": "fixed",
+          "levels": [{"unit": "process", "n": 5}, {"unit": "value", "n": 3}]
+        },
+        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.05},
+        "warmup": {"mode": "count", "n_warmup": 1}
+      }
+    }
+  }
+}

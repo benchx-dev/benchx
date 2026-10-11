@@ -1,0 +1,12 @@
+{
+  "schema": "benchx/env-identity/0.1.0",
+  "identity": {
+    "machine_id": "sha256:3e1f...",
+    "cpu": { "model": "Intel Core i7-1260P", "logical_cores": 16 },
+    "memory_bytes": 17179869184,
+    "os": { "family": "linux" },
+    "virtualization": "wsl",
+    "policy": "laptop-default@1.0.0",
+    "enforced": { "threads.max": 1 }
+  }
+}

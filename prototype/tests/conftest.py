@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from benchx import runner
 from benchx.core.catalog import SCHEMAS
 
 EXAMPLES = SCHEMAS / "measurement-result" / "0.1.0" / "examples"
+
 FAKE = Path(__file__).with_name("fake_gbench.py")
 SOURCE_URI = "https://example.org/demo.git"
 QUIET, NOISY = "BM_Quiet/1024", "BM_Noisy/1024"
@@ -73,29 +75,38 @@ def cases(quiet=1.0e-3, noisy=2.0e-3):
 
 
 def order(build: Path, source: Path | None, run_key: str, **extra) -> dict:
-    target = {"kind": "build_dir", "build_dir": str(build)}
+    target = {"kind": "build", "path": str(build), "source": {"uri": SOURCE_URI, "type": "git"}}
     if source is not None:
         target["source_dir"] = str(source)
+    case_s = extra.pop("timeout_seconds", 60)
     document = {
-        "workorder_version": 1,
-        "source": {"uri": SOURCE_URI, "type": "git"},
-        "benchmark": {"kind": "subject"},
-        "harness": {"name": "google-benchmark"},
+        "schema_version": "benchx/work-order/0.1.0",
+        "work_order_id": f"urn:uuid:{uuid.uuid4()}",
+        "state": "resolved",
+        "suites": [{"adapter": "google-benchmark", "suite": "demo-bench"}],
         "target": target,
-        "suite": "demo-bench",
         "quantities": ["wall-time"],
-        "protocol": {"repetitions": {"mode": "fixed", "levels": [{"unit": "repetition", "n": 5}]}},
-        "provenance": {"run_key": run_key},
+        "precision": {"repetitions": 5},
+        "timeouts": {"case_s": case_s, "order_s": 600},
+        "run_key": run_key,
+        "requester": {"kind": "workbench", "name": "tests"},
+        # Decorative: the runner does not yet cross-check plan against the
+        # runtime-discovered case list (runner-schema.md §3.2, still open).
+        "plan": [{"id": "p0", "case": "*", "quantity": "wall-time"}],
     }
     labels = extra.pop("labels", None)
     if labels:
-        document["provenance"]["labels"] = labels
+        document["labels"] = labels
     document.update(extra)
     return document
 
 
 def run_rounds(tmp: Path, sides: list[dict], rounds: int, run_key: str, out: Path, **extra) -> Path:
-    """The calling script's loop: alternate the sides, assign round and slot."""
+    """Alternate the sides and assign round and slot, writing result files only.
+
+    Unlike benchx.session (the real loop, which delivers to a store and
+    compares), this lets a test put arbitrary fields in the orders.
+    """
     slot = 0
     for r in range(rounds):
         for side in sides:

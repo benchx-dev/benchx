@@ -1,0 +1,34 @@
+{
+  "name": "tuned-node",
+  "version": "1.0.0",
+  "rules": [
+    { "check": "threads.max", "tier": "enforce", "parameters": { "n": 1 } },
+    { "check": "cpu.affinity", "tier": "enforce", "parameters": { "cpus": "0-7" } },
+    { "check": "cpu.governor", "tier": "verify", "on_fail": "refuse", "parameters": { "governor": "performance" } },
+    { "check": "cpu.boost", "tier": "verify", "on_fail": "refuse", "parameters": { "boost": false } },
+    { "check": "cpu.smt", "tier": "verify", "on_fail": "warn" },
+    { "check": "gpu.device", "tier": "enforce", "parameters": { "index": 0 } },
+    { "check": "gpu.clocks-locked", "tier": "verify", "on_fail": "refuse", "parameters": { "mhz": 1500 } },
+    { "check": "accel.sync", "tier": "enforce", "parameters": { "mode": "device-sync" } },
+    {
+      "check": "load.quiescent",
+      "tier": "verify",
+      "on_fail": "refuse",
+      "parameters": { "max_1m_load": 2, "window_s": 60 }
+    },
+    {
+      "check": "hardware.present",
+      "tier": "verify",
+      "on_fail": "refuse",
+      "parameters": { "cpu_model_pattern": "*", "gpu_count": 1, "min_ram_bytes": 34359738368 }
+    },
+    { "check": "tree.clean", "tier": "verify", "on_fail": "refuse" },
+    {
+      "check": "thermal.throttle",
+      "tier": "verify",
+      "on_fail": "warn",
+      "parameters": { "counters": ["thermal_throttle_count"] }
+    },
+    { "check": "thermal.temperature", "tier": "record", "parameters": { "sample_interval_s": 5 } }
+  ]
+}

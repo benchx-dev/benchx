@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:env-identity:0.1.0",
+  "title": "BenchX environment identity",
+  "description": "The shape of coordinates.environment when coordinates.environment.schema is \"benchx/env-identity/0.1.0\" (docs/design/runner-schema.md §5.2). A fact goes in identity when a change should split history, and in metadata otherwise.",
+  "$comment": "coordinates.environment.identity is deliberately open in schemas/measurement-result/0.1.0 (minProperties: 1 only), to allow other identity schemas. A validator applies this schema to a result's coordinates.environment object only when its schema field equals \"benchx/env-identity/0.1.0\". GPU UUIDs stay out of identity (in metadata) so that swapping a card of the same model does not split history; the device a result used is coordinates.resource_selection, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "identity"],
+  "properties": {
+    "schema": {
+      "const": "benchx/env-identity/0.1.0"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["machine_id", "cpu", "memory_bytes", "os", "virtualization", "policy", "enforced"],
+      "properties": {
+        "machine_id": {
+          "description": "Salted hash of /etc/machine-id or equivalent.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "logical_cores"],
+          "properties": {
+            "model": { "type": "string", "minLength": 1 },
+            "logical_cores": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "memory_bytes": { "type": "integer", "minimum": 0 },
+        "gpus": {
+          "description": "Visible accelerators by model. GPU UUIDs are metadata, not here.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "memory_bytes"],
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "memory_bytes": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family"],
+          "properties": {
+            "family": { "type": "string", "minLength": 1 }
+          }
+        },
+        "virtualization": {
+          "enum": ["bare-metal", "vm", "container", "wsl"]
+        },
+        "policy": {
+          "description": "The environment policy applied, as name@version (schemas/environment-policy/0.1.0).",
+          "type": "string",
+          "pattern": "^\\S+@\\S+$"
+        },
+        "enforced": {
+          "description": "The values the policy actually applied, keyed by check name (runner-schema.md §4.1).",
+          "type": "object"
+        }
+      }
+    },
+    "metadata": {
+      "description": "Descriptive facts that do not enter environment identity: hostname, GPU UUIDs, BIOS/firmware strings.",
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "laptop-default",
+  "version": "1.0.0",
+  "rules": [
+    { "check": "threads.max", "tier": "enforce", "parameters": { "n": 1 } },
+    { "check": "cpu.governor", "tier": "record" },
+    { "check": "cpu.boost", "tier": "record" },
+    { "check": "cpu.smt", "tier": "record" },
+    { "check": "gpu.device", "tier": "enforce", "parameters": { "index": 0 } },
+    { "check": "accel.sync", "tier": "enforce", "parameters": { "mode": "device-sync" } },
+    { "check": "load.quiescent", "tier": "record" },
+    {
+      "check": "hardware.present",
+      "tier": "verify",
+      "on_fail": "warn",
+      "parameters": { "cpu_model_pattern": "*", "min_ram_bytes": 8589934592 }
+    },
+    { "check": "tree.clean", "tier": "record" },
+    { "check": "thermal.throttle", "tier": "record" },
+    { "check": "thermal.temperature", "tier": "record", "parameters": { "sample_interval_s": 5 } }
+  ]
+}

@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import loader, rules, validation
-from .errors import DocumentError, Refusal, Rejected
+from . import catalog, loader, rules, validation
+from .errors import DocumentError, Refusal, Rejected, SchemaNotFound
 from .hashing import canonical, order_ref, sha256_hex
 from .validation import Kind
 
@@ -21,6 +21,7 @@ __all__ = [
     "Rejected",
     "canonical",
     "check",
+    "check_precision",
     "inspect",
     "order_ref",
     "sha256_hex",
@@ -57,3 +58,11 @@ def check(data: dict[str, Any], kind: Kind) -> Sequence[DocumentError]:
     if not errors:
         errors = list(rules.check(data, kind))
     return errors
+
+
+def check_precision(precision: dict[str, Any]) -> Sequence[DocumentError]:
+    """A work order's precision block on its own, as a config file holds it."""
+    validator = catalog.fragment("work-order", "0.1.0", "/properties/precision")
+    if validator is None:
+        return [SchemaNotFound(reason="no schema for work-order release 0.1.0")]
+    return list(validation.check(precision, validator))

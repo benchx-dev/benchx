@@ -1,0 +1,68 @@
+{
+ "benchmarks": [
+  {
+   "runs": [
+    {
+     "metadata": {
+      "cpu_freq": "trimmed",
+      "duration": 0.008606517687439919,
+      "mem_max_rss": 25690112,
+      "uptime": "trimmed"
+     },
+     "values": [
+      5.7220458984375e-07,
+      4.650279879570007e-07
+     ],
+     "warmups": [
+      [
+       50,
+       4.928186535835266e-07
+      ]
+     ]
+    },
+    {
+     "metadata": {
+      "cpu_freq": "trimmed",
+      "duration": 0.008399655111134052,
+      "mem_max_rss": 26214400,
+      "uptime": "trimmed"
+     },
+     "values": [
+      4.730001091957092e-07,
+      4.649907350540161e-07
+     ],
+     "warmups": [
+      [
+       50,
+       4.916265606880188e-07
+      ]
+     ]
+    }
+   ]
+  }
+ ],
+ "metadata": {
+  "aslr": "Full randomization",
+  "benchx_env_sha256": "c3a4a466edfe03ca6c3b1bd054811e1ab2e43d509d9f2a963fb8f9e33654f5a9",
+  "boot_time": "trimmed",
+  "cpu_config": "0-63=driver:acpi-cpufreq, governor:schedutil; idle:acpi_idle",
+  "cpu_count": 64,
+  "cpu_model_name": "trimmed",
+  "hostname": "trimmed",
+  "load_avg_1min": 1.06,
+  "loops": 50,
+  "name": "f",
+  "perf_version": "2.10.0",
+  "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.36",
+  "python_cflags": "trimmed",
+  "python_compiler": "GCC 15.3.0",
+  "python_config_args": "trimmed",
+  "python_executable": "trimmed",
+  "python_implementation": "cpython",
+  "python_version": "3.14.7 (64-bit)",
+  "runnable_threads": 4,
+  "timer": "clock_gettime(CLOCK_MONOTONIC), resolution: 1.00 ns",
+  "unit": "second"
+ },
+ "version": "1.0"
+}
