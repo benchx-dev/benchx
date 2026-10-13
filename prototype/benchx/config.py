@@ -94,5 +94,5 @@ def write_template(directory=".", adapter_name="pyperf") -> Path:
     if path.exists():
         raise ConfigError(f"{path} already exists")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(template(adapter_name), indent=2) + "\n")
+    path.write_text(json.dumps(template(adapter_name), indent=1) + "\n")
     return path

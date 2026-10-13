@@ -12,7 +12,7 @@ from typing import Any
 
 from . import catalog, loader, rules, validation
 from .errors import DocumentError, Refusal, Rejected, SchemaNotFound
-from .hashing import canonical, order_ref, sha256_hex
+from .hashing import canonical, order_ref, pretty, sha256_hex
 from .validation import Kind
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "Refusal",
     "Rejected",
     "canonical",
+    "pretty",
     "check",
     "check_precision",
     "inspect",

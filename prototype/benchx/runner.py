@@ -145,7 +145,7 @@ def run(order_path, out_dir) -> dict:
     artifacts_dir = out_dir / "artifacts" / (f"slot-{slot}" if slot is not None else ref[7:19])
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     order_file = out_dir / f"workorder-{ref[7:]}.json"
-    order_file.write_bytes(core.canonical(order))
+    order_file.write_bytes(core.pretty(order))
 
     attempted = adapter.attempted(applied_protocol)
     try:
@@ -249,7 +249,7 @@ def run(order_path, out_dir) -> dict:
                 if errors:
                     raise RuntimeError(f"the error result is itself invalid: {errors[0]}")
             path = out_dir / file_name(key)
-            path.write_bytes(core.canonical(document))
+            path.write_bytes(core.pretty(document))
             written.append(path)
     return {"order": ref, "cases": len(cases), "results": len(written), "out": str(out_dir),
             "files": [order_file, *written]}

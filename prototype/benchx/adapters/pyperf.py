@@ -177,7 +177,7 @@ runner.metadata[{digest_key!r}] = _DIGEST
 if runner.args.worker:
     # Only the allowlisted names: the digest above covers the whole environment,
     # the file is shared, and CI environments carry secrets.
-    Path({worker_env!r}).write_text(json.dumps({{k: _ENV[k] for k in {env_names!r} if k in _ENV}}, sort_keys=True))
+    Path({worker_env!r}).write_text(json.dumps({{k: _ENV[k] for k in {env_names!r} if k in _ENV}}, sort_keys=True, indent=1))
 
 sys.path[:0] = [{module_dir!r}, {root!r}]
 spec = importlib.util.spec_from_file_location("benchx_suite", {module!r})
@@ -217,6 +217,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
     if native_path.exists():
         try:
             native = json.loads(native_path.read_text())
+            native_path.write_text(json.dumps(native, indent=1) + "\n")
         except ValueError:
             native = None
     captured = None

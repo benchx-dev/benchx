@@ -174,7 +174,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                            min_time=min_time, project=project, run_key=run_key, source_uri=source_uri,
                            round_=round_, slot=slot, labels=side_labels)
             path = out / "orders" / f"order-{slot:04d}.json"
-            path.write_text(json.dumps(order, indent=1))
+            path.write_text(json.dumps(order, indent=1) + "\n")
             summary = runner.run(path, out)
             outcome = store.ingest_paths(summary["files"])
             if outcome["rejected"]:
