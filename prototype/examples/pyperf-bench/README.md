@@ -1,6 +1,6 @@
 # Example: benchmarking Python functions with `bx bench`
 
-A runnable suite you can try outside Claude. `bench_suite.py` holds five small
+A runnable example of a benchmark suite. `bench_suite.py` holds five small
 functions; `bx bench` runs each one under [pyperf](https://pyperf.readthedocs.io),
 writes benchx result files, delivers them to a local store, and prints a table.
 

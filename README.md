@@ -26,9 +26,10 @@ lost.
 ## Grounded in user stories
 
 To make sure the schema and the components serve real needs, we are collecting
-user stories from projects that will eventually use the system — who benchmarks,
-what they do today, where it hurts, what must not break. Apache Arrow's
-continuous benchmarking setup is the first collected story; more will follow.
+user stories from multiple projects — who benchmarks,
+what they do today, where it hurts, what must not break. We surveyed Apache Arrow's
+continuous benchmarking setup, NumPy, SciPy, Pandas, and several related projects from
+the data science/numerical computing ecosystem.
 The stories drive which components exist and what each must do; the schema must
 allow all of them.
 
@@ -37,11 +38,14 @@ allow all of them.
 - `docs/design/benchmark-result-schema.md` — the benchmark result schema and
   migration contract (the core design document).
 - `docs/user_stories/` — user story template and collected stories.
+- `prototype/` -- an in-progress implementation.
+- `prototype/examples/` -- worked examples of benchmarking setup(s).
 
 ## Status
 
-Design phase. No implementation yet; the goal at this stage is to get the
-schema and the component boundaries right.
+Pre-alpha. The main goal at this stage is to get the schema and the component
+boundaries right. The project is under active development, and we expect to be able to
+start offering API stability guarantees in the near future.
 
 ## License
 
