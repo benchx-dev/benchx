@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": "benchx/measurement-result/0.1.0",
   "producer": {
     "name": "example.org/benchmark-adapter",
     "version": "4.0",
@@ -58,7 +58,7 @@
       "filesystem_cache": "drop-before-attempt"
     },
     "environment": {
-      "schema": "machine/v1",
+      "schema_version": "machine/v1",
       "identity": {
         "runner": "bench-01",
         "cpu": "AMD EPYC 7R13",

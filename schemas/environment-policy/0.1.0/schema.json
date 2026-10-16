@@ -6,8 +6,9 @@
   "$comment": "The check vocabulary is open (core checks in §4.1 plus a namespaced x-<project>.* prefix), so `check` and `parameters` are not constrained to a closed set here; the runner rejects a check it has no handler for. `on_fail` is fixed by tier and therefore not a free choice: enforce always refuses on failure (§4's table), so it is omitted rather than restated; record never fails, so it is omitted too; only verify carries an explicit on_fail (refuse or warn, per rule). Every check token, and any detail appended to a reason built from one (e.g. policy-unsatisfied-<check>, runner-schema.md §6), must itself match the result schema's reason pattern (letters/digits joined by '.' or '-', no '_'), which is why gpu.clocks-locked replaces the original gpu.clocks_locked in §4.1.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "version", "rules"],
+  "required": ["schema_version", "name", "version", "rules"],
   "properties": {
+    "schema_version": { "const": "benchx/environment-policy/0.1.0" },
     "name": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/token" },
     "version": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/nonEmptyString" },
     "rules": {

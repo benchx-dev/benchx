@@ -213,7 +213,7 @@ All three schemas use the same scheme as `schemas/measurement-result/0.1.0`: sem
 |---|---|---|
 | Work order | `schemas/work-order/0.1.0/` | citing the resolved order from results |
 | Environment policy | `schemas/environment-policy/0.1.0/` | detecting a policy edited without a version bump |
-| Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema` |
+| Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema_version` |
 | Identity policy | `schemas/identity-policy/0.1.0/` | `identity_schema` names the policy and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
 
 Orders and policies are hashed the same way the result schema hashes its fingerprints:
@@ -265,7 +265,7 @@ A contributor measures an uncommitted Parquet change on a WSL2 laptop: the local
   "coordinates": {
     "subject": {"configuration": {"build_type": "release", "compiler": "clang-18"}},
     "environment": {
-      "schema": "benchx/env-identity/0.1.0",
+      "schema_version": "benchx/env-identity/0.1.0",
       "identity": {"machine_id": "sha256:3e1f...", "cpu": {"model": "Intel Core i7-1260P", "logical_cores": 16},
                    "memory_bytes": 17179869184, "os": {"family": "linux"}, "virtualization": "wsl",
                    "policy": "laptop-default@1.0.0", "enforced": {"threads.max": 1}},

@@ -13,7 +13,7 @@ import rfc8785
 
 from .core import catalog
 
-_VALIDATOR = catalog.lookup("measurement-result", 5)
+_VALIDATOR = catalog.lookup("measurement-result", "benchx/measurement-result/0.1.0")
 if _VALIDATOR is None:
     raise RuntimeError(
         f"result schema not found under {catalog.SCHEMAS}; "

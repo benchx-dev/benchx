@@ -1,5 +1,5 @@
 {
-  "comparison_version": 1,
+  "schema_version": "benchx/comparison-document/0.1.0",
   "mode": "run",
   "method": {
     "name": "benchx/paired-relative",

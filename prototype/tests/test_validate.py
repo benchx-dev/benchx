@@ -65,7 +65,7 @@ def test_kind_defaults_to_measurement_result_and_can_be_named(documents, adhoc, 
 
     code = cli.main(["validate", "--kind", "comparison-document", file])
     assert code == cli.EXIT_INVALID
-    assert "expected a comparison-document" in capsys.readouterr().err
+    assert "no schema for comparison-document" in capsys.readouterr().err
 
 
 def test_comparison_documents_are_validated(capsys):

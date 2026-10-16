@@ -59,7 +59,7 @@ def test_results_are_valid_documents(revisions_run):
     for doc in every:
         assert core.check(doc, "measurement-result") == []  # criterion 1: the file is the ingest payload
         assert doc["provenance"]["subject_dirty"] == "clean"
-        assert doc["coordinates"]["environment"]["schema"] == "machine/v1"
+        assert doc["coordinates"]["environment"]["schema_version"] == "machine/v1"
         config = doc["coordinates"]["subject"]["configuration"]
         assert config["options"] == {"DEMO_HARDENED": "OFF"}  # DEMO_DATA_DIR is a path
         assert config["cxx_compiler"] == "AppleClang 21.0.0"

@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:env-identity:0.1.0",
   "title": "BenchX environment identity",
-  "description": "The shape of coordinates.environment when coordinates.environment.schema is \"benchx/env-identity/0.1.0\" (docs/design/runner-schema.md §5.2). A fact goes in identity when it names the machine, and in system otherwise.",
-  "$comment": "coordinates.environment.identity is deliberately open in schemas/measurement-result/0.1.0 (minProperties: 1 only), to allow other identity schemas. A validator applies this schema to a result's coordinates.environment object only when its schema field equals \"benchx/env-identity/0.1.0\". GPU UUIDs stay out of identity (in system) so that swapping a card of the same model does not split history; the device a result used is coordinates.resource_selection, not here.",
+  "description": "The shape of coordinates.environment when coordinates.environment.schema_version is \"benchx/env-identity/0.1.0\" (docs/design/runner-schema.md §5.2). A fact goes in identity when it names the machine, and in system otherwise.",
+  "$comment": "coordinates.environment.identity is deliberately open in schemas/measurement-result/0.1.0 (minProperties: 1 only), to allow other identity schemas. A validator applies this schema to a result's coordinates.environment object only when its schema_version field equals \"benchx/env-identity/0.1.0\". GPU UUIDs stay out of identity (in system) so that swapping a card of the same model does not split history; the device a result used is coordinates.resource_selection, not here.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "identity"],
+  "required": ["schema_version", "identity"],
   "properties": {
-    "schema": {
+    "schema_version": {
       "const": "benchx/env-identity/0.1.0"
     },
     "identity": {
