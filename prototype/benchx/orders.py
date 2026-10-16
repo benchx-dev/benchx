@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from . import core
 
-SCHEMA_VERSION = "benchx/work-order/0.1.0"
+SCHEMA_VERSION = core.catalog.WORK_ORDER
 REQUESTER = {"kind": "workbench", "name": "bx"}
 CASE_TIMEOUT_S, ORDER_TIMEOUT_S = 60, 600
 

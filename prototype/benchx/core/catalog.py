@@ -13,6 +13,14 @@ SCHEMAS = Path(
     os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[3] / "schemas"
 )
 
+# The version string each document kind declares in its schema_version. Bump a
+# schema here and nowhere else in the code.
+MEASUREMENT_RESULT = "benchx/measurement-result/0.1.0"
+COMPARISON_DOCUMENT = "benchx/comparison-document/0.1.0"
+WORK_ORDER = "benchx/work-order/0.1.0"
+TARGET_DESCRIPTION = "benchx/target-description/0.1.0"
+TARGET_PROVIDER_REQUEST = "benchx/target-provider-request/0.1.0"
+
 RELEASE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
