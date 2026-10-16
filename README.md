@@ -38,6 +38,7 @@ allow all of them.
 - `docs/design/benchmark-result-schema.md` — the benchmark result schema and
   migration contract (the core design document).
 - `docs/user_stories/` — user story template and collected stories.
+- `schemas` -- JSON schemas for for the benchmark result and other components.
 - `prototype/` -- an in-progress implementation.
 - `prototype/examples/` -- worked examples of benchmarking setup(s).
 
