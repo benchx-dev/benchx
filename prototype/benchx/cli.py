@@ -1,6 +1,6 @@
 """bx: a thin command line over the benchx package (prototype-design.md §1).
 
-Every command reads the project's `benchx.json` (benchx.config), found from the
+Every command reads the project's `benchx.conf.json` (benchx.config), found from the
 working directory upward. The local store and the result files are in the
 project root unless that file says otherwise. A command-line argument wins over
 the file, and the file over a built-in default.
@@ -476,10 +476,10 @@ def main(argv=None):
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
-    p = sub.add_parser("config", help="write or show benchx.json")
+    p = sub.add_parser("config", help="write or show benchx.conf.json")
     p.add_argument("action", choices=["init", "show"],
-                   help="init: write a benchx.json stating a harness's defaults; show: what the file and the defaults give")
-    p.add_argument("--dir", default=".", help="init: where to write benchx.json (default .)")
+                   help="init: write a benchx.conf.json stating a harness's defaults; show: what the file and the defaults give")
+    p.add_argument("--dir", default=".", help="init: where to write benchx.conf.json (default .)")
     p.add_argument("--adapter", choices=sorted(harnesses.HARNESSES), default="pyperf",
                    help="init: the harness (default %(default)s)")
     p.set_defaults(fn=cmd_config)
@@ -509,7 +509,7 @@ def main(argv=None):
 
     p = sub.add_parser("target", help="ask for a target's description (schemas/target-description/0.1.0)",
                        description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
-                                   "benchx.json, or a build directory holding .benchx-target.json. "
+                                   "benchx.conf.json, or a build directory holding .benchx-target.json. "
                                    "describe only reports a target that exists; prepare may build it.")
     p.add_argument("operation", choices=["describe", "prepare"])
     p.add_argument("target")
