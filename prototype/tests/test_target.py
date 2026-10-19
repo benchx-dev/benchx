@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from benchx import compare, core, runner, session, snapshot
+from benchx import compare, config, core, runner, session, snapshot
 from benchx import target as target_mod
 from benchx.store import Store
 from conftest import SOURCE_URI, cases, make_build, order
@@ -82,34 +82,40 @@ def provider(repo, tmp, monkeypatch):
     script.parent.mkdir()
     script.write_text(PROVIDER.format(python=sys.executable, descriptions=str(descriptions)))
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    (tmp / "proj" / ".benchx").mkdir()
-    (tmp / "proj" / ".benchx" / "provider.json").write_text(json.dumps({"command": [str(script)]}))
+    (tmp / "proj" / "benchx.json").write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
+                                                          "provider": {"command": [str(script)]}}))
     monkeypatch.chdir(tmp / "proj")
     return {"plain": plain, "hardened": hardened}
 
 
+def provider_of(start):
+    return config.load(start).provider
+
+
 def test_provider_is_found_walking_up_and_answers_a_request(provider, tmp):
     (tmp / "proj" / "deeper").mkdir()
-    command, directory = target_mod.find_provider(tmp / "proj" / "deeper")
+    found = provider_of(tmp / "proj" / "deeper")
+    command, directory = found
     assert directory == (tmp / "proj").resolve() and len(command) == 1
-    doc = target_mod.resolve("@hardened", operation="describe", cwd=tmp / "proj" / "deeper")
+    doc = target_mod.resolve("@hardened", operation="describe", provider=found)
     assert doc["provider"] == {"name": "fake-provider", "version": "describe"}
-    assert target_mod.resolve("@hardened", operation="prepare")["provider"]["version"] == "prepare"
+    assert target_mod.resolve("@hardened", operation="prepare", provider=found)["provider"]["version"] == "prepare"
 
 
-def test_provider_failure_and_missing_provider_are_errors(provider, tmp, monkeypatch):
+def test_provider_failure_and_missing_provider_are_errors(provider, tmp):
     with pytest.raises(target_mod.TargetError, match="failed to prepare @broken .*exit 7"):
-        target_mod.resolve("@broken")
-    monkeypatch.chdir(tmp)
+        target_mod.resolve("@broken", provider=provider_of(tmp / "proj"))
     with pytest.raises(target_mod.TargetError, match="needs a provider"):
         target_mod.resolve("@plain")
+    with pytest.raises(config.ConfigError, match=r'@plain needs "provider"'):
+        config.load(tmp).require_provider("@plain")
 
 
 def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, provider):
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=4,
                                   label=("build", "plain", "hardened"), project="demo", store=store,
-                                  run_key="t1", out=tmp / "out")
+                                  run_key="t1", out=tmp / "out", provider=provider_of("."))
     orders = [json.loads(p.read_text()) for p in sorted((tmp / "out" / "orders").glob("*.json"))]
     plain_target, hardened_target = orders[0]["target"], orders[1]["target"]
     assert plain_target["how_built"] == "cmake plain"
@@ -133,7 +139,7 @@ def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, prov
 def test_no_build_asks_the_provider_to_describe(repo, tmp, provider):
     session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
                             label=("build", "plain", "hardened"), store=Store(tmp / "store.parquet"),
-                            run_key="t2", out=tmp / "out", build=False)
+                            run_key="t2", out=tmp / "out", build=False, provider=provider_of("."))
     result = next(p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-"))
     assert json.loads(result.read_text())["provenance"]["info"]["target_provider"]["version"] == "describe"
 
@@ -191,7 +197,7 @@ class _Stop(Exception):
 
 
 def _compare(tmp):
-    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, store=Store(tmp / "s.parquet"),
+    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, adapter="pyperf", store=Store(tmp / "s.parquet"),
                                    run_key="u", out=tmp / "out")
 
 
