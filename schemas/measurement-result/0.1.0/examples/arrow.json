@@ -43,10 +43,6 @@
         "compiler": "clang-18"
       }
     },
-    "quantity": {
-      "name": "wall-time",
-      "unit": "s"
-    },
     "protocol": {
       "name": "benchmark-time",
       "version": "v1",
@@ -82,6 +78,10 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "wall-time",
+      "unit": "s"
+    },
     "status": "success",
     "observations": [
       0.0371,

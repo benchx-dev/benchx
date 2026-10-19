@@ -70,7 +70,7 @@
       "description": "Reported coordinates: what was measured and under which conditions. Fingerprinted as reported; identity policy projects them into comparison identity.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["workload", "subject", "quantity", "protocol", "environment"],
+      "required": ["workload", "subject", "protocol", "environment"],
       "properties": {
         "workload": {
           "description": "Workload variant: a named operation plus one resolved parameter assignment.",
@@ -127,18 +127,6 @@
             }
           }
         },
-        "quantity": {
-          "description": "Measured quantity and its canonical UCUM unit. Distinct measurement semantics require distinct names.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["name", "unit"],
-          "properties": {
-            "name": { "$ref": "#/$defs/token" },
-            "unit": { "$ref": "#/$defs/nonEmptyString" },
-            "direction": { "enum": ["lower-is-better", "higher-is-better"] },
-            "deterministic": { "type": "boolean" }
-          }
-        },
         "protocol": {
           "description": "How the subject is exercised and measured: protocol version, warmup and calibration policy, timer.",
           "type": "object"
@@ -172,11 +160,23 @@
       }
     },
     "measurement": {
-      "description": "Outcome and producer evidence for this quantity.",
+      "description": "The measured quantity, its outcome, and producer evidence. Like the estimator, the quantity says what the number is, not what produced it, so it is never a coordinate.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["status"],
+      "required": ["quantity", "status"],
       "properties": {
+        "quantity": {
+          "description": "Measured quantity and its canonical UCUM unit. Distinct measurement semantics require distinct names.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "unit"],
+          "properties": {
+            "name": { "$ref": "#/$defs/token" },
+            "unit": { "$ref": "#/$defs/nonEmptyString" },
+            "direction": { "enum": ["lower-is-better", "higher-is-better"] },
+            "deterministic": { "type": "boolean" }
+          }
+        },
         "status": { "enum": ["success", "partial", "censored", "error", "skipped"] },
         "reason": {
           "description": "Machine-readable lowercase token such as 'timeout' or 'resource-exhausted.memory'. Required for every status except success.",

@@ -16,19 +16,19 @@ This document defines the minimum model needed to ingest, compare, and migrate c
 
 One attempt may report several quantities. CPU time, GPU time, peak memory, and a correctness metric are separate scalar results with separate units, joined by a shared `attempt_key`. A retry is a new attempt with a new key.
 
-> **Reported coordinates** are the facts a producer reports about what was measured and under which conditions: project, designated source, benchmark identity, workload variant, subject, quantity, protocol, environment, and optional resource selection. They exclude the designated source revision, which is the history axis, and all provenance such as attempt/run keys and timestamps.
+> **Reported coordinates** are the facts a producer reports about what was measured and under which conditions: project, designated source, benchmark identity, workload variant, subject, protocol, environment, and optional resource selection. They exclude the designated source revision, which is the history axis, the quantity, which names the measurement, and all provenance such as attempt/run keys and timestamps.
 
 > **Comparison identity** is the part of the reported coordinates that the project's identity policy requires to match before two estimates are points in the same history. Producers report coordinates; they never declare identity or series membership.
 
-> A **series** is one comparison identity under one estimator and followed across revisions of the designated subject source:
+> A **series** is one comparison identity for one quantity under one estimator, followed across revisions of the designated subject source:
 >
-> **policy(reported coordinates) × estimator**
+> **policy(reported coordinates) × quantity × estimator**
 
 The estimator is chosen separately: one observation batch feeds a mean series and a median series without being stored twice (§4.5). The server fingerprints reported coordinates for audit, applies a versioned identity policy, and materializes series as rebuildable indexes (§4.3). The identity policy is one **projection**: other projections, such as a comparison profile or a sweep across kernel versions, follow a different axis over the same results (§4.3).
 
 Two sources appear on every result. The top-level `source`/`revision` identify the subject component whose revisions form the history axis. `benchmark` identifies the code that defined and executed the workload; its exact revision is a reported coordinate that policy normally maps to a declared benchmark version or an audited continuity mapping rather than splitting history on every benchmark commit. A composite subject such as Arrow–NumPy interoperability names every component, designates one as the axis, and pins the others (§4.2).
 
-A result records two kinds of fact (§4.2). **Coordinates** are fixed for the attempt: which code, build, hardware, kernel, C library, runtime, timer, and calibration rule produced the number. **Measurements** are what the attempt produced or passed through: the measurand, and conditions such as temperature, load, or clock frequency, each a sibling result for its own quantity sharing the `attempt_key` (§4.4). Whether a coordinate splits history is decided by the identity policy, not by where it is stored: a Parquet-read benchmark may let kernel and glibc vary, while a benchmark of `malloc` throughput must match the glibc version because it is the thing under test, and both record glibc in the same place.
+A result records two kinds of fact (§4.2). **Coordinates** are fixed for the attempt: which code, build, hardware, kernel, C library, runtime, timer, and calibration rule produced the number. **Measurements** are what the attempt produced or passed through: the measurand, and conditions such as temperature, load, or clock frequency, each a sibling result for its own quantity sharing the `attempt_key` (§4.4). Like the estimator, the quantity is never a coordinate: it says what the number is, not what produced it. Whether a coordinate splits history is decided by the identity policy, not by where it is stored: a Parquet-read benchmark may let kernel and glibc vary, while a benchmark of `malloc` throughput must match the glibc version because it is the thing under test, and both record glibc in the same place.
 
 For example, one series could track:
 
@@ -55,13 +55,13 @@ The common operations are to find a series, order its results by revision, plot 
 | **Parameter assignment** | One concrete value for each parameter of a workload, such as `{"size": 100}` from a domain of `size = [10, 100, 1000]`. |
 | **Workload variant** | A workload plus one parameter assignment. |
 | **Subject** | Implementation or system under test. It may contain several named components; one source is the revision axis. |
-| **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. |
+| **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. Part of the measurement, not a coordinate. |
 | **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. Selected by the projection as a series dimension; reported only inside estimate summaries, never as a coordinate. |
 | **Reported coordinates** | Producer-reported facts describing what was measured and under which conditions, fingerprinted before any policy is applied. |
 | **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key`. Never a coordinate. |
 | **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is the projection a project's store maintains, with the subject revision as its axis. |
 | **Comparison identity** | The part of the reported coordinates a projection requires to match. |
-| **Series** | Derived comparison-time construct: one comparison identity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
+| **Series** | Derived comparison-time construct: one comparison identity × one quantity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
 | **Observation** | One measured value produced by a repetition after declared normalization. |
 | **Observation batch** | Observations of one quantity from one attempt. Three repetitions producing 1.0 ms, 1.1 ms, and 1.0 ms are three observations in one batch. |
 | **Estimate** | Scalar produced by applying an estimator to an observation batch, used for plots and analysis; not a known “true value.” Producer estimates are typed summaries on the immutable result; derived estimates are series points. |
@@ -100,7 +100,7 @@ In metrology, the quantity intended for a workload variant at a revision is the 
 | `quantity` | named scalar output with canonical unit (UCUM unit when representable) and descriptive metadata (§4.4) | unique `(project_id, name)`; immutable after use |
 | `environment` | host/allocation identity | unique `(identity_schema, fingerprint)` |
 | `revision` | source revision plus the optional `native_order` and `native_time` reported with it | unique `(source_id, revision_key)` |
-| `series` | derived index: one comparison identity × one estimator under one projection | unique `series_fingerprint`; rebuildable |
+| `series` | derived index: one comparison identity × one quantity × one estimator under one projection | unique `series_fingerprint`; rebuildable |
 | `series_point` | one entry of a series: the estimate one result contributes, recording which result and which series | unique `(series_fingerprint, producer, ingest_key)`; rebuildable |
 | `benchmark_result` | immutable producer record for one attempt × one quantity | unique `(producer, ingest_key)`; indexed by `reported_coordinates_fingerprint` |
 
@@ -192,7 +192,7 @@ The use cases in [`docs/use-cases/`](../use-cases/README.md) and their [template
 
 ### 4.3 Fingerprints
 
-The **reported-coordinate fingerprint** preserves the complete tuple before any policy: top-level project/source, the exact `benchmark` identity, and the `coordinates` object of §5.2. It never contains row IDs, an estimator, the axis revision, or attempt/run keys.
+The **reported-coordinate fingerprint** preserves the complete tuple before any policy: top-level project/source, the exact `benchmark` identity, and the `coordinates` object of §5.2. It never contains row IDs, the quantity, an estimator, the axis revision, or attempt/run keys.
 
 ```text
 reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v2\0" + JCS(reported_coordinates))
@@ -205,7 +205,7 @@ Any other projection, such as a comparison profile (§5.5) or a sweep across ker
 ```text
 comparison_fingerprint = SHA-256("benchmark-comparison-v1\0" + identity_schema + "\0" + JCS(comparison_identity))
 estimator_fingerprint  = SHA-256("benchmark-estimator-v1\0" + JCS(estimator))
-series_fingerprint     = SHA-256("benchmark-series-v6\0" + comparison_fingerprint + "\0" + estimator_fingerprint)
+series_fingerprint     = SHA-256("benchmark-series-v7\0" + comparison_fingerprint + "\0" + quantity_name + "\0" + estimator_fingerprint)
 ```
 
 `JCS` is RFC 8785 canonical JSON. The server computes all fingerprints; canonical source URIs, number/string normalization, omitted values, estimator method versions, and identity schema definitions are part of the contract.
@@ -253,7 +253,7 @@ A **compound estimator** additionally declares semantic input roles and quantiti
 3. **Pair observations** by ordinal or pair key. Pairing needs equal counts, which is why the profiles require interleaved rounds and equal repetitions.
 4. **Apply the derivation rule per pair**, such as `max` of CPU and GPU time or the ratio of narwhals to native time. The results are the compound's observation batch, kept as structured observations with their ordinals, and the rule is declared next to them in `measurement.derivation` as an estimator at `input_level: observations`.
 5. **Apply an ordinary estimator** to that batch, `median` say, as the producer estimate. Policy may materialize other estimators from the same batch later.
-6. **Assemble coordinates**: those the inputs share, minus those they differ in such as `parameters.role`, plus the compound's own quantity. A same-attempt compound keeps the input `attempt_key`; a cross-attempt one gets a new attempt key in the same run.
+6. **Assemble coordinates**: those the inputs share, minus those they differ in such as `parameters.role`; the compound's own quantity goes in its measurement. A same-attempt compound keeps the input `attempt_key`; a cross-attempt one gets a new attempt key in the same run.
 7. **Ingest** as a normal result. The inputs are untouched.
 
 Because the inputs keep their batches, the pipeline runs identically at measurement time in the runner or later in the comparator, and the compound can be added retroactively across a project's whole history. The comparator has two outputs: a stored compound, ingested under its own producer name, which gets a series with one point per revision and is the form a tracked question such as "does the overhead stay low across commits" needs; or a value inside one comparison document, with no series, which is the form for a one-off question. Same inputs and the same versioned declaration land in the same series whoever computed it; a different rule or estimator parameter is a different series beside the old one, never a rewrite.
@@ -270,7 +270,7 @@ The indexed contract remains scalar: `median([cpu_times, gpu_times])` emits one 
 |---|---|
 | **Identity facts** | reported source, `coordinates`, `reported_coordinates_fingerprint`, subject `revision_key`; project and benchmark identity when not thin |
 | **Attempt grouping** | `attempt_key` |
-| **Outcome** | `status`, optional reason, optional quantitative constraint |
+| **Outcome** | quantity, `status`, optional reason, optional quantitative constraint |
 | **Producer evidence** | optional observation batch and immutable typed summaries |
 | **Method** | optional realized procedure JSON, including `round` within the run |
 | **Provenance** | producer/version, ingest/native/run/batch keys, caller labels, dirty tri-state flags and working-tree ids, references to input or anchor results, mapping version, timestamps, artifacts, payload URI/checksum |
@@ -308,7 +308,6 @@ Absence of a row means the variant was not reported. Telling a lost result from 
       "components": [{"role": "primary"}],
       "configuration": {"build_type": "release", "compiler": "clang-18"}
     },
-    "quantity": {"name": "wall-time", "unit": "s"},
     "protocol": {
       "name": "benchmark-time",
       "version": "v1",
@@ -328,6 +327,7 @@ Absence of a row means the variant was not reported. Telling a lost result from 
     }
   },
   "measurement": {
+    "quantity": {"name": "wall-time", "unit": "s"},
     "status": "success",
     "observations": [0.0371, 0.0364, 0.0363, 0.0370, 0.0368],
     "summaries": [
@@ -398,7 +398,6 @@ A thin local message (§4.1) from a contributor's laptop omits `project` and `be
         {"role": "numpy", "source": "https://github.com/numpy/numpy", "revision": "v2.0.0"}
       ]
     },
-    "quantity": {"name": "wall-time", "unit": "s"},
     "protocol": {
       "name": "timeit",
       "version": "v1",
@@ -411,6 +410,7 @@ A thin local message (§4.1) from a contributor's laptop omits `project` and `be
     "environment": {"schema": "local/v1", "identity": {"hostname": "rok-laptop"}, "system": {"runtime": {"python": "3.12"}}}
   },
   "measurement": {
+    "quantity": {"name": "wall-time", "unit": "s"},
     "status": "success",
     "observations": [0.000131, 0.000129, 0.000133, 0.000130, 0.000128]
   },

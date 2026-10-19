@@ -43,10 +43,6 @@
         "compiler": "clang-18"
       }
     },
-    "quantity": {
-      "name": "cpu-temperature",
-      "unit": "Cel"
-    },
     "protocol": {
       "probe": {
         "name": "hwmon",
@@ -78,6 +74,10 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "cpu-temperature",
+      "unit": "Cel"
+    },
     "status": "success",
     "observations": [
       { "value": 61.0, "ordinal": 0, "time": "2026-07-18T09:12:44Z" },

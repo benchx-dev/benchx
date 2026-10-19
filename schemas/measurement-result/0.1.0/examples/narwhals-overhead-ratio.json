@@ -38,11 +38,6 @@
         {"role": "pandas", "source": "https://github.com/pandas-dev/pandas", "revision": "v2.2.3"}
       ]
     },
-    "quantity": {
-      "name": "overhead-ratio",
-      "unit": "1",
-      "direction": "lower-is-better"
-    },
     "protocol": {
       "name": "timeit",
       "version": "v1",
@@ -64,6 +59,11 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "overhead-ratio",
+      "unit": "1",
+      "direction": "lower-is-better"
+    },
     "status": "success",
     "summaries": [
       {

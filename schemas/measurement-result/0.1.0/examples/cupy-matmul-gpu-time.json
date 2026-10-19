@@ -44,10 +44,6 @@
         "distribution": "wheel"
       }
     },
-    "quantity": {
-      "name": "gpu-time",
-      "unit": "s"
-    },
     "protocol": {
       "name": "cupyx-profiler-benchmark",
       "version": "v1",
@@ -89,6 +85,10 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "gpu-time",
+      "unit": "s"
+    },
     "status": "success",
     "observations": [
       {

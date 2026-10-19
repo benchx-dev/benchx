@@ -35,10 +35,6 @@
         }
       ]
     },
-    "quantity": {
-      "name": "wall-time",
-      "unit": "s"
-    },
     "protocol": {
       "name": "timeit",
       "version": "v1",
@@ -74,6 +70,10 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "wall-time",
+      "unit": "s"
+    },
     "status": "success",
     "observations": [
       0.000131,
