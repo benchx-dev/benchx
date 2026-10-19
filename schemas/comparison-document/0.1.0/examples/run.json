@@ -41,7 +41,7 @@
       "noise_source": "paired-rounds",
       "threshold": 0.0063,
       "verdict": "regressed",
-      "observed_context_differences": []
+      "unmatched_differences": []
     },
     {
       "workload": {

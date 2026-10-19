@@ -249,8 +249,8 @@
           "description": "Why the verdict is indeterminate, such as insufficient-history or duplicate-points.",
           "$ref": "#/$defs/token"
         },
-        "observed_context_differences": {
-          "description": "Observed-context keys whose values differ between target and reference.",
+        "unmatched_differences": {
+          "description": "Reported facts the identity policy or profile did not require to match, named by JSON Pointer into the reported coordinates, whose values differ between target and reference, such as /coordinates/environment/facts/os/kernel.",
           "type": "array",
           "uniqueItems": true,
           "items": {

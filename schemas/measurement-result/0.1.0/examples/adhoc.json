@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/benchx-cli",
     "version": "0.1.0",
@@ -39,8 +39,7 @@
       "name": "wall-time",
       "unit": "s"
     },
-    "comparison_context": {
-      "python": "3.12",
+    "method": {
       "protocol": {
         "name": "timeit",
         "version": "v1",
@@ -68,6 +67,11 @@
       "schema": "local/v1",
       "identity": {
         "hostname": "rok-laptop"
+      },
+      "facts": {
+        "runtime": {
+          "python": "3.12"
+        }
       }
     }
   },

@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/cupyx-adapter",
     "version": "1.3.0",
@@ -48,8 +48,7 @@
       "name": "gpu-time",
       "unit": "s"
     },
-    "comparison_context": {
-      "python": "3.12",
+    "method": {
       "protocol": {
         "name": "cupyx-profiler-benchmark",
         "version": "v1",
@@ -73,6 +72,17 @@
           "NVIDIA H100 80GB HBM3",
           "NVIDIA H100 80GB HBM3"
         ]
+      },
+      "facts": {
+        "os": {
+          "kernel": "6.8.0-45-generic"
+        },
+        "gpu": {
+          "driver": "550.90.07"
+        },
+        "runtime": {
+          "python": "3.12"
+        }
       }
     },
     "resource_selection": {
@@ -143,11 +153,6 @@
         "source": "producer"
       }
     ]
-  },
-  "observed_context": {
-    "kernel": "6.8.0-45-generic",
-    "nvidia_driver": "550.90.07",
-    "gpu_clock_mhz": 1980
   },
   "procedure": {
     "attempted_repetitions": 10,

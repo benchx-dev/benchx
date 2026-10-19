@@ -141,7 +141,7 @@ possible ensures reliability.
 - **Comparability key:** records must *differ* in the code version (the revision)
   and *agree* on everything under code identity.
 - **Validation invariants:** all records in a comparison share all of
-  `project_id`, `name`, `parameters`, `environment`, `observed_context`.
+  `project_id`, `name`, `parameters`, `environment` (identity and facts).
   The `environment` is compared by its hash.
 
 ### 9. Storage and lifecycle
@@ -173,7 +173,7 @@ possible ensures reliability.
 ### 12. Open questions
 
 1. For storing interleaving positions / other data, do we create pair
-   identities under the comparison context?
+   identities under the method?
 2. For the future CI path, do we need a shared store for validation?
 3. Should `--compare` allow a dirty tree as a local-only comparison keyed on
    working-tree ids, so a contributor can compare uncommitted work on the

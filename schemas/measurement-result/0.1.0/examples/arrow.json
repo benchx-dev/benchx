@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/benchmark-adapter",
     "version": "4.0",
@@ -47,8 +47,7 @@
       "name": "wall-time",
       "unit": "s"
     },
-    "comparison_context": {
-      "python": "3.12",
+    "method": {
       "protocol": {
         "name": "benchmark-time",
         "version": "v1",
@@ -70,6 +69,17 @@
         "runner": "bench-01",
         "cpu": "AMD EPYC 7R13",
         "cores": 8
+      },
+      "facts": {
+        "os": {
+          "kernel": "6.8.0-31-generic"
+        },
+        "libc": {
+          "version": "2.39"
+        },
+        "runtime": {
+          "python": "3.12"
+        }
       }
     }
   },
@@ -110,10 +120,6 @@
         "source": "producer"
       }
     ]
-  },
-  "observed_context": {
-    "kernel": "6.8.0-31-generic",
-    "glibc": "2.39"
   },
   "procedure": {
     "inner_iterations": 100,

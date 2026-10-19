@@ -1,6 +1,6 @@
 # Prototype Design
 
-**Status:** Draft for review
+**Status:** Draft for review. Updated for the placement revision of `benchmark-result-schema.md` (result `schema_version` 6); the prototype code still emits version 5 and has not been changed to match.
 **Companion to:** `prototype-scope.md` (what's in the slice); `benchmark-result-schema.md` (the result); `runner-schema.md` and `schemas/work-order/0.1.0` (the work order); `harness-adapter.md`; `benchmark-environments.md`; `comparator.md`; `runner.md`; `system-decomposition.md` §3.4 (the workbench); `measurement-result-parquet.md` (#30, the result row)
 
 ## 1. Shape
@@ -170,7 +170,7 @@ criterion 1 holds by construction.
      "reference_estimate": 0.0455, "effect": 0.024,
      "noise": 0.0021, "noise_source": "paired-rounds",
      "verdict": "regressed", "reason": null,
-     "observed_context_differences": []}
+     "unmatched_differences": []}
   ],
   "missing": [{"workload": "…", "quantity": "wall-time", "side": "contender"}],
   "failed_invariants": [],
@@ -217,7 +217,7 @@ and the native JSON are kept as provenance artifacts. Its translating half follo
 `harness-adapter.md` §6.1: iteration rows become observations, aggregate rows
 producer summaries, encoded names and user counters are split only under
 `parameter_rules` (none in the prototype, so names stay whole and counters go
-to observed context), and a planned case absent from the output is an `error`
+to environment facts), and a planned case absent from the output is an `error`
 result with reason `harness.no-output` (§5 step 5). Keys follow §4.6: one
 `attempt_key` per case per invocation, and an `ingest_key` whose attempt
 discriminator is the slot, since one run holds an attempt of each variant per
@@ -229,8 +229,9 @@ landing where its §3.4 puts it:
 - **Snapshot** (§3.1, the part readable without privileges): host name, CPU
   model, and core count as environment identity under `machine/v1`, also in
   ad hoc mode, so both profiles have a full environment identity (schema
-  §5.5); OS, kernel, libc, governor, and load as observed context; an
-  allowlist of thread-control environment variables as observed context,
+  §5.5); OS, kernel, libc, and governor as environment facts, and load as a
+  `load-average` condition measurement; an allowlist of thread-control
+  environment variables as the environment fact `process.environment`,
   which is the allowlist of `benchmark-environments.md` §3.1.
   The `env` key reads differently by adapter. Google Benchmark takes the
   runner's own environment and omits `env` when no allowlisted variable is set.
@@ -249,19 +250,18 @@ landing where its §3.4 puts it:
   `CMakeCache.txt` in the build directory: build type, compiler and version,
   flags, and the project's own options (cache entries prefixed with the
   upper-cased project name, `ARROW_*` for Arrow), never paths, so two directories configured
-the same way report the same configuration. Nobody declared these, so the detected
-  values are recorded as the intended ones in `coordinates.subject.configuration`
-  (§3.4). This is what makes the hardened and plain directories differ in
+the same way report the same configuration. They are detected, so they are
+  recorded as read in `coordinates.subject.configuration` (§3.4). This is what makes the hardened and plain directories differ in
   coordinates, which the `environments` profile requires.
   The pyperf adapter's `python_cflags` is the exception to "never paths": it is
-  recorded verbatim in `comparison_context.runtime`, as `harness-adapter.md` §6.8
+  recorded verbatim in `environment.facts.runtime`, as `harness-adapter.md` §6.8
   has it, so the same Python build installed under two prefixes reports different
-  flags (conda adds its `-isystem` and `-fdebug-prefix-map` paths) and lands in
-  different series.
+  flags (conda adds its `-isystem` and `-fdebug-prefix-map` paths) and, because
+  the default identity policy matches runtime facts, lands in different series.
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
-  land in `observed_context.setup` and enter no identity.
+  land in `environment.facts.setup`, which the default identity policy ignores.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
 (`detected`, `declared`, or a plugin name). The prototype does not record it
@@ -363,8 +363,8 @@ varying coordinate:
 
 | Profile | Varying coordinate | `--baseline` names | Sides must agree on |
 |---|---|---|---|
-| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment, comparison context |
-| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment, comparison context |
+| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment identity, method |
+| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment identity, method |
 
 Before any verdict, the eligibility guard (§3) checks the profile's
 invariants over the run: exactly two sides that differ only in the varying

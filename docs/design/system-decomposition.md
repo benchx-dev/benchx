@@ -71,7 +71,8 @@ serves facts.
 - One adapter per harness (Google Benchmark, ASV, JMH, pytest-benchmark, …),
   following the schema's mapping rules: samples become observations, aggregate
   statistics become typed summaries, harness metadata is split into case
-  parameters, comparison context, observed context, procedure, and provenance.
+  parameters, method, environment facts, procedure, and provenance; sampled
+  states such as load become condition measurements.
 - Separates counters that describe the workload (case parameters) from those
   that describe the measurement (procedure).
 - Emits one result per quantity: a run that measures wall time, GPU time, and
@@ -94,8 +95,8 @@ harness did not report.
   thread caps, CPU pinning, device selection and synchronization, warmup and
   JIT state. It verifies that the hardware and conditions the order requests
   are present, and refuses the run when they are not. What it does not control,
-  such as machine tuning, it records as observed context so no setting is lost
-  from results.
+  such as machine tuning, it records as environment facts, and states such as
+  temperature as condition measurements, so no setting is lost from results.
 - Captures identity honestly: machine, build configuration, compiler, source
   revision, dirty working tree. A result that cannot state where it came from
   is a defect.
@@ -262,7 +263,7 @@ project does about a change (that is policy, expressed in alerts and review).
   human to act on.
 - Respects annotations: an acknowledged, accepted change resets expectations
   going forward instead of firing forever.
-- Uses observed context to help separate "the code changed" from "the
+- Uses environment facts and condition measurements to help separate "the code changed" from "the
   environment changed."
 
 **Does not:** deliver notifications or track who was told; it produces

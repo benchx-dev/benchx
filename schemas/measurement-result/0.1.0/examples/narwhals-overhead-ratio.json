@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/narwhals-bench",
     "version": "0.4.0",
@@ -43,8 +43,7 @@
       "unit": "1",
       "direction": "lower-is-better"
     },
-    "comparison_context": {
-      "python": "3.12",
+    "method": {
       "protocol": {
         "name": "timeit",
         "version": "v1",
@@ -60,6 +59,9 @@
         "runner": "ci-01",
         "cpu": "AMD EPYC 7R13",
         "cores": 4
+      },
+      "facts": {
+        "runtime": {"python": "3.12"}
       }
     }
   },

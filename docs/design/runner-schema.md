@@ -18,9 +18,9 @@ Each schema rule below traces to a principle in `runner.md` or a rule in `benchm
 
 1. **Work orders are documents, not calls.** A work order is plain JSON with a `schema_version`, a `work_order_id`, and a content hash. It can be written by hand, emitted by a scheduler or CI job, stored, and replayed. The runner reads nothing else.
 2. **Self-contained means resolved.** Everything that changes the run is in the order or in a policy it references by name *and* version. Ambiguous references such as "latest" or a bare branch name are allowed only in a draft and resolved to fixed values before execution; the resolved order is what gets hashed and cited.
-3. **No new result fields.** The runner adds nothing to the measurement-result schema. What it captures goes into slots that already exist: `coordinates.environment`, `coordinates.subject.configuration`, `observed_context`, `procedure`, and `provenance`.
+3. **No new result fields.** The runner adds nothing to the measurement-result schema. What it captures goes into slots that already exist: `coordinates.environment` (identity and facts), `coordinates.subject.configuration`, `procedure`, and `provenance`, plus sibling results for the condition measurements it takes.
 4. **The work order is the run manifest.** `benchmark-result-schema.md` §5.1 leaves "lost vs. never planned" to the runner design. Here the resolved order lists every case the run plans, so a missing result can be told apart from one that was never requested.
-5. **Every observation says whether it was available.** A condition the runner tried to observe but could not read is recorded as `unavailable`, never dropped. "No temperature on this VM" and "forgot to record temperature" look different.
+5. **Every observation says whether it was available.** A fact the runner tried to read but could not is recorded as `null`, and a condition it could not measure as a `skipped` measurement with reason `probe-unavailable`; neither is dropped. "No temperature on this VM" and "forgot to record temperature" look different.
 
 ## 3. Work order
 
@@ -40,10 +40,10 @@ A work order (`benchx/work-order/0.1.0`) has four required groups matching `runn
 | `benchmark` | object | no | at what | `{source, revision}` naming where the benchmark suite's own code lives, when different from `target` (§3.3, added here to close a gap) | top-level `benchmark.source`, `benchmark.revision` |
 | `components[]` | array | no | at what | Pinned non-primary components `{name, role, source, revision}` | `coordinates.subject.components` |
 | `build` | object | no | how | `{profile, type, compiler, flags[], options{}}`: the **declared** configuration of the prebuilt target, for facts the runner cannot read from it. Never an instruction to build | `coordinates.subject.configuration` |
-| `precision` | object | yes | how | `{repetitions, calibration, warmup}`, spelled per Appendix B (`repetitions` a bare int or `{mode: fixed, levels[]}`; `calibration.mode`: `adaptive` + `minimum_sample_seconds`, or `fixed` + `n_iterations`; `warmup.mode`: `none`, `count` + `n_warmup`, or `time` + `seconds`) | intended: `comparison_context`; realized: `procedure` |
-| `schedule` | object | no | how | `{kind: sequential \| alternating \| random, seed}` across sides | `comparison_context.protocol.schedule`; realized `procedure.slot` |
+| `precision` | object | yes | how | `{repetitions, calibration, warmup}`, spelled per Appendix B (`repetitions` a bare int or `{mode: fixed, levels[]}`; `calibration.mode`: `adaptive` + `minimum_sample_seconds`, or `fixed` + `n_iterations`; `warmup.mode`: `none`, `count` + `n_warmup`, or `time` + `seconds`) | as executed: `method.protocol`; realized: `procedure`; the order itself: provenance artifact |
+| `schedule` | object | no | how | `{kind: sequential \| alternating \| random, seed}` across sides | `method.protocol.schedule`; realized `procedure.slot` |
 | `timeouts` | object | yes | how | `{case_s, order_s}`, both positive | exceeded: `censored` or `error` result |
-| `environment_policy` | `{name, version}` | no | how | Named policy (§4); absent means the runner applies none and only records observed context, the default `benchmark-environments.md`'s laptop scenario describes | policy identity in `coordinates.environment.identity` |
+| `environment_policy` | `{name, version}` | no | how | Named policy (§4); absent means the runner applies none and only records environment facts and condition measurements, the default `benchmark-environments.md`'s laptop scenario describes | policy identity in `coordinates.environment.identity` |
 | `run_key` | token | yes | for whom | Groups this order with sibling orders in one comparison | `provenance.run_key` |
 | `round` | integer | no | for whom | Position in an interleaved run; set by the run author | `procedure.round` |
 | `labels` | string map | no | for whom | Caller labels, e.g. `{"env": "numpy-2.0"}` | `provenance.labels` |
@@ -95,13 +95,13 @@ Where results are delivered (store URL, local file) is an invocation argument, n
 
 A policy (`benchx/environment-policy/0.1.0`) is a named, versioned list of rules. Each rule has a **check**, a **tier**, parameters, and an `on_fail` action. The tier sets both what the runner does and where the fact lands in the result.
 
-| Tier | Runner action | On failure | Lands in result as | Enters identity? |
+| Tier | Runner action | On failure | Lands in result as | Default role |
 |---|---|---|---|---|
-| `enforce` | Sets the condition on the launched process before execution; never changes machine state | Refuse the order | `coordinates.environment.identity` (policy name + version + enforced values) | Yes |
-| `verify` | Checks before, and optionally after, execution | `refuse` or `warn`, per rule | Result in `observed_context`; failures in `quality.warnings` | No |
-| `record` | Observes only | Never fails; unreadable = `unavailable` | `observed_context` | No |
+| `enforce` | Sets the condition on the launched process before execution; never changes machine state | Refuse the order | `coordinates.environment.identity` (policy name + version + enforced values) | match |
+| `verify` | Checks before, and optionally after, execution | `refuse` or `warn`, per rule | Value read in `environment.facts` (a setting) or a condition measurement (a state, such as quiescence); failures in `quality.warnings` | ignore |
+| `record` | Observes only | Never fails; unreadable = `null` fact or `skipped` measurement | `environment.facts` or condition measurements (§5.3) | ignore |
 
-Changing a policy's version changes environment identity, so it splits the series: the "series-splitting event, not a silent change" of `runner.md` §5.
+The last column is the default identity policy's choice (`benchmark-result-schema.md` §4.3), not a property of the tier; a project can match on a verified fact, such as the governor, in its own policy. Changing a policy's version changes environment identity, so under the default policy it splits the series: the "series-splitting event, not a silent change" of `runner.md` §5.
 
 ### 4.1 Core check vocabulary
 
@@ -131,7 +131,7 @@ Only conditions of the launched process (`threads.max`, `cpu.affinity`, `gpu.dev
 
 ## 5. Run context
 
-The runner fills existing measurement-result fields and defines no new ones. What it does define are two conventions for the open objects: an environment identity schema and an observed-context key set.
+The runner fills existing measurement-result fields and defines no new ones. What it does define are two conventions: an environment identity schema with its fact keys, and a set of condition measurements.
 
 ### 5.1 Identity and revision
 
@@ -147,35 +147,40 @@ The runner fills existing measurement-result fields and defines no new ones. Wha
 
 ### 5.2 Environment identity: `benchx/env-identity/0.1.0`
 
-This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. A fact goes in `identity` if a change should split history, and in `metadata` otherwise.
+This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. `identity` holds the fields that name the machine and key its environment record; `facts` holds everything else read about its system (§5.3). Neither placement decides what splits history: the default identity policy matches identity and ignores facts other than `runtime`, and a project overrides that per scope.
 
 - **identity:** `machine_id` (salted hash of `/etc/machine-id` or equivalent), `cpu.model`, `cpu.logical_cores`, `memory_bytes`, `gpus[] {model, memory_bytes}`, `os.family`, `virtualization` (`bare-metal` | `vm` | `container` | `wsl`), `policy` (`name@version`), `enforced{}` (the values actually applied)
-- **metadata:** hostname, GPU UUIDs, BIOS/firmware strings
+- **facts:** hostname, GPU UUIDs, BIOS/firmware strings, and the system facts of §5.3
 
-GPU UUIDs stay out of identity, because swapping a card of the same model shouldn't split history. The device each result used goes in `coordinates.resource_selection`.
+GPU UUIDs are facts rather than identity, so a card swapped for one of the same model still names the same machine. The device each result used goes in `coordinates.resource_selection`.
 
-### 5.3 Observed context: `benchx/observed-context/0.1.0`
+### 5.3 System facts and condition measurements
 
-`observed_context` is an open object; the runner fills it using this convention. Every key holds an **observation record**, never a bare value:
+The runner reads two kinds of thing about the machine, and they land in two places (`benchmark-result-schema.md` §4.2).
 
-```json
-{"value": 71.0, "unit": "Cel", "status": "observed", "when": "sampled", "source": "hwmon/coretemp"}
-```
+**System facts** are constitutive and fixed for the attempt. They go in `coordinates.environment.facts`, nested by group, and are copied to every result of the attempt. A fact the runner tried to read and could not is `null`; a fact it did not try to read is absent.
 
-- `status`: `observed` | `unavailable` | `error`. An `unavailable` record has no `value`.
-- `when`: `before` | `after` | `sampled`. A sampled record's `value` is `{min, max, mean, n}`.
-- Units are UCUM, as in the result schema.
+| Fact path | Typical source (Linux) |
+|---|---|
+| `os.kernel`, `os.release` | `uname`, `/etc/os-release` |
+| `libc.name`, `libc.version` | `ldd --version`, `gnu_get_libc_version` |
+| `cpu.microcode` | `/proc/cpuinfo` |
+| `cpu.governor`, `cpu.boost`, `cpu.smt` | cpufreq and SMT sysfs |
+| `gpu.driver`, `gpu.uuids`, `gpu.clocks_locked_mhz` | NVML or the vendor equivalent |
+| `container.image_digest` | runtime |
+| `runtime.*` | the interpreter or VM the harness runs on |
+| `process.environment`, `process.cgroup` | the launched process, allowlisted (`benchmark-environments.md` §3.1) |
 
-| Key | Typical source (Linux) | `when` |
-|---|---|---|
-| `os.kernel`, `libc.version`, `cpu.microcode` | `uname`, `ldd`, `/proc/cpuinfo` | before |
-| `cpu.governor`, `cpu.freq_mhz` | cpufreq sysfs | before, sampled |
-| `load.avg_1m` | `/proc/loadavg` | before, after |
-| `thermal.temperature` | hwmon / thermal zones; NVML for GPUs | sampled |
-| `thermal.throttle_events` | throttle counters, after minus before; NVML throttle reasons | after |
-| `container.image_digest` | runtime | before |
+**Condition measurements** are states the machine passes through. Each is a sibling result for its own quantity, sharing the measurand's `attempt_key`, with the probe and how it was read in `method.protocol.probe` (`benchmark-result-schema.md` §4.4). A probe that cannot read on this machine yields status `skipped` with reason `probe-unavailable`.
 
-Throttle evidence is recorded separately from temperature. It's the signal that can explain a slower result, and it's available on some machines that don't expose temperature.
+| Quantity | Unit | Typical source (Linux) | `probe.sampling.mode` |
+|---|---|---|---|
+| `cpu-frequency` | `MHz` | cpufreq sysfs | `before-attempt`, `interval` |
+| `load-average` | `1` | `/proc/loadavg` | `before-attempt`, `after-attempt` |
+| `cpu-temperature`, `gpu-temperature` | `Cel` | hwmon or thermal zones; NVML for GPUs | `interval` |
+| `throttle-events` | `1` | throttle counters, after minus before; NVML throttle reasons | `delta` |
+
+Throttle evidence is measured separately from temperature. It's the signal that can explain a slower result, and it's available on some machines that don't expose temperature. Because condition measurements are results, an identity policy can restrict a series by them, such as keeping only attempts with zero `throttle-events` (`benchmark-result-schema.md` §4.3).
 
 ## 6. Outcome statuses
 
@@ -191,7 +196,7 @@ Every `plan` entry ends as exactly one result, using the five statuses the resul
 | Harness crashed mid-suite (remaining entries) | execute | `error` | `harness-crashed` | log in `provenance.artifacts` |
 | Adapter could not translate output | emit | `error` | `adapter-error` | raw output as artifact |
 | Target missing or not identifiable (no build directory, checksum mismatch) | identify target | `error` (every entry) | `target-unavailable` | detail in `provenance.info` |
-| Policy check failed with `refuse` | prepare | `error` (every entry) | `policy-unsatisfied-<check>` | check result in `observed_context` |
+| Policy check failed with `refuse` | prepare | `error` (every entry) | `policy-unsatisfied-<check>` | value read in `environment.facts`, or the condition measurement |
 | `timeouts.order_s` exceeded (unstarted entries) | any | `error` | `timeout-order` | — |
 | Policy check failed with `warn` | prepare / after | unchanged | — | `quality.warnings` entry |
 | Runner process killed | any | no result | — | resolved order shows the gap |
@@ -209,7 +214,8 @@ All three schemas use the same scheme as `schemas/measurement-result/0.1.0`: sem
 | Work order | `schemas/work-order/0.1.0/` | citing the resolved order from results |
 | Environment policy | `schemas/environment-policy/0.1.0/` | detecting a policy edited without a version bump |
 | Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema` |
-| Observed-context record | `schemas/observed-context-record/0.1.0/` | not hashed — validates the `{value, status, when, source}` shape of one `observed_context` entry (§5.3); referenced by convention, not by a `coordinates` field |
+| Observed-context record (retired) | `schemas/observed-context-record/0.1.0/` | not hashed; retired with result `schema_version` 6, which removes `observed_context`. Its schema description maps each field to its new place |
+| Identity policy | `schemas/identity-policy/0.1.0/` | `identity_schema` names the projection and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
 
 Orders and policies are hashed the same way the result schema hashes its fingerprints:
 
@@ -263,15 +269,9 @@ A contributor measures an uncommitted Parquet change on a WSL2 laptop: the local
       "schema": "benchx/env-identity/0.1.0",
       "identity": {"machine_id": "sha256:3e1f...", "cpu": {"model": "Intel Core i7-1260P", "logical_cores": 16},
                    "memory_bytes": 17179869184, "os": {"family": "linux"}, "virtualization": "wsl",
-                   "policy": "laptop-default@1.0.0", "enforced": {"threads.max": 1}}
+                   "policy": "laptop-default@1.0.0", "enforced": {"threads.max": 1}},
+      "facts": {"os": {"kernel": "6.6.87.2-microsoft-standard-WSL2"}, "cpu": {"governor": null}}
     }
-  },
-  "observed_context": {
-    "os.kernel": {"value": "6.6.87.2-microsoft-standard-WSL2", "status": "observed", "when": "before"},
-    "load.avg_1m": {"value": 0.42, "unit": "1", "status": "observed", "when": "before"},
-    "cpu.governor": {"status": "unavailable", "when": "before"},
-    "thermal.temperature": {"status": "unavailable", "when": "sampled"},
-    "thermal.throttle_events": {"status": "unavailable", "when": "after"}
   },
   "provenance": {
     "run_key": "local:parquet-snappy-2026-09-23",
@@ -288,14 +288,14 @@ A contributor measures an uncommitted Parquet change on a WSL2 laptop: the local
 }
 ```
 
-WSL2 exposes no governor, temperature, or throttle counters, so all three are recorded as `unavailable`. The dirty tree makes any comparison using this result local-only (`benchmark-result-schema.md` §5.5).
+The runner also emits sibling results under the same `attempt_key`: `load-average` with one observation of `0.42` (`before-attempt`), and `cpu-temperature` and `throttle-events` with status `skipped` and reason `probe-unavailable`. WSL2 exposes no governor, temperature, or throttle counters, so the governor fact is `null` and the two probes are skipped. The dirty tree makes any comparison using this result local-only (`benchmark-result-schema.md` §5.5).
 
 ## 9. Open questions
 
 1. **Multi-node benchmarks.** 0.1.0 targets one node per order. Should a later version allow a node group (`target.nodes[]` plus a coordinator role), or should a distributed benchmark stay a harness concern behind a single coordinator runner?
 2. **Who stores resolved orders?** The order doubles as the run manifest, but the runner is store-unaware. Does the runner upload the order as an artifact alongside results, or does the requester (scheduler, workbench) keep it?
 3. **Case listing failure before the plan exists.** §3.2 lets the runner expand `plan` by listing cases from the prebuilt target for harnesses that enumerate them only that way. If listing fails, or the target is unidentifiable, there are no plan entries to attach `error` results to. Does the runner emit a single order-level `target-unavailable` result, and under which workload coordinates?
-4. **Should the observation-record convention move into the result schema?** Today `observed_context` is an open object. Making `{value, status, when, source}` normative there would let every producer, not just this runner, mark facts `unavailable`.
+4. ~~**Should the observation-record convention move into the result schema?**~~ Superseded by the placement revision: `observed_context` is removed. An unreadable fact is `null` in `environment.facts`, and an unreadable condition is a `skipped` measurement, so every producer can mark a gap without a separate record shape. Where a fact's source goes is `benchmark-result-schema.md` §9 question 7.
 5. **Sampling overhead.** Sampling temperature and frequency during execution can itself disturb the measurement. What default interval (e.g. 1 s) and core placement keep it negligible, and should the policy be able to turn sampling off?
 6. **Delivery in the order?** This draft makes the result destination an invocation argument. Are there cases, such as CI, where the order should carry it?
 7. **Refusal as results.** §4.2 turns a policy refusal into one `error` result per plan entry, which goes beyond `runner.md` §6's "refused before execution". Keep that, or report refusals only to the requester?

@@ -128,10 +128,12 @@ that every result of both sides has a `clean` subject and benchmark tree
 (`clean-tree`, UC-03 §10). A run that fails an invariant is not compared: the comparison document records the failed invariant
 and contains no verdicts for the units it affects.
 
-Excluded points and their reasons remain visible in the output. Changes in
-observed context do not split a series by themselves, but differences between
-the target and its reference are carried as caveats so that a kernel, load, or
-other recorded condition is not hidden from the reader.
+Excluded points and their reasons remain visible in the output. Facts the
+identity policy or profile does not require to match do not split a series, but
+those that differ between the target and its reference are listed as unmatched
+differences, by JSON Pointer, so that a kernel upgrade or another recorded fact
+is not hidden from the reader. Condition measurements of the two sides, such as
+load or temperature, are reported beside the verdict for the same reason.
 
 An intentional comparison across an identity difference outside a single run
 requires the store to materialize the series under an explicit identity policy
@@ -196,7 +198,7 @@ evaluation it records:
   version, and complete configuration;
 - the reference estimate, effect measure and value, noise and its source,
   threshold or limits, evidence counts, and verdict with reason; and
-- exclusions, failed profile invariants, observed-context differences, quality
+- exclusions, failed profile invariants, unmatched differences, quality
   caveats, and missing target results from a batch request.
 
 The document is renderable as a reviewer-speed summary ("these target results

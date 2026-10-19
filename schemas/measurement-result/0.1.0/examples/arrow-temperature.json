@@ -1,0 +1,111 @@
+{
+  "schema_version": 6,
+  "producer": {
+    "name": "example.org/benchmark-adapter",
+    "version": "4.0",
+    "mapping_version": "native-to-benchx/v5"
+  },
+  "ingest_key": "ci-1234:parquet-read/snappy:cpu-temperature",
+  "attempt_key": "ci.example.org/runs/ci-1234/attempts/parquet-read-snappy-1",
+  "project": "arrow",
+  "source": {
+    "uri": "https://github.com/apache/arrow",
+    "type": "git"
+  },
+  "revision": {
+    "key": "02addad7a1f3ce7d6de6a6230ec4c17828cb8f52"
+  },
+  "benchmark": {
+    "source": {
+      "uri": "https://github.com/example/arrow-benchmarks",
+      "type": "git"
+    },
+    "revision": {
+      "key": "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e"
+    }
+  },
+  "coordinates": {
+    "workload": {
+      "name": "parquet-read",
+      "parameters": {
+        "compression": "snappy"
+      }
+    },
+    "subject": {
+      "name": "apache-arrow",
+      "components": [
+        {
+          "role": "primary"
+        }
+      ],
+      "configuration": {
+        "build_type": "release",
+        "compiler": "clang-18"
+      }
+    },
+    "quantity": {
+      "name": "cpu-temperature",
+      "unit": "Cel"
+    },
+    "method": {
+      "protocol": {
+        "probe": {
+          "name": "hwmon",
+          "sensor": "coretemp/package",
+          "sampling": {
+            "mode": "interval",
+            "seconds": 1
+          }
+        }
+      }
+    },
+    "environment": {
+      "schema": "machine/v1",
+      "identity": {
+        "runner": "bench-01",
+        "cpu": "AMD EPYC 7R13",
+        "cores": 8
+      },
+      "facts": {
+        "os": {
+          "kernel": "6.8.0-31-generic"
+        },
+        "libc": {
+          "version": "2.39"
+        },
+        "runtime": {
+          "python": "3.12"
+        }
+      }
+    }
+  },
+  "measurement": {
+    "status": "success",
+    "observations": [
+      { "value": 61.0, "ordinal": 0, "time": "2026-07-18T09:12:44Z" },
+      { "value": 63.5, "ordinal": 1, "time": "2026-07-18T09:12:45Z" },
+      { "value": 64.0, "ordinal": 2, "time": "2026-07-18T09:12:46Z" },
+      { "value": 64.5, "ordinal": 3, "time": "2026-07-18T09:12:47Z" }
+    ]
+  },
+  "procedure": {
+    "duration_seconds": 3.4
+  },
+  "provenance": {
+    "run_key": "ci.example.org/runs/ci-1234",
+    "started_at": "2026-07-18T09:12:44Z",
+    "subject_dirty": "clean",
+    "subject_tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "benchmark_dirty": "dirty",
+    "benchmark_tree": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "runner": {
+      "name": "example-runner",
+      "version": "2.1"
+    }
+  },
+  "quality": {
+    "warnings": [
+      "dirty-benchmark-tree"
+    ]
+  }
+}

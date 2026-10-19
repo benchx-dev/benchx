@@ -26,9 +26,11 @@ identical; only precision settings and environment strictness differ.
    target or declared in the work order; the runner does not choose it.
 3. **Control the process, record the machine.** Settings of the process the
    runner launches (thread caps, pinning, device selection, environment
-   variables) it enforces and records. Conditions it does not control (kernel,
-   governor, load, temperature) it snapshots as observed context, and it
-   checks the ones the work order requires (hardware present, quiescence).
+   variables) it enforces and records. What it does not control it records
+   too: facts about the machine (kernel, libc, governor setting) as environment
+   facts, and states it passes through (load, temperature, throttling) as
+   condition measurements. It checks the ones the work order requires
+   (hardware present, quiescence).
 4. **The harness measures; the runner surrounds.** Measurement itself belongs
    to the native harness and its adapter. The runner prepares, invokes,
    captures, and reports.
@@ -84,8 +86,8 @@ identify target → prepare environment → execute → capture context → emit
    work-order filters, with the requested precision.
 4. **Capture context.** Assemble identity and conditions: machine and
    environment identity, build configuration, source revision (including
-   dirty state), and the observed-context snapshot (kernel, versions,
-   frequency governor, load, temperature where available).
+   dirty state), environment facts (kernel, versions, frequency governor),
+   and condition measurements (load, temperature where available).
 5. **Emit results.** Combine adapter output with captured context into schema
    results — one per case × quantity, including failures and skips — and
    deliver them: to the store's ingest API, to a local result file, or both.
@@ -105,12 +107,12 @@ work order:
   machine state the runner cannot set (governor, boost, SMT), with `refuse` or
   `warn` per rule;
 - what to **record**: everything enforced and verified, plus the
-  observed-context snapshot.
+  environment facts and condition measurements.
 
-The policy's identity-relevant parts land in the result's comparison context
-and environment identity, so "measured under policy X" is visible and
-comparable. Loosening or tightening a policy is therefore a series-splitting
-event, not a silent change.
+The policy's name, version, and enforced values land in the result's
+environment identity, so "measured under policy X" is visible and comparable.
+Under the default identity policy, loosening or tightening a policy is
+therefore a series-splitting event, not a silent change.
 
 ## 6. Failure handling
 

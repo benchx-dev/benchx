@@ -1,0 +1,38 @@
+{
+  "identity_schema": "arrow/identity/v4",
+  "project": "arrow",
+  "description": "Arrow's policy: the default, benchmark revisions mapped to a declared suite version, an allocator suite that fixes the C library, and a Parquet suite that only keeps unthrottled attempts.",
+  "default": "match",
+  "rules": [
+    {
+      "scope": {},
+      "paths": {
+        "/coordinates/environment/facts": "ignore",
+        "/coordinates/environment/facts/runtime": "match",
+        "/source/uri": { "normalize": { "rule": "canonical-uri" } },
+        "/benchmark/revision/key": {
+          "normalize": {
+            "rule": "map",
+            "map": {
+              "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e": "suite-v3",
+              "a0f3c2d1e4b5a6978c8d9e0f1a2b3c4d5e6f7a8b": "suite-v3"
+            }
+          }
+        }
+      }
+    },
+    {
+      "scope": { "workload": "alloc-*" },
+      "description": "The allocator is part of what these workloads measure.",
+      "paths": {
+        "/coordinates/environment/facts/libc/version": { "normalize": { "rule": "version-prefix", "depth": 2 } }
+      }
+    },
+    {
+      "scope": { "workload": "parquet-*", "quantity": "wall-time" },
+      "conditions": [
+        { "quantity": "cpu-throttle-events", "estimator": "max", "op": "eq", "value": 0 }
+      ]
+    }
+  ]
+}

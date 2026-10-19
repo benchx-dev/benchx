@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:measurement-result:0.1.0",
   "title": "BenchX measurement result ingest object",
-  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message.",
-  "$comment": "Rules the schema cannot express and the server enforces at ingest: the primary subject component's source, when present, equals the top-level source URI; a quantity's unit never changes once used in a project; at most one estimate summary per estimator declaration; results sharing an attempt_key agree on the fields listed in section 5.3; identical (producer, ingest_key) payloads are idempotent and differing ones conflict; UCUM unit syntax; interval lower bounds not exceeding upper bounds; completed_repetitions never exceeding attempted_repetitions, and likewise completed never exceeding attempted at each repetition level; exactly one provenance.references entry per compound input role; comparison profiles (section 5.5) are checked by the comparator, not here. A result without project or benchmark is thin (section 4.1): valid, comparable within its run, and joinable to tracked series only through an approved mapping.",
+  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message. Coordinates are constitutive facts about the attempt; conditions the attempt passes through, such as temperature or load, are sibling results sharing attempt_key. Which facts a comparison fixes is decided by identity policy (schemas/identity-policy/0.1.0), never by where a fact is placed here.",
+  "$comment": "Rules the schema cannot express and the server enforces at ingest: the primary subject component's source, when present, equals the top-level source URI; a quantity's unit never changes once used in a project; at most one estimate summary per estimator declaration; results sharing an attempt_key agree on the fields listed in section 5.3, including environment facts; identical (producer, ingest_key) payloads are idempotent and differing ones conflict; UCUM unit syntax; interval lower bounds not exceeding upper bounds; completed_repetitions never exceeding attempted_repetitions, and likewise completed never exceeding attempted at each repetition level; exactly one provenance.references entry per compound input role; comparison profiles (section 5.5) are checked by the comparator, not here. A result without project or benchmark is thin (section 4.1): valid, comparable within its run, and joinable to tracked series only through an approved mapping.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,7 +20,7 @@
   "properties": {
     "schema_version": {
       "description": "Message contract version this object conforms to.",
-      "const": 5
+      "const": 6
     },
     "producer": {
       "description": "Stable, namespaced identity of the adapter or harness that produced this message, plus its software and mapping versions. Only the name is part of the idempotency key.",
@@ -67,10 +67,10 @@
       }
     },
     "coordinates": {
-      "description": "Reported coordinates: what was measured and under which conditions. Fingerprinted as reported; identity policy projects them into comparison identity.",
+      "description": "Reported coordinates: constitutive facts about the attempt, meaning what was measured, by which method, on which system. A coordinate is a fact read from the attempt as it ran, not a request (intent lives in the work order) and not a statement that comparisons must match on it (that is identity policy). Fingerprinted as reported; identity policy projects them into comparison identity. A condition the system passes through during the attempt, such as temperature, load, or clock frequency, is not a coordinate: it is a sibling result for its own quantity, sharing attempt_key.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["workload", "subject", "quantity", "comparison_context", "environment"],
+      "required": ["workload", "subject", "quantity", "method", "environment"],
       "properties": {
         "workload": {
           "description": "Workload variant: a named operation plus one resolved parameter assignment.",
@@ -139,12 +139,12 @@
             "deterministic": { "type": "boolean" }
           }
         },
-        "comparison_context": {
-          "description": "How the subject is exercised and measured: intended settings such as protocol version, host runtime, warmup and calibration policy, timer.",
+        "method": {
+          "description": "The measurement method as executed: protocol name and version, timer, synchronization, warmup, calibration, repetition, cache and GC policy, probe, interleaving schedule (Appendix B keys under protocol). These rules define what the number is. What they produced in this attempt, such as the loop count chosen or the warmups performed, is procedure.",
           "type": "object"
         },
         "environment": {
-          "description": "Host or allocation shared by every result of the attempt.",
+          "description": "Host or allocation shared by every result of the attempt, and the facts about the system the subject ran on.",
           "type": "object",
           "additionalProperties": false,
           "required": ["schema", "identity"],
@@ -154,18 +154,18 @@
               "$ref": "#/$defs/token"
             },
             "identity": {
-              "description": "Fields that define environment identity under the named schema.",
+              "description": "Fields that name the host or allocation under the named schema; their fingerprint keys the environment record. Naming a host is not a statement that comparisons must match on these fields; identity policy decides that.",
               "type": "object",
               "minProperties": 1
             },
-            "metadata": {
-              "description": "Descriptive facts that do not enter environment identity.",
+            "facts": {
+              "description": "Further constitutive facts about the system during the attempt: OS and kernel, C library, microcode, drivers, frequency governor and boost settings, container image digest, language runtime, the allowlisted environment of the measured process, and facts reported by context collectors. Nested objects; a fact that was read but could not be determined is null, a fact that was not collected is absent. Recorded whether or not any comparison fixes it.",
               "type": "object"
             }
           }
         },
         "resource_selection": {
-          "description": "Optional resource this result applies to within the environment: CPU/core set, GPU UUID or device index, accelerator partition.",
+          "description": "Optional resource this result applies to within the environment: CPU/core set or affinity mask actually applied, GPU UUID or device index, accelerator partition.",
           "type": "object",
           "minProperties": 1
         }
@@ -244,10 +244,6 @@
         }
       ]
     },
-    "observed_context": {
-      "description": "Immutable per-result snapshot of conditions allowed to vary within a series, such as kernel, glibc, microcode, load, temperature. Never enters identity.",
-      "type": "object"
-    },
     "procedure": {
       "description": "Realized batch-wide acquisition details. Per-observation metadata belongs on structured observations instead.",
       "type": "object",
@@ -278,7 +274,7 @@
           "items": { "$ref": "#/$defs/token" }
         },
         "slot": {
-          "description": "Position of this attempt in the run's realized order across all sides, zero-based. The intended schedule is comparison_context.protocol.schedule.",
+          "description": "Position of this attempt in the run's realized order across all sides, zero-based. The schedule the run followed is method.protocol.schedule.",
           "type": "integer",
           "minimum": 0
         },
