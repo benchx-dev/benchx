@@ -1,0 +1,13 @@
+{
+  "schema_version": "benchx/config/0.1.0",
+  "project": "archery-local",
+  "provider": { "command": ["./provider.sh"] },
+  "adapter": {
+    "name": "google-benchmark",
+    "suite": "demo-bench",
+    "quantities": ["wall-time"],
+    "precision": { "repetitions": 5 }
+  },
+  "paths": { "store": "_work/store.parquet", "results": "_work/results" },
+  "compare": { "profile": "environments" }
+}
