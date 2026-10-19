@@ -589,7 +589,8 @@ The pinned primary-source links above are the review record included with this d
 4. **Addressing pinned components.** JSON Pointers address array members by index; a release-line rule for one pinned component needs to address `subject.components` by `role`.
 5. **The system boundary.** For self-modifying systems, such as a warmed JIT or an on-disk kernel cache, whether a value is a coordinate or a measurement depends on whether "the system" is the code or the running process.
 6. **Stale materializations.** Who rebuilds a projection materialized on top of the identity policy, and when: on read, on a schedule, or only on request?
-7. **Sources of facts.** Whether a fact was declared, detected, or reported by a collector (`benchmark-environments.md` §9 question 1) has no home now that the observed-context record is retired; one option is a provenance map from JSON Pointer to source.
+7. **Re-fingerprinting on policy edits.** `identity_schema` enters every comparison fingerprint, so any edit to the identity policy gives all of its series new fingerprints, including those whose identity object did not change, and annotations and detector state stay with the old ones. Hashing the identity object and axis instead, and recording the projection version on each series point, would re-fingerprint only the series an edit affects, at the cost of marking where a series' definition changed. Deferred: edits should be batched until then.
+8. **Sources of facts.** Whether a fact was declared, detected, or reported by a collector (`benchmark-environments.md` §9 question 1) has no home now that the observed-context record is retired; one option is a provenance map from JSON Pointer to source.
 
 ## Appendix A: Example quantities (non-normative)
 
