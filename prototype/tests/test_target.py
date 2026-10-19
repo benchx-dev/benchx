@@ -82,7 +82,7 @@ def provider(repo, tmp, monkeypatch):
     script.parent.mkdir()
     script.write_text(PROVIDER.format(python=sys.executable, descriptions=str(descriptions)))
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    (tmp / "proj" / "benchx.json").write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
+    (tmp / "proj" / "benchx.conf.json").write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
                                                           "provider": {"command": [str(script)]}}))
     monkeypatch.chdir(tmp / "proj")
     return {"plain": plain, "hardened": hardened}

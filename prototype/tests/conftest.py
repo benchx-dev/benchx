@@ -121,7 +121,7 @@ def run_rounds(tmp: Path, sides: list[dict], rounds: int, run_key: str, out: Pat
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     """No test reads a setup file, and each runs in its own project root: with no
-    benchx.json the working directory is the root, so the store and the results
+    benchx.conf.json the working directory is the root, so the store and the results
     land in the test's directory."""
     monkeypatch.delenv("BENCHX_SETUP_FILE", raising=False)
     monkeypatch.chdir(tmp_path)

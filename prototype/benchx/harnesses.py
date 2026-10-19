@@ -88,7 +88,7 @@ class GoogleBenchmark(Harness):
 
 class Pyperf(Harness):
     """Two repetition levels (processes, values), calibration by loops or minimum
-    time, and a warmup count. `benchx.json` and pyperf's defaults fill what the
+    time, and a warmup count. `benchx.conf.json` and pyperf's defaults fill what the
     flags leave out."""
 
     name = "pyperf"

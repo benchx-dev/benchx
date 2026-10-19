@@ -1,4 +1,4 @@
-"""benchx.json: where it is found, what it holds, and how a value is picked (benchx.config)."""
+"""benchx.conf.json: where it is found, what it holds, and how a value is picked (benchx.config)."""
 
 import json
 
@@ -104,7 +104,7 @@ def test_a_missing_required_value_names_the_flag_and_the_key(tree):
     with pytest.raises(config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*none found"):
         config.load(tree).pick(None, None, flag="--suite", key="adapter.suite")
     write_config(tree)
-    with pytest.raises(config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*benchx\.json"):
+    with pytest.raises(config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*benchx\.conf\.json"):
         config.load(tree).pick(None, None, flag="--suite", key="adapter.suite")
 
 

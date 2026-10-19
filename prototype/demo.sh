@@ -15,7 +15,7 @@
 # Google Benchmark unless it is installed. ROUNDS=5 by default.
 #
 # `bx compare` (measure mode) and `bx run` deliver every result to the one local store,
-# examples/demo/store.parquet (paths.store in examples/demo/benchx.json, the demo's
+# examples/demo/store.parquet (paths.store in examples/demo/benchx.conf.json, the demo's
 # project file, from whose directory every `bx` command runs), so the store and
 # each series' history grow from run to run. `bx head` shows the latest rows
 # at any time. Delete the file to start over.
@@ -85,7 +85,7 @@ build "$WORK/wt-head" "$WORK/build-hardened" -DDEMO_HARDENED=ON
 step "revisions, ad hoc: no project, measured and compared in one command"
 echo "# measure mode: the sides alternate over $ROUNDS rounds, one work order each"
 bx compare "$WORK/build-base:$WORK/wt-base" "$WORK/build-head:$WORK/wt-head" \
-  --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"  # adapter, suite and profile: benchx.json
+  --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"  # adapter, suite and profile: benchx.conf.json
 echo "# the first work order it wrote:"
 show cat "$WORK/results-rev/orders/order-0000.json"
 echo

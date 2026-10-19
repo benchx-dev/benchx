@@ -5,7 +5,7 @@ and schemas/target-provider-request are its documents. A description arrives
 three ways, and `resolve` handles each:
 
 - `@CONFIG[=SOURCE_REF]`: the project's provider command, named in
-  `benchx.json`, asked to `prepare` (it may build) or `describe` (it only
+  `benchx.conf.json`, asked to `prepare` (it may build) or `describe` (it only
   reports).
 - `BUILD_DIR[:SOURCE_DIR]` with a sidecar `.benchx-target.json` in the build
   directory, written by whatever built it.

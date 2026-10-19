@@ -4,7 +4,7 @@
 # noise-aware verdicts, where the comparison describes itself.
 #
 # You play the user. The target provider (provider.sh, named in
-# benchx.json) is your own build script: it builds with CMake and
+# benchx.conf.json) is your own build script: it builds with CMake and
 # tells benchx what it built, how, and what environment you need. benchx builds
 # nothing, and runs none of that text: you activate the environment yourself
 # (activate.sh) and benchx records the text beside the environment it inherited.
@@ -17,7 +17,7 @@
 #
 #   ROUNDS=5  alternation rounds (default 5)
 #
-# benchx.json is this directory's project file, so the local store is kept
+# benchx.conf.json is this directory's project file, so the local store is kept
 # inside it too (_work/store.parquet). Delete _work/ to start over.
 set -euo pipefail
 cd "$(dirname "$0")"
