@@ -10,8 +10,8 @@ Each harness has
     FLAGS                   the precision flags it takes, by keyword
     flags_to_precision(**flags) -> the flags spelled as a partial work-order
                             `precision`; a flag it does not take is refused
-    precision(flags, start) -> (the complete precision, the config file it
-                            read or None): flags over its defaults
+    precision(flags, file) -> the complete precision: flags over the config
+                            file's precision over its defaults
     describe_precision(precision, config_path) -> that precision in a few words
     suite_entry(suite, filter) -> one `suites[]` entry
     BARE_PATH_KIND          what a bare path names for this harness: a `build`
@@ -20,7 +20,7 @@ Each harness has
 
 import re
 
-from . import config
+from . import adapters, config, core
 from .errors import SessionError
 
 
@@ -50,22 +50,29 @@ class Harness:
     def _precision_from(self, **flags) -> dict:
         raise NotImplementedError
 
-    def precision(self, flags: dict | None, start=".") -> tuple[dict, object]:
-        raise NotImplementedError
+    def precision(self, flags: dict | None, file: dict | None = None) -> dict:
+        """The complete precision; ConfigError if the result is not a valid one."""
+        merged = config.merge(config.merge(self._defaults(), file or {}), flags or {})
+        if errors := core.check_precision(merged):
+            raise config.ConfigError("precision: " + "; ".join(str(error) for error in errors))
+        return merged
+
+    def _defaults(self) -> dict:
+        return adapters.get(self.name).default_precision()
 
     def describe_precision(self, precision: dict, config_path=None) -> str:
         raise NotImplementedError
 
 
 class GoogleBenchmark(Harness):
-    """Repetitions of one level; adaptive calibration by minimum time. No config
-    file: Google Benchmark's defaults are left to the harness, except the
-    repetition count, which the order always states."""
+    """Repetitions of one level; adaptive calibration by minimum time, and a
+    time-based warmup. Whatever the config file and the flags leave out takes
+    Google Benchmark's default, and the order states it."""
 
     name = "google-benchmark"
     FLAGS = ("repetitions", "min_time")
     BARE_PATH_KIND = "build"  # the binary is built; BUILD_DIR[:SOURCE_DIR]
-    DEFAULT_REPETITIONS = 5
+    DEFAULT_REPETITIONS = adapters.gbench.DEFAULT_REPETITIONS
 
     def _precision_from(self, repetitions=None, min_time=None) -> dict:
         precision = {}
@@ -75,17 +82,14 @@ class GoogleBenchmark(Harness):
             precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": min_time}
         return precision
 
-    def precision(self, flags, start="."):
-        return {"repetitions": self.DEFAULT_REPETITIONS, **(flags or {})}, None
-
     def describe_precision(self, precision, config_path=None):
         return f"{precision['repetitions']} repetitions"
 
 
 class Pyperf(Harness):
     """Two repetition levels (processes, values), calibration by loops or minimum
-    time, and a warmup count. `.benchx/config.json` and pyperf's defaults fill
-    what the flags leave out."""
+    time, and a warmup count. `benchx.json` and pyperf's defaults fill what the
+    flags leave out."""
 
     name = "pyperf"
     FLAGS = ("processes", "values", "min_time", "loops", "warmups")
@@ -105,9 +109,6 @@ class Pyperf(Harness):
         if warmups is not None:
             precision["warmup"] = {"mode": "count", "n_warmup": warmups} if warmups else {"mode": "none"}
         return precision
-
-    def precision(self, flags, start="."):
-        return config.resolve(self.name, flags, start=start)
 
     def describe_precision(self, precision, config_path=None):
         reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
