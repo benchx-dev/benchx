@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:config:0.1.0",
+  "title": "BenchX project configuration",
+  "description": "benchx.json, in the project root: how this project is measured. Every key is optional here; the workbench takes a value from the command line first, then from this file, then from a built-in default, and refuses a command that is left without a value it requires (adapter.name, adapter.suite, a target). Relative paths are relative to the directory holding the file.",
+  "$comment": "adapter.precision is checked against the work-order precision schema by the loader, after it is merged over the harness defaults, because it may be partial here (a repetition level, or calibration or warmup, may be left to the harness). adapter.name must name a harness; the loader checks that, so a new harness needs no schema change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "const": "benchx/config/0.1.0" },
+    "project": {
+      "description": "Names the project, so results join its series. Without it a run is ad hoc, and the store files it as local/<hostname>.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "description": "The source's URI, when the checkouts' origin remote does not give it.", "type": "string", "minLength": 1 }
+      }
+    },
+    "provider": {
+      "description": "The target provider, called for an @CONFIG target. It runs with the project root as its working directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "adapter": {
+      "description": "The harness, and what is specific to it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "description": "pyperf or google-benchmark.", "type": "string", "minLength": 1 },
+        "suite": {
+          "description": "The benchmark program in the target: pyperf, the module's path in the working tree; google-benchmark, the binary in the build directory.",
+          "type": "string",
+          "minLength": 1
+        },
+        "quantities": {
+          "description": "What one run collects, from those the harness reports.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "precision": { "description": "A work-order precision, possibly partial.", "type": "object" }
+      }
+    },
+    "environment_variables": {
+      "description": "Set for the benchmark's processes; each becomes a workload parameter.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "case_s": { "type": "number", "exclusiveMinimum": 0 },
+        "order_s": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "store": { "description": "The local store (default store.parquet).", "type": "string", "minLength": 1 },
+        "results": { "description": "Where result files are written (default results).", "type": "string", "minLength": 1 }
+      }
+    },
+    "compare": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": { "enum": ["revisions", "environments"] },
+        "rounds": { "type": "integer", "minimum": 1 },
+        "k": { "type": "number", "exclusiveMinimum": 0 },
+        "min_rounds": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

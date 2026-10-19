@@ -12,6 +12,7 @@ Kind = Literal[
     "comparison-document",
     "target-description",
     "target-provider-request",
+    "config",
 ]
 
 
@@ -25,6 +26,7 @@ def find_schema(
         or kind == "work-order"
         or kind == "target-description"
         or kind == "target-provider-request"
+        or kind == "config"
     ):
         field = "schema_version"
     else:
