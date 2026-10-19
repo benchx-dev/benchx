@@ -462,7 +462,7 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     build = make_build(tmp / "b", repo["wt-head"], cases())
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
-    store_path = tmp / "store.parquet"  # no benchx.json: the working directory is the root
+    store_path = tmp / "store.parquet"  # no benchx.conf.json: the working directory is the root
     assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
     assert "ingested 4, duplicate 0" in capsys.readouterr().out  # this run's files only, with load averages
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK

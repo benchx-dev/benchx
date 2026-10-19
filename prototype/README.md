@@ -32,11 +32,11 @@ bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
 bx bench PATH --adapter asv [CASE …] [--filter REGEX] [--tree DIR] [...]
                                           # shorthand: an asv benchmark suite, timed by pyperf
-bx config init [--dir DIR] [--adapter …] # write a benchx.json stating a harness's defaults
-bx config show                           # what benchx.json and the defaults give, and where each value comes from
+bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
+bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
 
-**One project file.** `benchx.json` in the project root (found by walking up from the
+**One project file.** `benchx.conf.json` in the project root (found by walking up from the
 working directory; its directory is the root) says how the project is measured: the
 `provider`, the `project` name and `source`, an `adapter` block (`name`, `suite`,
 `quantities`, `precision`), `environment_variables`, `timeouts`, `paths` for the store
@@ -54,7 +54,7 @@ Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
 select measure mode and `--run` selects read mode; mixing them is an error.
 
 `@CONFIG` asks the project's **target provider**, the command named by `provider.command`
-in `benchx.json` (it runs with the project root as its working directory). The provider speaks the contract of
+in `benchx.conf.json` (it runs with the project root as its working directory). The provider speaks the contract of
 `system-decomposition.md` §3.4: a JSON request on stdin, a target description
 (`schemas/target-description/0.1.0`) on stdout, build output on stderr, and a
 nonzero exit for failure. `prepare`, the default, may build; `describe`
@@ -77,7 +77,7 @@ as dirty). Cases are the harness's defaults (pyperf: each `bench_*` or `benchmar
 function), the exact names given, or a `--filter` regex. A flag the chosen harness does
 not take is refused. `-e` sets environment variables for the workers and lands in the
 workload's parameters. Precision resolves as flags, then `adapter.precision` in
-`benchx.json` (`bx config init` writes a template), then the harness's defaults, and the
+`benchx.conf.json` (`bx config init` writes a template), then the harness's defaults, and the
 resolved values are written into the order. `--quantity` takes a comma-separated list,
 and one run collects them all. The workers run the `python` first on `PATH`, which must have
 pyperf.
@@ -136,7 +136,7 @@ every result is pyperf. Results also record the installed project's version
   and it refuses an order that names a deferred field (`environment_policy`,
   a declared `build`, `components`, `schedule`) instead of ignoring it.
 - **The store** is one Parquet file, by default `store.parquet` in the project root
-  (`paths.store` in `benchx.json` moves it). It reads documents strictly, validates them, and applies the
+  (`paths.store` in `benchx.conf.json` moves it). It reads documents strictly, validates them, and applies the
   schema §5.4 contract: idempotency and the rejection codes `malformed`,
   `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
   `attempt-conflict`. Each result is one row: the columns #30 derives from the
@@ -190,7 +190,7 @@ part, then:
 
 Every `bx run` and every measure-mode `bx compare` delivers to the local store, so each demo run adds its
 results, ad hoc and tracked, to `examples/demo/store.parquet` (the demo's project root, set
-in its `benchx.json`). Run keys carry a
+in its `benchx.conf.json`). Run keys carry a
 timestamp, so runs accumulate and each series' history grows. Look at it any
 time:
 
@@ -220,7 +220,7 @@ benchx/
   adapters/asv.py    asv's benchmark format, timed by pyperf (bx bench --adapter asv)
   adapters/asv_runtime.py  asv's discovery and setup semantics, standalone, copied beside each driver
   bench.py           bx bench: the MODULE.py and asv shorthands, and the results table
-  config.py          benchx.json: finding it, validating it, picking a value, the template
+  config.py          benchx.conf.json: finding it, validating it, picking a value, the template
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare
   target.py          target descriptions: the provider call, the sidecar, the declared text
@@ -232,7 +232,7 @@ benchx/
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
 examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
-examples/demo        the demo's project root: its benchx.json, and its persistent store
+examples/demo        the demo's project root: its benchx.conf.json, and its persistent store
 examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
 tests/               test_prototype.py: the success criteria and the runner and store

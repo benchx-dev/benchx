@@ -178,7 +178,7 @@ The same document reaches the workbench by three routes:
 1. **A sidecar file**, `.benchx-target.json` in a build directory, written by
    the user's own build script. It stays with a long-lived build directory
    instead of with one invocation.
-2. **A provider command**, named in the project file `benchx.json`
+2. **A provider command**, named in the project file `benchx.conf.json`
    as `"provider": {"command": [...]}`, which prints the description on stdout.
 3. **The workbench's own input**, when the user prepared everything by hand
    and there is no provider.

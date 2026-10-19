@@ -32,7 +32,7 @@ def levels(precision):
 
 
 def write_config(directory, precision):
-    path = directory / "benchx.json"
+    path = directory / "benchx.conf.json"
     path.write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
                                 "adapter": {"name": "pyperf", "precision": precision}}))
     return path
@@ -55,7 +55,7 @@ def test_order_holds_the_resolved_precision(tree):
     order = session._order(side, harness=harness, suite="mod.py", filter=harnesses.exact_filter(["bench_a"]),
                            quantities=["wall-time"], precision=precision, environment_variables=None, project=None,
                            run_key="r", source_uri=SOURCE_URI)
-    assert cfg.path == tree / "benchx.json"
+    assert cfg.path == tree / "benchx.conf.json"
     assert core.check(order, "work-order") == []
     assert levels(order["precision"]) == {"process": 7, "value": 5}
     assert order["suites"][0] == {"adapter": "pyperf", "suite": "mod.py", "filter": "^(bench_a)$"}
