@@ -107,20 +107,38 @@ def merge(base: dict, facts: dict) -> dict:
 _PYCACHE_EXCLUDE = ":(exclude,glob)**/__pycache__/**"
 
 
+_IGNORED: tuple[Path, ...] = ()
+
+
+def ignore(*paths) -> None:
+    """Paths benchx itself writes (the store, the result files), left out of every
+    tree identity from now on, so a run's own output never marks the tree dirty
+    or changes its tree id. Replaces the previous set; no arguments clears it."""
+    global _IGNORED
+    _IGNORED = tuple(Path(p).resolve() for p in paths)
+
+
+def _ignored_in(root: Path) -> list[str]:
+    """The ignored paths inside `root`, relative to it."""
+    root = Path(root).resolve()
+    return [p.relative_to(root).as_posix() for p in _IGNORED if p != root and p.is_relative_to(root)]
+
+
 def git_identity(path) -> dict | None:
     """Revision, dirty state, and working-tree id of a checkout (schema §4.1)."""
     top = _run(["git", "rev-parse", "--show-toplevel"], cwd=path)
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", _PYCACHE_EXCLUDE], cwd=top)
+    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in _ignored_in(top))]
+    status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
     with tempfile.TemporaryDirectory() as tmp:
         index = os.path.join(tmp, "index")
         env = {**os.environ, "GIT_INDEX_FILE": index}
         try:
-            subprocess.run(["git", "add", "-A", "--", ".", _PYCACHE_EXCLUDE], cwd=top, env=env, check=True, capture_output=True)
+            subprocess.run(["git", "add", "-A", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True)
             tree = subprocess.run(["git", "write-tree"], cwd=top, env=env, check=True,
                                   capture_output=True, text=True).stdout.strip()
         except (OSError, subprocess.CalledProcessError):
@@ -159,8 +177,10 @@ def directory_identity(path) -> dict | None:
     if not root.is_dir():
         return None
     digest = hashlib.sha1()
+    ignored = tuple(_IGNORED)
     for file in sorted(p for p in root.rglob("*") if p.is_file()
-                       and not _SKIPPED_DIRS.intersection(p.relative_to(root).parts)):
+                       and not _SKIPPED_DIRS.intersection(p.relative_to(root).parts)
+                       and not any(p.resolve().is_relative_to(i) for i in ignored)):
         try:
             content = file.read_bytes()
         except OSError:
