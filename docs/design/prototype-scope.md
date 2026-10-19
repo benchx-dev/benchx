@@ -44,7 +44,7 @@ one run:
 | Adapter | Google Benchmark, both halves: drive filter and repetitions, translate output; pyperf, both halves, for Python functions in a working tree, through `bx bench` and `bx compare` (the default adapter of both) | all other harnesses; pyperf's `tags`, `date`, per-run load and frequency, and `pyperf check` | — |
 | Store | one Parquet file; ingest per schema §5.4 (validated and durable, auto-create, unit-conflict rejection, idempotency, attempt integrity); one default identity policy; queries: list series, series history, get result | continuity events, quarantine, artifact storage, identity-policy authoring | — |
 | Comparator | run mode with the `revisions` and `environments` profiles; eligibility guard; comparison document | history mode; `single-run`, `variants`, and `cross-machine` profiles; batch requests; provisional noise rules | — |
-| Workbench session loop | `bx compare` in measure mode: writes one work order per side and round, alternates them, delivers the results, then compares; takes each side as a build directory or as `@CONFIG`, a call to the project's target provider (`describe` or `prepare`), whose description may be a build or a working tree; either harness, with the same `-e` variables on both sides; a bare path is a build directory for Google Benchmark and a working tree for pyperf; `bx bench` is the same path for one order; `bx target` asks for a description directly; copies the description's declared text (`how_built`, `activation`, `shell`, `provider`) into the order | provider-built revisions (a source ref other than `WORKSPACE` is the provider's business), an `artifact` target, a declared `build` | workbench packaging, front ends such as `spin bench` |
+| Workbench session loop | the project file `benchx.json` (one file, in the project root: provider, project, harness and suite, quantities, precision, environment variables, timeouts, paths, comparator policy; flags over file over defaults); `bx bench` (one order) and `bx compare` in measure mode: writes one work order per side and round, alternates them, delivers the results, then compares; takes each side as a build directory or as `@CONFIG`, a call to the project's target provider (`describe` or `prepare`), whose description may be a build or a working tree; either harness, with the same `-e` variables on both sides; a bare path is a build directory for Google Benchmark and a working tree for pyperf; `bx bench` is the same path for one order; `bx target` asks for a description directly; copies the description's declared text (`how_built`, `activation`, `shell`, `provider`) into the order | provider-built revisions (a source ref other than `WORKSPACE` is the provider's business), an `artifact` target, a declared `build` | workbench packaging, front ends such as `spin bench` |
 | Documents | work order (`schemas/work-order/0.1.0`), result (schema §5.2), comparison document | — | — |
 
 **Out entirely:** scheduler, change detector, alerting, views beyond query
@@ -84,7 +84,7 @@ proto-workbench).
 - One command, `bx compare`, has a read mode and a measure mode
   (`prototype-design.md` §1).
 - The local store is a single Parquet file in one place,
-  `~/.benchx/store.parquet`, and `bx run` delivers to it. JSON is for
+  the project's `store.parquet` (`paths.store` in `benchx.json`), and `bx run` delivers to it. JSON is for
   documents in transit (work orders, result files, comparison documents),
   never for the store.
 - Ingest acknowledgment = validated and durable (schema §5.4).

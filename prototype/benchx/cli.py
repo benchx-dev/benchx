@@ -524,7 +524,7 @@ def main(argv=None):
 
     p = sub.add_parser("target", help="ask for a target's description (schemas/target-description/0.1.0)",
                        description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
-                                   ".benchx/provider.json, or a build directory holding .benchx-target.json. "
+                                   "benchx.json, or a build directory holding .benchx-target.json. "
                                    "describe only reports a target that exists; prepare may build it.")
     p.add_argument("operation", choices=["describe", "prepare"])
     p.add_argument("target")

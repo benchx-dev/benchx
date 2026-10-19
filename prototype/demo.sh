@@ -15,16 +15,18 @@
 # Google Benchmark unless it is installed. ROUNDS=5 by default.
 #
 # `bx compare` (measure mode) and `bx run` deliver every result to the one local store,
-# ~/.benchx/store.parquet (BENCHX_HOME=... relocates it), so the store and
+# examples/demo/store.parquet (paths.store in examples/demo/benchx.json, the demo's
+# project file, from whose directory every `bx` command runs), so the store and
 # each series' history grow from run to run. `bx head` shows the latest rows
-# at any time.
+# at any time. Delete the file to start over.
 set -euo pipefail
 cd "$(dirname "$0")"
 PROTOTYPE=$PWD
 PYTHON=${PYTHON:-$PROTOTYPE/.venv/bin/python}
 ROUNDS=${ROUNDS:-5}
 WORK=$(mktemp -d)
-STORE="${BENCHX_HOME:-$HOME/.benchx}/store.parquet"
+DEMO_ROOT=$PROTOTYPE/examples/demo
+STORE=$DEMO_ROOT/store.parquet
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)  # run keys are unique per demo run, so runs accumulate
 RUN_REV="rev-adhoc-$STAMP"
 RUN_ENV="env-tracked-$STAMP"
@@ -47,7 +49,7 @@ say() {  # to stderr, so a command's own redirected output never contains it
 }
 show() { say "$@"; "$@"; }                   # print, then run
 quiet() { say "$@"; "$@" >/dev/null; }       # print, then run without its output
-bx() { say bx "$@"; "$PYTHON" -m benchx.cli "$@"; }
+bx() { say bx "$@"; (cd "$DEMO_ROOT" && "$PYTHON" -m benchx.cli "$@"); }
 into() {  # into <file> <bx ...>: run with stdout to a file, printed with its redirect
   SAY_SUFFIX="> $1"; local out=$1; shift
   "$@" > "$out"
@@ -82,18 +84,18 @@ build "$WORK/wt-head" "$WORK/build-hardened" -DDEMO_HARDENED=ON
 
 step "revisions, ad hoc: no project, measured and compared in one command"
 echo "# measure mode: the sides alternate over $ROUNDS rounds, one work order each"
-bx compare "$WORK/build-base:$WORK/wt-base" "$WORK/build-head:$WORK/wt-head" --profile revisions \
-  --adapter google-benchmark --suite demo-bench --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"
+bx compare "$WORK/build-base:$WORK/wt-base" "$WORK/build-head:$WORK/wt-head" \
+  --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"  # adapter, suite and profile: benchx.json
 echo "# the first work order it wrote:"
 show cat "$WORK/results-rev/orders/order-0000.json"
 echo
 echo "# read mode: the same run key, compared again through a throwaway store"
-bx compare --run "$RUN_REV" --profile revisions --baseline "${BASE:0:10}" --results "$WORK/results-rev"
+bx compare --run "$RUN_REV" --baseline "${BASE:0:10}" --results "$WORK/results-rev"
 echo "# bx compare also delivered these to the local store, as thin results of project local/<hostname>"
 
 step "environments, tracked: project demo, into the local store"
 bx compare "$WORK/build-head:$WORK/wt-head" "$WORK/build-hardened:$WORK/wt-head" --profile environments \
-  --label build=plain,hardened --adapter google-benchmark --suite demo-bench --rounds "$ROUNDS" --project demo \
+  --label build=plain,hardened --rounds "$ROUNDS" --project demo \
   --run-key "$RUN_ENV" --out "$WORK/results-env"
 
 step "re-ingest is a visible no-op"

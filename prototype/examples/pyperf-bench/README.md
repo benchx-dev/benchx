@@ -17,23 +17,23 @@ The script runs `bx` and `python` from the active environment, so benchx and pyp
 be installed there; the workers use that same `python`. Extra arguments go to
 `bx bench` in step 1 and win over the config file, e.g. `./run.sh --processes 20`.
 It takes about 20 seconds. Nothing outside this directory changes: the local store is
-`out/home/store.parquet` (the script sets `BENCHX_HOME`), and `out/` is deleted at
-the start of each run.
+`out/store.parquet` (`paths.store` in `benchx.json`), and `out/` is deleted at the start
+of each run.
 
 ## What goes in
 
 | Input | Where | What it does |
 |---|---|---|
-| `bench_suite.py` | first argument | The module. Each function named `bench_*` or `benchmark_*` is a case. |
-| Function names | after the module | `bx bench bench_suite.py bench_sorted bench_join` runs only those, any function, whatever its name. |
-| `.benchx/config.json` | found by walking up from where you run `bx` | Precision: worker processes, values per process, calibration, warmup. Here: 5 processes x 3 values, calibrate to 0.05 s per value. |
-| Flags | command line | `--processes`, `--values`, `--min-time`, `--loops`, `--warmups` override the file. |
+| `.` | first argument | The target: this directory, a working tree. pyperf reads a bare path that way. |
+| `benchx.json` | found by walking up from where you run `bx`; its directory is the project root | The harness (`adapter.name`), the module (`adapter.suite`, `bench_suite.py`: each function named `bench_*` or `benchmark_*` is a case), and the precision: worker processes, values per process, calibration, warmup. Here: 5 processes x 3 values, calibrate to 0.05 s per value. |
+| Function names | after the target | `bx bench . bench_sorted bench_join` runs only those, any function, whatever its name. `bx bench bench_suite.py bench_sorted` still works as a shorthand: the module's git checkout is the target and its path the suite. |
+| Flags | command line | `--processes`, `--values`, `--min-time`, `--loops`, `--warmups` override the file, and so does `--suite`. |
 | `-e NAME=VALUE` | command line | Sets an environment variable for the workers. The workers otherwise inherit your whole environment. |
 
 Precision is resolved as: **flags, then the config file, then pyperf's defaults**
 (20 processes x 3 values, 0.1 s calibration, 1 warmup). A level you leave out of the
-file takes pyperf's default. `bx config init` writes a `.benchx/config.json` that states
-the defaults, as a template to edit. The resolved values are written into the work order,
+file takes pyperf's default. `bx config init` writes a `benchx.json` that states
+the defaults, as a template to edit, and `bx config show` says where each value comes from. The resolved values are written into the work order,
 so a result records the precision that applied. A bad config file is reported before
 anything runs.
 
@@ -42,23 +42,25 @@ the calibration (how many calls make up one value) itself. Put setup at module l
 
 ## The config file
 
-`.benchx/config.json` (a hidden directory: use `ls -a`) is the example's precision config.
-It is the work-order `precision` block under the adapter's name:
+`benchx.json` is the example's project file. Its `adapter.precision` is the work-order
+`precision` block; `adapter.name` and `adapter.suite` say which harness and which module:
 
 ```json
 {
-  "adapters": {
-    "pyperf": {
-      "precision": {
-        "repetitions": {
-          "mode": "fixed",
-          "levels": [{"unit": "process", "n": 5}, {"unit": "value", "n": 3}]
-        },
-        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.05},
-        "warmup": {"mode": "count", "n_warmup": 1}
-      }
+  "schema_version": "benchx/config/0.1.0",
+  "adapter": {
+    "name": "pyperf",
+    "suite": "bench_suite.py",
+    "precision": {
+      "repetitions": {
+        "mode": "fixed",
+        "levels": [{"unit": "process", "n": 5}, {"unit": "value", "n": 3}]
+      },
+      "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.05},
+      "warmup": {"mode": "count", "n_warmup": 1}
     }
-  }
+  },
+  "paths": {"store": "out/store.parquet", "results": "out"}
 }
 ```
 
@@ -72,10 +74,10 @@ It is the work-order `precision` block under the adapter's name:
 
 ## What `run.sh` does
 
-1. `bx bench bench_suite.py` runs all five cases with the config file's precision.
-2. `bx bench bench_suite.py bench_env_var -e EXAMPLE_N=100000 --processes 3 --values 2`
+1. `bx bench .` runs all five cases with the config file's suite and precision.
+2. `bx bench . bench_env_var -e EXAMPLE_N=100000 --processes 3 --values 2`
    runs one case, sets a variable for the workers, and overrides the file's process count.
-3. `bx bench bench_suite.py bench_join --run-key example-again` runs one case a second time
+3. `bx bench . bench_join --run-key example-again` runs one case a second time
    under a new run key, so its series gets a second point.
 4. `ls -l` and `bx head` show the local store: one Parquet file, and its latest rows.
 5. `bx series` lists the series in the store.
