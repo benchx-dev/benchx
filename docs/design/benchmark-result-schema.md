@@ -18,13 +18,13 @@ One attempt may report several quantities. CPU time, GPU time, peak memory, and 
 
 > **Reported coordinates** are the facts a producer reports about what was measured and under which conditions: project, designated source, benchmark identity, workload variant, subject, quantity, protocol, environment, and optional resource selection. They exclude the designated source revision, which is the history axis, and all provenance such as attempt/run keys and timestamps.
 
-> **Comparison identity** is the projection of reported coordinates that the project's identity policy requires to match before two estimates are points in the same history. Producers report coordinates; they never declare identity or series membership.
+> **Comparison identity** is the part of the reported coordinates that the project's identity policy requires to match before two estimates are points in the same history. Producers report coordinates; they never declare identity or series membership.
 
-> A **series** is one comparison identity projected through one estimator and followed across revisions of the designated subject source:
+> A **series** is one comparison identity under one estimator and followed across revisions of the designated subject source:
 >
 > **policy(reported coordinates) × estimator**
 
-The estimator is a projection as well: one observation batch feeds a mean series and a median series without being stored twice (§4.5). The server fingerprints reported coordinates for audit, applies a versioned identity policy, and materializes series as rebuildable indexes (§4.3). The identity policy is one **projection**: other projections, such as a comparison profile or a sweep across kernel versions, follow a different axis over the same results (§4.3).
+The estimator is chosen separately: one observation batch feeds a mean series and a median series without being stored twice (§4.5). The server fingerprints reported coordinates for audit, applies a versioned identity policy, and materializes series as rebuildable indexes (§4.3). The identity policy is one **projection**: other projections, such as a comparison profile or a sweep across kernel versions, follow a different axis over the same results (§4.3).
 
 Two sources appear on every result. The top-level `source`/`revision` identify the subject component whose revisions form the history axis. `benchmark` identifies the code that defined and executed the workload; its exact revision is a reported coordinate that policy normally maps to a declared benchmark version or an audited continuity mapping rather than splitting history on every benchmark commit. A composite subject such as Arrow–NumPy interoperability names every component, designates one as the axis, and pins the others (§4.2).
 
@@ -41,7 +41,7 @@ For example, one series could track:
 - protocol: protocol version and the warmup/calibration strategy;
 - environment: runner `bench-01` with a specified CPU and core policy, running Python 3.12; resource selection: absent, or a GPU UUID/device index for a per-device result.
 
-Each subject revision contributes zero or more results, producing the history shown in a benchmark chart. Under this policy, changing a workload parameter, quantity, protocol value, environment identity, or Python version yields a different series; a different estimator yields a different series over the same coordinates; changing only the attempt/run key or timestamp never does, and changing the kernel or glibc version does not under this example's policy, which ignores them rather than treating them as a property of those components.
+Each subject revision contributes zero or more results, producing the history shown in a benchmark chart. Under this policy, changing a workload parameter, quantity, protocol value, or environment identity yields a different series; a different estimator yields a different series over the same coordinates; changing only the attempt/run key or timestamp never does, and changing the kernel or glibc version does not under this example's policy, which ignores them rather than treating them as a property of those components.
 
 The common operations are to find a series, order its results by revision, plot estimates, inspect observation batches, group an attempt's quantities, and trace a result to its producer. The indexed core is therefore scalar; richer data remains representable without first-class tables.
 
@@ -56,11 +56,11 @@ The common operations are to find a series, order its results by revision, plot 
 | **Workload variant** | A workload plus one parameter assignment. |
 | **Subject** | Implementation or system under test. It may contain several named components; one source is the revision axis. |
 | **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. |
-| **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. Selected by policy as a series projection; reported only inside estimate summaries, never as a coordinate. |
+| **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. Selected by the projection as a series dimension; reported only inside estimate summaries, never as a coordinate. |
 | **Reported coordinates** | Producer-reported facts describing what was measured and under which conditions, fingerprinted before any policy is applied. |
 | **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key`. Never a coordinate. |
 | **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is the projection a project's store maintains, with the subject revision as its axis. |
-| **Comparison identity** | The projection of reported coordinates that must match for comparison. |
+| **Comparison identity** | The part of the reported coordinates a projection requires to match. |
 | **Series** | Derived comparison-time construct: one comparison identity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
 | **Observation** | One measured value produced by a repetition after declared normalization. |
 | **Observation batch** | Observations of one quantity from one attempt. Three repetitions producing 1.0 ms, 1.1 ms, and 1.0 ms are three observations in one batch. |
