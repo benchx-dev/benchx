@@ -9,7 +9,7 @@ from benchx.identity import normalize_remote
 
 pytest.importorskip("pyperf")
 
-from benchx import cli, core, harnesses, session
+from benchx import cli, config, core, harnesses, session
 from benchx.errors import SessionError
 from benchx.store import Store
 from conftest import SOURCE_URI
@@ -32,9 +32,9 @@ def levels(precision):
 
 
 def write_config(directory, precision):
-    path = directory / ".benchx" / "config.json"
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps({"adapters": {"pyperf": {"precision": precision}}}))
+    path = directory / "benchx.json"
+    path.write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
+                                "adapter": {"name": "pyperf", "precision": precision}}))
     return path
 
 
@@ -49,12 +49,13 @@ def tree(tmp, monkeypatch):
 
 def test_order_holds_the_resolved_precision(tree):
     write_config(tree, {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 7}]}})
-    harness, precision, config_path = session._harness("pyperf", {"values": 5}, cwd=tree)
+    cfg = config.load(tree)
+    harness, precision = session._harness("pyperf", {"values": 5}, cfg.adapter["precision"])
     side = session._side(str(tree), "mod.py", "describe", harness)
     order = session._order(side, harness=harness, suite="mod.py", filter=harnesses.exact_filter(["bench_a"]),
-                           quantity="wall-time", precision=precision, environment_variables=None, project=None,
+                           quantities=["wall-time"], precision=precision, environment_variables=None, project=None,
                            run_key="r", source_uri=SOURCE_URI)
-    assert config_path == tree / ".benchx" / "config.json"
+    assert cfg.path == tree / "benchx.json"
     assert core.check(order, "work-order") == []
     assert levels(order["precision"]) == {"process": 7, "value": 5}
     assert order["suites"][0] == {"adapter": "pyperf", "suite": "mod.py", "filter": "^(bench_a)$"}
@@ -72,7 +73,7 @@ def test_bench_command_runs_and_ingests(tree, capsys):
     out = capsys.readouterr()
     assert "bench_a" in out.out and "success" in out.out and "bench_b" not in out.out
     assert "2 processes x 2 values" in out.err
-    results = [d for d in Store().documents("cli") if d["measurement"]["quantity"]["name"] == "wall-time"]
+    results = [d for d in Store(tree / "store.parquet").documents("cli") if d["measurement"]["quantity"]["name"] == "wall-time"]
     assert [d["coordinates"]["workload"]["name"] for d in results] == ["bench_a"]
     order = json.loads(next((tree / "results" / "cli").glob("workorder-*.json")).read_text())
     assert levels(order["precision"]) == {"process": 2, "value": 2}
