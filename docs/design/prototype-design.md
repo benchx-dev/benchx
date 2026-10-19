@@ -42,8 +42,8 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: the module's checkout, pyperf → result files → store → table
-bx config init [--dir DIR] [--adapter …] # write a benchx.json stating a harness's defaults
-bx config show                           # what benchx.json and the defaults give, and where each value comes from
+bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
+bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
 
 `bx bench` is the single-target form of `bx compare` (measure mode). It names a
@@ -65,7 +65,7 @@ state and tree id recorded; `--suite` is the module's path in it, and a case is
 a function in it (`bench_*` and `benchmark_*` by default). A case named on the
 command line is an exact name; `--filter` is a regex; not both. `-e` fills
 `environment_variables`. Precision is resolved before the order is written,
-flags over `adapter.precision` in `benchx.json` over the harness's defaults, so the
+flags over `adapter.precision` in `benchx.conf.json` over the harness's defaults, so the
 order always states what applied; a flag the chosen harness does not take is refused, as in
 `bx compare`. The pyperf adapter takes `python` from the `PATH` the workers
 start with and refuses the order if pyperf is not importable there. Both
@@ -76,7 +76,7 @@ is the git checkout containing the module (or `--tree`), the suite is the
 module's path in it, and the functions are exact case names. Without `--suite`,
 a TARGET ending in `.py` selects it.
 
-**The project file.** Both commands read `benchx.json` in the project root, found by
+**The project file.** Both commands read `benchx.conf.json` in the project root, found by
 walking up from the working directory; its directory is the root, and with no file the
 root is the working directory (`schemas/config/0.1.0`). It holds `project`, `source.uri`,
 `provider.command`, an `adapter` block (`name`, `suite`, `quantities`, `precision`),
@@ -120,7 +120,7 @@ subprocess. Measure mode is a call into the session function, which calls the
 runner for each order and then the comparator.
 
 The local store has one place per project, `store.parquet` in the project root
-unless `paths.store` in `benchx.json` says otherwise; no command takes another.
+unless `paths.store` in `benchx.conf.json` says otherwise; no command takes another.
 `bx run` delivers what it measures there: it writes the result files,
 then ingests exactly those files. The `runner` module itself stays
 store-unaware (`runner.md` §2 principle 6); the command composes it with
@@ -510,7 +510,7 @@ assigns `round` and `slot`. The demo script plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
 and CMake, since benchx builds nothing. `prototype/examples/archery-local`
 shows the other route, where a provider script named in
-`benchx.json` builds and describes the targets and the sides are
+`benchx.conf.json` builds and describes the targets and the sides are
 given as `@plain` and `@hardened`.
 
 - **Revisions:** two git worktrees of one source at the base and head
@@ -548,7 +548,7 @@ history grow from run to run, and the demo ends with `bx head`.
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
 - The target-provider hook is minimal: one provider command per project
-  (`provider.command` in `benchx.json`), `describe` and `prepare` only, `build` targets
+  (`provider.command` in `benchx.conf.json`), `describe` and `prepare` only, `build` targets
   only, and a source ref other than `WORKSPACE` is the provider's business.
   How cached builds are named and expired stays open
   (`system-decomposition.md` §6 question 5). The demo prepares its builds by

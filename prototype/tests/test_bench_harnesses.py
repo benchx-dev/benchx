@@ -164,7 +164,7 @@ def test_pyperf_takes_a_working_tree_path_like_the_shorthand(tmp, monkeypatch, c
     assert long_form["target"]["kind"] == "working_tree"
 
 
-# --- from benchx.json -------------------------------------------------------------------
+# --- from benchx.conf.json -------------------------------------------------------------------
 
 CONFIG = {"project": "demo",
           "adapter": {"name": "google-benchmark", "suite": "demo-bench", "quantities": ["wall-time", "cpu-time"],

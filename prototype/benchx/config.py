@@ -1,4 +1,4 @@
-"""The project configuration file, `benchx.json`, in the project root.
+"""The project configuration file, `benchx.conf.json`, in the project root.
 
     schemas/config/0.1.0
 
@@ -25,7 +25,7 @@ from pathlib import Path
 from . import adapters, core
 from .core import loader
 
-CONFIG_FILE = "benchx.json"
+CONFIG_FILE = "benchx.conf.json"
 # Files of the format this one replaced. They are not read; finding one is an error, so
 # no setting silently stops applying.
 LEGACY_FILES = (Path(".benchx") / "provider.json", Path(".benchx") / "config.json")
@@ -100,7 +100,7 @@ class Config:
 
 
 def load(start=".") -> Config:
-    """The nearest `benchx.json` walking up from `start`, validated; or an empty
+    """The nearest `benchx.conf.json` walking up from `start`, validated; or an empty
     configuration rooted at `start` when there is none."""
     start = Path(start).resolve()
     path = _find_upward(CONFIG_FILE, start)
@@ -167,7 +167,7 @@ def template(adapter_name="pyperf") -> dict:
 
 
 def write_template(directory=".", adapter_name="pyperf") -> Path:
-    """Write `benchx.json` under `directory`; never overwrites."""
+    """Write `benchx.conf.json` under `directory`; never overwrites."""
     path = Path(directory) / CONFIG_FILE
     if path.exists():
         raise ConfigError(f"{path} already exists")

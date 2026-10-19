@@ -17,7 +17,7 @@ The script runs `bx` and `python` from the active environment, so benchx and pyp
 be installed there; the workers use that same `python`. Extra arguments go to
 `bx bench` in step 1 and win over the config file, e.g. `./run.sh --processes 20`.
 It takes about 20 seconds. Nothing outside this directory changes: the local store is
-`out/store.parquet` (`paths.store` in `benchx.json`), and `out/` is deleted at the start
+`out/store.parquet` (`paths.store` in `benchx.conf.json`), and `out/` is deleted at the start
 of each run.
 
 ## What goes in
@@ -25,14 +25,14 @@ of each run.
 | Input | Where | What it does |
 |---|---|---|
 | `.` | first argument | The target: this directory, a working tree. pyperf reads a bare path that way. |
-| `benchx.json` | found by walking up from where you run `bx`; its directory is the project root | The harness (`adapter.name`), the module (`adapter.suite`, `bench_suite.py`: each function named `bench_*` or `benchmark_*` is a case), and the precision: worker processes, values per process, calibration, warmup. Here: 5 processes x 3 values, calibrate to 0.05 s per value. |
+| `benchx.conf.json` | found by walking up from where you run `bx`; its directory is the project root | The harness (`adapter.name`), the module (`adapter.suite`, `bench_suite.py`: each function named `bench_*` or `benchmark_*` is a case), and the precision: worker processes, values per process, calibration, warmup. Here: 5 processes x 3 values, calibrate to 0.05 s per value. |
 | Function names | after the target | `bx bench . bench_sorted bench_join` runs only those, any function, whatever its name. `bx bench bench_suite.py bench_sorted` still works as a shorthand: the module's git checkout is the target and its path the suite. |
 | Flags | command line | `--processes`, `--values`, `--min-time`, `--loops`, `--warmups` override the file, and so does `--suite`. |
 | `-e NAME=VALUE` | command line | Sets an environment variable for the workers. The workers otherwise inherit your whole environment. |
 
 Precision is resolved as: **flags, then the config file, then pyperf's defaults**
 (20 processes x 3 values, 0.1 s calibration, 1 warmup). A level you leave out of the
-file takes pyperf's default. `bx config init` writes a `benchx.json` that states
+file takes pyperf's default. `bx config init` writes a `benchx.conf.json` that states
 the defaults, as a template to edit, and `bx config show` says where each value comes from. The resolved values are written into the work order,
 so a result records the precision that applied. A bad config file is reported before
 anything runs.
@@ -42,7 +42,7 @@ the calibration (how many calls make up one value) itself. Put setup at module l
 
 ## The config file
 
-`benchx.json` is the example's project file. Its `adapter.precision` is the work-order
+`benchx.conf.json` is the example's project file. Its `adapter.precision` is the work-order
 `precision` block; `adapter.name` and `adapter.suite` say which harness and which module:
 
 ```json

@@ -120,7 +120,7 @@ def _harness(adapter, flags, file_precision=None, quantities=None) -> tuple:
     take, a precision or a quantity it cannot apply, is refused here, before any
     side is resolved."""
     if not adapter:
-        raise SessionError("no adapter given: pass --adapter, or set adapter.name in benchx.json")
+        raise SessionError("no adapter given: pass --adapter, or set adapter.name in benchx.conf.json")
     harness = harnesses.get(adapter)
     precision = harness.precision(harness.flags_to_precision(**(flags or {})), file_precision)
     try:
