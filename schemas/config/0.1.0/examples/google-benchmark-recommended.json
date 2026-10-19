@@ -1,0 +1,14 @@
+{
+  "schema_version": "benchx/config/0.1.0",
+  "adapter": {
+    "name": "google-benchmark",
+    "suite": "bench/example-bench",
+    "quantities": ["wall-time", "cpu-time"],
+    "precision": {
+      "repetitions": 10,
+      "calibration": { "mode": "adaptive", "minimum_sample_seconds": 0.5 },
+      "warmup": { "mode": "time", "seconds": 0.1 }
+    }
+  },
+  "timeouts": { "case_s": 120, "order_s": 1800 }
+}

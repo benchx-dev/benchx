@@ -31,6 +31,7 @@ def check(data: dict[str, Any], kind: Kind) -> Iterator[RuleViolation]:
         kind == "comparison-document"
         or kind == "target-description"
         or kind == "target-provider-request"
+        or kind == "config"
     ):
         return  # nothing beyond what their schemas say
     else:
