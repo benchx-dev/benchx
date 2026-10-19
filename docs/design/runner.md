@@ -27,7 +27,8 @@ identical; only precision settings and environment strictness differ.
 3. **Control the process, record the machine.** Settings of the process the
    runner launches (thread caps, pinning, device selection, environment
    variables) it enforces and records. Conditions it does not control (kernel,
-   governor, load, temperature) it snapshots as observed context, and it
+   governor, load, temperature) it records as environment system facts and
+   condition measurements, and it
    checks the ones the work order requires (hardware present, quiescence).
 4. **The harness measures; the runner surrounds.** Measurement itself belongs
    to the native harness and its adapter. The runner prepares, invokes,
@@ -84,7 +85,7 @@ identify target → prepare environment → execute → capture context → emit
    work-order filters, with the requested precision.
 4. **Capture context.** Assemble identity and conditions: machine and
    environment identity, build configuration, source revision (including
-   dirty state), and the observed-context snapshot (kernel, versions,
+   dirty state), and the environment system and condition measurements (kernel, versions,
    frequency governor, load, temperature where available).
 5. **Emit results.** Combine adapter output with captured context into schema
    results — one per case × quantity, including failures and skips — and
@@ -105,9 +106,9 @@ work order:
   machine state the runner cannot set (governor, boost, SMT), with `refuse` or
   `warn` per rule;
 - what to **record**: everything enforced and verified, plus the
-  observed-context snapshot.
+  environment system and condition measurements.
 
-The policy's identity-relevant parts land in the result's comparison context
+The policy's identity-relevant parts land in the result's protocol
 and environment identity, so "measured under policy X" is visible and
 comparable. Loosening or tightening a policy is therefore a series-splitting
 event, not a silent change.

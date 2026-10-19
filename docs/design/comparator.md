@@ -129,13 +129,13 @@ that every result of both sides has a `clean` subject and benchmark tree
 and contains no verdicts for the units it affects.
 
 Excluded points and their reasons remain visible in the output. Changes in
-observed context do not split a series by themselves, but differences between
+facts the projection ignores do not split a series by themselves, but differences between
 the target and its reference are carried as caveats so that a kernel, load, or
 other recorded condition is not hidden from the reader.
 
 An intentional comparison across an identity difference outside a single run
-requires the store to materialize the series under an explicit identity policy
-that projects that difference out. The comparator never bypasses the resulting
+requires the series to be materialized under an explicit projection that
+projects that difference out (schema §4.3). The comparator never bypasses the resulting
 series boundary.
 
 ## 4. Comparison method and verdict
@@ -196,7 +196,7 @@ evaluation it records:
   version, and complete configuration;
 - the reference estimate, effect measure and value, noise and its source,
   threshold or limits, evidence counts, and verdict with reason; and
-- exclusions, failed profile invariants, observed-context differences, quality
+- exclusions, failed profile invariants, unmatched differences, quality
   caveats, and missing target results from a batch request.
 
 The document is renderable as a reviewer-speed summary ("these target results

@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/benchx-cli",
     "version": "0.1.0",
@@ -39,35 +39,37 @@
       "name": "wall-time",
       "unit": "s"
     },
-    "comparison_context": {
-      "python": "3.12",
-      "protocol": {
-        "name": "timeit",
-        "version": "v1",
-        "timer": "perf_counter",
-        "warmup": {
-          "mode": "repetitions",
-          "n_warmup": 1
-        },
-        "calibration": {
-          "mode": "adaptive",
-          "minimum_sample_seconds": 0.2
-        },
-        "repetitions": {
-          "mode": "fixed",
-          "n_repeat": 5
-        },
-        "schedule": {
-          "unit": "attempt",
-          "rule": "alternating",
-          "rounds": 5
-        }
+    "protocol": {
+      "name": "timeit",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {
+        "mode": "repetitions",
+        "n_warmup": 1
+      },
+      "calibration": {
+        "mode": "adaptive",
+        "minimum_sample_seconds": 0.2
+      },
+      "repetitions": {
+        "mode": "fixed",
+        "n_repeat": 5
+      },
+      "schedule": {
+        "unit": "attempt",
+        "rule": "alternating",
+        "rounds": 5
       }
     },
     "environment": {
       "schema": "local/v1",
       "identity": {
         "hostname": "rok-laptop"
+      },
+      "system": {
+        "runtime": {
+          "python": "3.12"
+        }
       }
     }
   },

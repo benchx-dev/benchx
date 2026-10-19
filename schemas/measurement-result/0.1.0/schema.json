@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:measurement-result:0.1.0",
   "title": "BenchX measurement result ingest object",
-  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message.",
+  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message. Conditions such as temperature or load are sibling results sharing attempt_key, not coordinates; whether a coordinate splits history is decided by a projection (schemas/projection/0.1.0).",
   "$comment": "Rules the schema cannot express and the server enforces at ingest: the primary subject component's source, when present, equals the top-level source URI; a quantity's unit never changes once used in a project; at most one estimate summary per estimator declaration; results sharing an attempt_key agree on the fields listed in section 5.3; identical (producer, ingest_key) payloads are idempotent and differing ones conflict; UCUM unit syntax; interval lower bounds not exceeding upper bounds; completed_repetitions never exceeding attempted_repetitions, and likewise completed never exceeding attempted at each repetition level; exactly one provenance.references entry per compound input role; comparison profiles (section 5.5) are checked by the comparator, not here. A result without project or benchmark is thin (section 4.1): valid, comparable within its run, and joinable to tracked series only through an approved mapping.",
   "type": "object",
   "additionalProperties": false,
@@ -20,7 +20,7 @@
   "properties": {
     "schema_version": {
       "description": "Message contract version this object conforms to.",
-      "const": 5
+      "const": 6
     },
     "producer": {
       "description": "Stable, namespaced identity of the adapter or harness that produced this message, plus its software and mapping versions. Only the name is part of the idempotency key.",
@@ -70,7 +70,7 @@
       "description": "Reported coordinates: what was measured and under which conditions. Fingerprinted as reported; identity policy projects them into comparison identity.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["workload", "subject", "quantity", "comparison_context", "environment"],
+      "required": ["workload", "subject", "quantity", "protocol", "environment"],
       "properties": {
         "workload": {
           "description": "Workload variant: a named operation plus one resolved parameter assignment.",
@@ -139,8 +139,8 @@
             "deterministic": { "type": "boolean" }
           }
         },
-        "comparison_context": {
-          "description": "How the subject is exercised and measured: intended settings such as protocol version, host runtime, warmup and calibration policy, timer.",
+        "protocol": {
+          "description": "How the subject is exercised and measured: protocol version, warmup and calibration policy, timer.",
           "type": "object"
         },
         "environment": {
@@ -158,8 +158,8 @@
               "type": "object",
               "minProperties": 1
             },
-            "metadata": {
-              "description": "Descriptive facts that do not enter environment identity.",
+            "system": {
+              "description": "Facts about the system the attempt ran on that do not name the host: kernel, C library, drivers, image digest, runtime, the allowlisted process environment. null means read but undeterminable.",
               "type": "object"
             }
           }
@@ -244,10 +244,6 @@
         }
       ]
     },
-    "observed_context": {
-      "description": "Immutable per-result snapshot of conditions allowed to vary within a series, such as kernel, glibc, microcode, load, temperature. Never enters identity.",
-      "type": "object"
-    },
     "procedure": {
       "description": "Realized batch-wide acquisition details. Per-observation metadata belongs on structured observations instead.",
       "type": "object",
@@ -278,7 +274,7 @@
           "items": { "$ref": "#/$defs/token" }
         },
         "slot": {
-          "description": "Position of this attempt in the run's realized order across all sides, zero-based. The intended schedule is comparison_context.protocol.schedule.",
+          "description": "Position of this attempt in the run's realized order across all sides, zero-based. The intended schedule is protocol.schedule.",
           "type": "integer",
           "minimum": 0
         },

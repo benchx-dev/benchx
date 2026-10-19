@@ -197,7 +197,7 @@ criterion 1 holds by construction.
      "reference_estimate": 0.0455, "effect": 0.024,
      "noise": 0.0021, "noise_source": "paired-rounds",
      "verdict": "regressed", "reason": null,
-     "observed_context_differences": []}
+     "unmatched_differences": []}
   ],
   "missing": [{"workload": "…", "quantity": "wall-time", "side": "contender"}],
   "failed_invariants": [],
@@ -244,7 +244,7 @@ and the native JSON are kept as provenance artifacts. Its translating half follo
 `harness-adapter.md` §6.1: iteration rows become observations, aggregate rows
 producer summaries, encoded names and user counters are split only under
 `parameter_rules` (none in the prototype, so names stay whole and counters go
-to observed context), and a planned case absent from the output is an `error`
+to `environment.system`), and a planned case absent from the output is an `error`
 result with reason `harness.no-output` (§5 step 5). Keys follow §4.6: one
 `attempt_key` per case per invocation, and an `ingest_key` whose attempt
 discriminator is the slot, since one run holds an attempt of each variant per
@@ -256,8 +256,9 @@ landing where its §3.4 puts it:
 - **Snapshot** (§3.1, the part readable without privileges): host name, CPU
   model, and core count as environment identity under `machine/v1`, also in
   ad hoc mode, so both profiles have a full environment identity (schema
-  §5.5); OS, kernel, libc, governor, and load as observed context; an
-  allowlist of thread-control environment variables as observed context,
+  §5.5); OS, kernel, libc, and governor in `environment.system`, and load as a
+  condition measurement; an allowlist of thread-control environment variables
+  in `environment.system`,
   which is the allowlist of `benchmark-environments.md` §3.1.
   The `env` key reads differently by adapter. Google Benchmark takes the
   runner's own environment and omits `env` when no allowlisted variable is set.
@@ -281,14 +282,14 @@ the same way report the same configuration. Nobody declared these, so the detect
   (§3.4). This is what makes the hardened and plain directories differ in
   coordinates, which the `environments` profile requires.
   The pyperf adapter's `python_cflags` is the exception to "never paths": it is
-  recorded verbatim in `comparison_context.runtime`, as `harness-adapter.md` §6.8
+  recorded verbatim in `environment.system.runtime`, as `harness-adapter.md` §6.8
   has it, so the same Python build installed under two prefixes reports different
   flags (conda adds its `-isystem` and `-fdebug-prefix-map` paths) and lands in
   different series.
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
-  land in `observed_context.setup` and enter no identity.
+  land in `environment.system.setup`, which the default identity policy ignores.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
 (`detected`, `declared`, or a plugin name). The prototype does not record it
@@ -393,8 +394,8 @@ varying coordinate:
 
 | Profile | Varying coordinate | `--baseline` names | Sides must agree on |
 |---|---|---|---|
-| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment, comparison context |
-| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment, comparison context |
+| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment, protocol |
+| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment, protocol |
 
 Before any verdict, the eligibility guard (§3) checks the profile's
 invariants over the run: exactly two sides that differ only in the varying

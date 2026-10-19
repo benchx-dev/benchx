@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:projection:0.1.0",
+  "title": "BenchX projection",
+  "description": "How stored results become series (docs/design/benchmark-result-schema.md section 4.3): the facts a series follows (its axis), and for every other reported fact whether it must match, as is or normalized, or is ignored. A project's identity policy is the projection the store maintains on ingest; any other projection, including the comparison profiles of section 5.5, can be materialized over the same results into series of the same form.",
+  "$comment": "Rules the server enforces: paths are JSON Pointers into the result, limited to the reported coordinates (project, source, benchmark, coordinates) plus /revision/key and /provenance/subject_tree, and for an axis also /provenance/labels/<key>; the longest matching path wins, so a role on a subtree can be overridden for one member; a null fact never equals anything; an ignored fact whose value differs from the previous point of a series is recorded as a warning on that point; an identity policy's axis is /revision/key; a projection whose axis has neither /revision/key nor /provenance/subject_tree must match /provenance/subject_tree unless mixed_code is true; any change other than description needs a new identity_schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identity_schema", "default", "axis"],
+  "properties": {
+    "identity_schema": {
+      "description": "Versioned name of the projection. Enters comparison_fingerprint, so series of different projections never mix.",
+      "$ref": "#/$defs/token"
+    },
+    "description": { "type": "string" },
+    "axis": {
+      "description": "The facts a series follows, and how their values are ordered. Several paths make one axis value per distinct combination, as in a two-factor study.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "order"],
+        "properties": {
+          "path": { "$ref": "#/$defs/pointer" },
+          "order": { "enum": ["revision-graph", "version", "numeric", "time", "unordered"] }
+        }
+      }
+    },
+    "default": {
+      "description": "Role of every reported fact that is neither on the axis nor named in paths.",
+      "enum": ["match", "ignore"]
+    },
+    "paths": {
+      "description": "Roles by JSON Pointer.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/pointer" },
+      "additionalProperties": { "$ref": "#/$defs/role" }
+    },
+    "mixed_code": {
+      "description": "True when the projection deliberately puts results of different code at one axis value, such as a trend over time.",
+      "type": "boolean",
+      "default": false
+    },
+    "estimators": {
+      "description": "Estimators to materialize series for. Used when the projection is maintained as series; a comparison names its own.",
+      "type": "array",
+      "items": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/estimator" }
+    },
+    "invariants": {
+      "description": "Checks a set of results must pass before any comparison under this projection (section 5.5).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["one-run", "two-sides", "one-tree-per-side", "equal-attempts", "alternating-slots", "clean-tree", "anchor-reference"] }
+    }
+  },
+  "$defs": {
+    "token": { "type": "string", "minLength": 1, "pattern": "^\\S+$" },
+    "pointer": { "type": "string", "pattern": "^(/[^/]+)+$" },
+    "role": {
+      "oneOf": [
+        { "description": "match: equal values share a series. ignore: kept on the result and never splits a series; a change along a series is flagged on the point.", "enum": ["match", "ignore"] },
+        {
+          "description": "Match after normalizing: version-prefix keeps the first depth components (2.39.1 at depth 2 is 2.39); map replaces values by a table, keeping unlisted ones; canonical-uri normalizes a source URI.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalize"],
+          "properties": {
+            "normalize": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule"],
+              "properties": {
+                "rule": { "enum": ["version-prefix", "map", "canonical-uri"] },
+                "depth": { "type": "integer", "minimum": 1 },
+                "map": { "type": "object" }
+              },
+              "allOf": [
+                { "if": { "properties": { "rule": { "const": "version-prefix" } } }, "then": { "required": ["depth"] } },
+                { "if": { "properties": { "rule": { "const": "map" } } }, "then": { "required": ["map"] } }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

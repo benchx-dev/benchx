@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {
     "name": "example.org/narwhals-bench",
     "version": "0.4.0",
@@ -43,16 +43,13 @@
       "unit": "1",
       "direction": "lower-is-better"
     },
-    "comparison_context": {
-      "python": "3.12",
-      "protocol": {
-        "name": "timeit",
-        "version": "v1",
-        "timer": "perf_counter",
-        "warmup": {"mode": "repetitions", "n_warmup": 1},
-        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.2},
-        "repetitions": {"mode": "fixed", "n_repeat": 5}
-      }
+    "protocol": {
+      "name": "timeit",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {"mode": "repetitions", "n_warmup": 1},
+      "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.2},
+      "repetitions": {"mode": "fixed", "n_repeat": 5}
     },
     "environment": {
       "schema": "machine/v1",
@@ -60,6 +57,9 @@
         "runner": "ci-01",
         "cpu": "AMD EPYC 7R13",
         "cores": 4
+      },
+      "system": {
+        "runtime": {"python": "3.12"}
       }
     }
   },

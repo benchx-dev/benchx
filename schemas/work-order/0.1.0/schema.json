@@ -90,7 +90,7 @@
       }
     },
     "precision": {
-      "description": "Harness-neutral precision settings, spelled per the result schema's Appendix B (comparison_context.protocol.{repetitions,calibration,warmup}).",
+      "description": "Harness-neutral precision settings, spelled per the result schema's Appendix B (protocol.{repetitions,calibration,warmup}).",
       "type": "object",
       "additionalProperties": false,
       "required": ["repetitions"],
@@ -170,7 +170,7 @@
       }
     },
     "environment_policy": {
-      "description": "Named policy (schemas/environment-policy/0.1.0). Optional: absent means the runner applies no policy and only records observed context, the default `benchmark-environments.md`'s laptop scenario describes.",
+      "description": "Named policy (schemas/environment-policy/0.1.0). Optional: absent means the runner applies no policy and only records the environment system and condition measurements, the default `benchmark-environments.md`'s laptop scenario describes.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "version"],

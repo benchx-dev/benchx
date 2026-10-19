@@ -6,6 +6,8 @@
 
 **Review date:** 2026-09-11
 
+**Revision (2026-10-19, draft for review):** a result separates coordinates, fixed for the attempt, from measurements, what it produced. `comparison_context` becomes `protocol`, `environment.metadata` becomes `environment.system`, and `observed_context` is removed: system facts such as kernel and glibc join `environment.system`, and conditions such as temperature become sibling results. Whether a coordinate splits history is decided by a projection (`schemas/projection/0.1.0`); the identity policy is the project's default projection. See §1, §4.2, §4.3, and §9.
+
 ## 1. Purpose
 
 This document defines the minimum model needed to ingest, compare, and migrate computing benchmark results without inventing statistical meaning. Detection, alerts, thresholds, scheduling, run lifecycle, and environment setup are out of scope.
@@ -14,19 +16,19 @@ This document defines the minimum model needed to ingest, compare, and migrate c
 
 One attempt may report several quantities. CPU time, GPU time, peak memory, and a correctness metric are separate scalar results with separate units, joined by a shared `attempt_key`. A retry is a new attempt with a new key.
 
-> **Reported coordinates** are the facts a producer reports about what was measured and under which conditions: project, designated source, benchmark identity, workload variant, subject, quantity, comparison context, environment, and optional resource selection. They exclude the designated source revision, which is the history axis, and all provenance such as attempt/run keys and timestamps.
+> **Reported coordinates** are the facts a producer reports about what was measured and under which conditions: project, designated source, benchmark identity, workload variant, subject, quantity, protocol, environment, and optional resource selection. They exclude the designated source revision, which is the history axis, and all provenance such as attempt/run keys and timestamps.
 
-> **Comparison identity** is the projection of reported coordinates that project policy requires to match before two estimates are points in the same history. Producers report coordinates; they never declare identity or series membership.
+> **Comparison identity** is the projection of reported coordinates that the project's identity policy requires to match before two estimates are points in the same history. Producers report coordinates; they never declare identity or series membership.
 
 > A **series** is one comparison identity projected through one estimator and followed across revisions of the designated subject source:
 >
 > **policy(reported coordinates) × estimator**
 
-The estimator is a projection as well: one observation batch feeds a mean series and a median series without being stored twice (§4.5). The server fingerprints reported coordinates for audit, applies a versioned identity policy, and materializes series as rebuildable indexes (§4.3).
+The estimator is a projection as well: one observation batch feeds a mean series and a median series without being stored twice (§4.5). The server fingerprints reported coordinates for audit, applies a versioned identity policy, and materializes series as rebuildable indexes (§4.3). The identity policy is one **projection**: other projections, such as a comparison profile or a sweep across kernel versions, follow a different axis over the same results (§4.3).
 
 Two sources appear on every result. The top-level `source`/`revision` identify the subject component whose revisions form the history axis. `benchmark` identifies the code that defined and executed the workload; its exact revision is a reported coordinate that policy normally maps to a declared benchmark version or an audited continuity mapping rather than splitting history on every benchmark commit. A composite subject such as Arrow–NumPy interoperability names every component, designates one as the axis, and pins the others (§4.2).
 
-Conditions a project intentionally allows to vary within a series are recorded per result as **observed context**. They annotate history without splitting it (§4.2). Which conditions those are is a policy choice, not a property of the condition: a Parquet-read benchmark may treat kernel and glibc version as observed context, while a benchmark of `malloc` throughput must put the glibc version in comparison context because it is the thing under test.
+A result records two kinds of fact (§4.2). **Coordinates** are fixed for the attempt: which code, build, hardware, kernel, C library, runtime, timer, and calibration rule produced the number. **Measurements** are what the attempt produced or passed through: the measurand, and conditions such as temperature, load, or clock frequency, each a sibling result for its own quantity sharing the `attempt_key` (§4.4). Whether a coordinate splits history is decided by the identity policy, not by where it is stored: a Parquet-read benchmark may let kernel and glibc vary, while a benchmark of `malloc` throughput must match the glibc version because it is the thing under test, and both record glibc in the same place.
 
 For example, one series could track:
 
@@ -36,10 +38,10 @@ For example, one series could track:
 - estimator: mean;
 - subject configuration: release build with Clang 18;
 - benchmark identity: the suite source/revision;
-- comparison context: protocol version, Python 3.12, and the warmup/calibration strategy;
-- environment: runner `bench-01` with a specified CPU and core policy; resource selection: absent, or a GPU UUID/device index for a per-device result.
+- protocol: protocol version and the warmup/calibration strategy;
+- environment: runner `bench-01` with a specified CPU and core policy, running Python 3.12; resource selection: absent, or a GPU UUID/device index for a per-device result.
 
-Each subject revision contributes zero or more results, producing the history shown in a benchmark chart. Under this policy, changing a workload parameter, quantity, comparison-context value, or environment yields a different series; a different estimator yields a different series over the same coordinates; changing only the attempt/run key or timestamp never does, and changing the kernel or glibc version does not under this example's policy, which treats them as observed context rather than as a property of those components.
+Each subject revision contributes zero or more results, producing the history shown in a benchmark chart. Under this policy, changing a workload parameter, quantity, protocol value, environment identity, or Python version yields a different series; a different estimator yields a different series over the same coordinates; changing only the attempt/run key or timestamp never does, and changing the kernel or glibc version does not under this example's policy, which ignores them rather than treating them as a property of those components.
 
 The common operations are to find a series, order its results by revision, plot estimates, inspect observation batches, group an attempt's quantities, and trace a result to its producer. The indexed core is therefore scalar; richer data remains representable without first-class tables.
 
@@ -56,25 +58,26 @@ The common operations are to find a series, order its results by revision, plot 
 | **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. |
 | **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. Selected by policy as a series projection; reported only inside estimate summaries, never as a coordinate. |
 | **Reported coordinates** | Producer-reported facts describing what was measured and under which conditions, fingerprinted before any policy is applied. |
-| **Projection** | A function the identity policy applies to reported coordinates: it selects the subset that must match and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). |
+| **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key`. Never a coordinate. |
+| **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is the projection a project's store maintains, with the subject revision as its axis. |
 | **Comparison identity** | The projection of reported coordinates that must match for comparison. |
-| **Series** | Derived comparison-time construct: one comparison identity × one estimator under one identity-policy schema. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
+| **Series** | Derived comparison-time construct: one comparison identity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
 | **Observation** | One measured value produced by a repetition after declared normalization. |
 | **Observation batch** | Observations of one quantity from one attempt. Three repetitions producing 1.0 ms, 1.1 ms, and 1.0 ms are three observations in one batch. |
 | **Estimate** | Scalar produced by applying an estimator to an observation batch, used for plots and analysis; not a known “true value.” Producer estimates are typed summaries on the immutable result; derived estimates are series points. |
 | **Statistic** | Numeric summary computed from observations, such as a mean, median, percentile, or standard deviation. |
 | **Precision statistic** | Statistic describing observation dispersion, such as standard deviation, MAD, or IQR. |
 | **Measurement uncertainty** | Uncertainty associated with an estimate. It is not synonymous with error or observation spread. |
-| **Environment** | Host or allocation shared by an attempt's results, especially runner and hardware identity. |
+| **Environment** | Host or allocation shared by an attempt's results, especially runner and hardware identity, plus the system it ran: kernel, C library, runtime. |
 
 In metrology, the quantity intended for a workload variant at a revision is the **measurand**; it needs no database entity here. Use `accuracy`, `precision`, `error`, `bias`, `confidence interval`, and `coverage interval` only with their defined meanings, and preserve source terminology when its exact meaning is unknown.
 
 ## 3. Design rules
 
 1. **Producers report facts; policy derives identity.** A result carries reported coordinates, never a comparison identity or series identifier (§4.3).
-2. **The designated subject revision is the series axis.** Ingest time is not historical order; dirty working-tree state is a per-result flag, never a revision property (§4.1).
+2. **The designated subject revision is the identity policy's axis.** Ingest time is not historical order; dirty working-tree state is a per-result flag, never a revision property (§4.1).
 3. **One result contains one quantity and unit.** A multi-output attempt emits several results joined by `attempt_key`; tuple outputs are split into named scalar quantities.
-4. **Observed context never splits history on its own.** Promotion into identity requires a new mapping and identity-policy schema (§4.2).
+4. **Placement never decides identity.** A fact is a coordinate or a measurement by what it is; which coordinates split history is the identity policy's choice, and changing it is a new identity policy, never a change to results or mappings (§4.2, §4.3).
 5. **Environment and selected resource are explicit.** Environment identifies the shared host; optional resource selection identifies the CPU set, GPU, or partition one result applies to.
 6. **Observations are preferred, not required.** Aggregate-only history remains valid and is marked producer-supplied.
 7. **Summaries are typed.** Estimates, statistics, uncertainty, intervals, and opaque source bounds remain distinct entries (§5.3).
@@ -83,6 +86,7 @@ In metrology, the quantity intended for a workload variant at a revision is the 
 10. **Grouping keys are provenance.** The run author defines `run_key`; the executor defines a namespace-qualified `attempt_key`; neither enters identity.
 11. **Decision policy is separate.** Direction, thresholds, guard bands, correctness verdicts, and alerts never enter identity or imply a verdict.
 12. **The quantity vocabulary is open.** Adding a quantity is configuration, not a schema change; a quantity's meaning and unit are immutable once used (§4.4).
+13. **Results record what was, not what was asked.** A coordinate is the value read from the attempt; the request lives in the work order, which the result cites (§4.2).
 
 ## 4. Minimal schema
 
@@ -94,9 +98,9 @@ In metrology, the quantity intended for a workload variant at a revision is the 
 | `source` | versioned code or data source, usually a repository | unique `(project_id, canonical_uri)` |
 | `workload_variant` | workload plus one resolved parameter assignment | unique `(project_id, name, parameters)` |
 | `quantity` | named scalar output with canonical unit (UCUM unit when representable) and descriptive metadata (§4.4) | unique `(project_id, name)`; immutable after use |
-| `environment` | host/allocation identity plus descriptive metadata | unique `(identity_schema, fingerprint)` |
+| `environment` | host/allocation identity | unique `(identity_schema, fingerprint)` |
 | `revision` | source revision plus the optional `native_order` and `native_time` reported with it | unique `(source_id, revision_key)` |
-| `series` | derived index: one comparison identity × one estimator under one identity-policy schema | unique `series_fingerprint`; rebuildable |
+| `series` | derived index: one comparison identity × one estimator under one projection | unique `series_fingerprint`; rebuildable |
 | `series_point` | one entry of a series: the estimate one result contributes, recording which result and which series | unique `(series_fingerprint, producer, ingest_key)`; rebuildable |
 | `benchmark_result` | immutable producer record for one attempt × one quantity | unique `(producer, ingest_key)`; indexed by `reported_coordinates_fingerprint` |
 
@@ -122,9 +126,9 @@ Two limits follow from how git hashes a tree. Submodules and nested repositories
 
 **Thin local results.** An ad hoc run on a laptop (UC-01, one-off stories) may have no benchmark repository and no project. `project` and `benchmark` are therefore optional, and environment identity may use the `local/v1` schema with only a hostname. Such a result is *thin*: it validates and can be compared within its own run. On ingest the store assigns it the implicit project `local/<hostname>` so that its vocabulary rows exist, and it joins a tracked project's series only after an approved mapping re-projects it with the missing coordinates (§6). When the logic under test lives in the benchmark scripts themselves, as in a Narwhals overhead study, the script repository is the subject: `source` names it, and `benchmark` either names the same source or is omitted.
 
-`benchmark_result` stores coordinates exactly as reported plus their fingerprint, `attempt_key`, the outcome, observed context, observation batch, producer summaries, procedure, quality, and provenance as validated JSON. All of it is immutable after ingest. Promote a JSON structure to a child table only when a concrete query, size, or integrity requirement justifies it. No core tables exist for estimator, unit, procedure, run/attempt, observation, interval, uncertainty component, covariance, revision graph, or aliases; estimator and unit vocabularies are configuration.
+`benchmark_result` stores coordinates exactly as reported plus their fingerprint, `attempt_key`, the outcome, observation batch, producer summaries, procedure, quality, and provenance as validated JSON. All of it is immutable after ingest. Promote a JSON structure to a child table only when a concrete query, size, or integrity requirement justifies it. No core tables exist for estimator, unit, procedure, run/attempt, observation, interval, uncertainty component, covariance, revision graph, or aliases; estimator and unit vocabularies are configuration.
 
-`series` and `series_point` are materialized indexes. A series is the ordered list of estimates for one comparison identity and one estimator, for example the minimum wall time of a Parquet read on one runner across three revisions, `[50, 10, 25]`. A series point is one entry of that list, `50`, and records the result it was computed from and the series it belongs to, so either can be reached from the other. The server applies the identity policy to reported coordinates, creates a series per comparison identity and estimator, and a point per eligible result. Rebuilding under one policy schema never deletes indexes built under another. Stable annotations and external references use `series_fingerprint`, not a row ID.
+`series` and `series_point` are materialized indexes. A series is the ordered list of estimates for one comparison identity and one estimator, for example the minimum wall time of a Parquet read on one runner across three revisions, `[50, 10, 25]`. A series point is one entry of that list, `50`, and records the result it was computed from and the series it belongs to, so either can be reached from the other. The server applies the identity policy to reported coordinates, creates a series per comparison identity and estimator, and a point per eligible result. Other projections are materialized the same way on request (§4.3). Rebuilding under one projection never deletes indexes built under another. Stable annotations and external references use `series_fingerprint`, not a row ID.
 
 A composite subject keeps the axis explicit and pins every non-primary component:
 
@@ -144,35 +148,38 @@ A result pins the components its workload exercises and no others. The pandas ov
 
 ### 4.2 Field placement
 
+Coordinates and measurements are told apart by one question: if this value were different, would it be a different system, or the same system in a different state? A different system makes it a coordinate; the same system in another state makes it a measurement (§4.4). A setting and the state it controls are two facts: a locked GPU clock is a coordinate, the frequency observed during the attempt a measurement.
+
 | Destination | Put here | Examples |
 |---|---|---|
 | **Workload-variant parameters** | Resolved controlled workload/input, including dataset identity and any parameter set from outside the harness | size, compression, scenario, role, dataset name/version/checksum, `OMP_NUM_THREADS` |
 | **Subject descriptor** | What is under test: components, roles, pinned non-axis revisions, build/configuration | Arrow–NumPy roles, build type, compiler/flags, JIT/AOT mode, backend |
 | **Benchmark identity** | Exact code that defined/executed the workload | source URI, revision |
-| **Comparison context** | How the subject is exercised and measured; intended settings | protocol version, host runtime such as Python version, warmup/GC/calibration policy, adaptive vs. pedantic timing, timer, CUDA events vs. synchronization, cache-clearing policy, interleaving schedule |
+| **Protocol** | How the subject is exercised and measured | protocol version, warmup/GC/calibration policy, adaptive vs. pedantic timing, timer, CUDA events vs. synchronization, cache-clearing policy, interleaving schedule |
 | **Environment identity** | Host or allocation shared by an attempt | runner, CPU model, available accelerators, memory, cluster shape |
+| **Environment system** | The system the attempt ran on, beyond what names the host | kernel, glibc, microcode, drivers, image digest, host runtime such as Python version, the environment the measured process ran in |
 | **Resource selection** | Optional resource one result applies to | CPU/core set, GPU UUID/device index, accelerator partition |
-| **Observed context** | Conditions allowed to vary within a series | kernel, glibc, microcode, image digest, load, temperature, the environment the measured process ran in |
+| **Condition measurements** | States the system passes through, each a sibling result sharing `attempt_key` (§4.4) | load, temperature, clock frequency |
 | **Result procedure** | Realized batch-wide acquisition details and the limits imposed | repetitions completed, inner iterations selected, warmups performed, round and slot within the run, durations, caches actually cleared, timeout imposed |
 | **Provenance** | Audit metadata | run/attempt keys, caller labels, dirty flags and working-tree ids, CI link, logs, runner software, references to input or anchor results, patch and dependency manifest artifacts, source payload |
 
 Three rules resolve most cases:
 
-- **Subject versus measurement.** A setting that changes the artifact under test belongs in the subject descriptor; a setting that changes how it is exercised or measured belongs in comparison context. Both are coordinates; the split exists for readability and adapter consistency, and a field goes in exactly one.
-- **Intended versus realized.** An adaptive timer's minimum-duration rule is comparison context; the loop count it chose is procedure. A requested cache reset is comparison context; whether it ran is procedure. Per-observation ordinal, group, pair, and inclusion data belongs on structured observations, not in procedure.
-- **Identity versus annotation.** A timer, harness, probe, or data-reduction version goes in comparison context if its change must split history, observed context if it should only annotate, and provenance if audit-only. The test for the last two: a fact belongs in observed context when a change in it could plausibly explain a change in the estimate, so a viewer or detector should show it beside the series and be able to group or filter by it; it belongs in provenance when it only serves to trace a result back to its run, logs, and inputs, and would be consulted once a specific result is already under investigation. A project that later needs an observed field to match promotes it into reported coordinates through a new mapping version and identity-policy schema; producers do not move fields on their own.
+- **Subject versus measurement.** A setting that changes the artifact under test belongs in the subject descriptor; a setting that changes how it is exercised or measured belongs in the protocol; a fact about the system it ran on belongs in `environment.system`. All are coordinates; the split exists for readability and adapter consistency, and a field goes in exactly one.
+- **Intended versus realized.** An adaptive timer's minimum-duration rule is protocol; the loop count it chose is procedure. A requested cache reset is protocol; whether it ran is procedure. A system fact is recorded as read from the attempt: when it cannot be read, the requested value is recorded with a warning such as `build-config-unverified`, and a read value that differs from the request carries `requested-value-mismatch`. Per-observation ordinal, group, pair, and inclusion data belongs on structured observations, not in procedure.
+- **Coordinate versus provenance.** A timer, harness, probe, or data-reduction version goes in the protocol whether or not its change should split history, which is the identity policy's choice (§4.3), and in provenance only if audit-only. The test: a fact belongs in coordinates when a change in it could plausibly explain a change in the estimate, so a viewer or detector should show it beside the series and be able to group or filter by it; it belongs in provenance when it only serves to trace a result back to its run, logs, and inputs, and would be consulted once a specific result is already under investigation.
 
 **Parameters set outside the harness.** A parameter need not come from the benchmark's own parameter domain. A runner may set environment variables for the measured process, or pass parameters of its own, to choose which variant is measured; these are workload-variant parameters, reported under the names used to set them. Thread control is the common case and has no single spelling (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, and others), so the names are reported as written rather than folded into one canonical `threads` parameter. A variant that capped two libraries is not the variant that capped three, and reporting the names is what keeps that difference visible instead of merging two measurements into one series. This is also what lets a project compare one thread against ten within a single suite: the two are ordinary variants, as a size of 10 and a size of 1000 are. A name the harness reports for itself, such as Google Benchmark's `threads:N`, must not arrive twice with conflicting values; the adapter resolves that before ingest.
 
-**The environment the measured process ran in.** A runner inherits the shell it was started from, so the measured process sees more than whoever ordered the run named. The environment actually passed to it is recorded per result as observed context and never enters identity: the variables that select the variant are already parameters, and this record exists so that a variable nobody ordered is visible after the fact. It is the environment of the measured process, whatever process model the harness uses internally, since a harness that spawns workers must give them the same environment for the record to be true. Only allowlisted variables are recorded, as in `benchmark-environments.md` §3.1, because an inherited environment carries tokens and credentials in CI and a result store is shared. This applies to every artifact the result references as well: a capture of the whole environment kept as an artifact is the same exposure.
+**The environment the measured process ran in.** A runner inherits the shell it was started from, so the measured process sees more than whoever ordered the run named. The environment actually passed to it is recorded per result in `environment.system`, which the default identity policy ignores: the variables that select the variant are already parameters, and this record exists so that a variable nobody ordered is visible after the fact. It is the environment of the measured process, whatever process model the harness uses internally, since a harness that spawns workers must give them the same environment for the record to be true. Only allowlisted variables are recorded, as in `benchmark-environments.md` §3.1, because an inherited environment carries tokens and credentials in CI and a result store is shared. This applies to every artifact the result references as well: a capture of the whole environment kept as an artifact is the same exposure.
 
 **Naming the subject.** `subject.name` is a naming decision, and it belongs to whoever ordered the run rather than to the producer. A producer that derives it from the source URI collides whenever one repository holds several subjects, since a C++ library and its Python bindings derive to the same name, and splits one subject's history across a fork, mirror, or rename. Producers are expected to be told the name; derivation is a fallback for ad hoc results.
 
 The top-level `source` is the authoritative axis. The subject component with role `primary` may omit its `source`; if present it must match, and a mismatch is an identity violation (§5.4). Non-primary components carry a source URI and pinned revision as fixed coordinates.
 
-**Environment setup is out of scope.** How the subject and its pinned components are obtained, built, and installed, such as a PyPI wheel versus a source build with particular flags or BLAS backend, is the job of whoever prepares the environment; the runner never builds or installs. A pinned revision identifies code, not the installed artifact, so the runner or adapter records the facts about the environment it knows to matter: in the subject descriptor when they change the artifact under test (install method, build type, compiler flags), in observed context when they should only annotate, and as a dependency manifest artifact in provenance when a full inventory is wanted. This document prescribes none of those facts and does not aim at reproducing an environment; it records enough to tell two environments apart.
+**Environment setup is out of scope.** How the subject and its pinned components are obtained, built, and installed, such as a PyPI wheel versus a source build with particular flags or BLAS backend, is the job of whoever prepares the environment; the runner never builds or installs. A pinned revision identifies code, not the installed artifact, so the runner or adapter records the facts about the environment it knows to matter: in the subject descriptor when they change the artifact under test (install method, build type, compiler flags), in `environment.system` when they describe the system around it, and as a dependency manifest artifact in provenance when a full inventory is wanted. This document prescribes none of those facts and does not aim at reproducing an environment; it records enough to tell two environments apart.
 
-A runner-level **probe** maps to a quantity plus the instrumentation used to acquire it: `GPUTimeProbe` might yield `gpu-time` via CUDA events, `OSSMemoryProbe` yield `peak-rss` via a named OS counter. Probe names are not a schema vocabulary. Comparison context and procedure are open objects; Appendix B lists recommended keys so adapters spell the same warmup, calibration, timer, thread, or cache strategy the same way and land in the same series.
+A runner-level **probe** maps to a quantity plus the instrumentation used to acquire it: `GPUTimeProbe` might yield `gpu-time` via CUDA events, `OSSMemoryProbe` yield `peak-rss` via a named OS counter. Probe names are not a schema vocabulary. Protocol, `environment.system`, and procedure are open objects; Appendix B lists recommended keys so adapters spell the same warmup, calibration, timer, thread, or cache strategy the same way and land in the same series.
 
 The use cases in [`docs/use-cases/`](../use-cases/README.md) and their [template](../use-cases/UC_NN_TEMPLATE.md) reason in four coordinates. They map onto this schema as follows; note that the template's "environment" includes dependency versions, which are pinned subject components here, while `environment` in this document means the host.
 
@@ -180,18 +187,20 @@ The use cases in [`docs/use-cases/`](../use-cases/README.md) and their [template
 |---|---|
 | Code identity | workload variant and its parameters/dataset; benchmark identity |
 | Code version | subject revision, dirty flag, and working-tree id; subject configuration; pinned non-primary components |
-| Environment | environment identity; resource selection; observed context for OS, microcode, load |
-| Execution context | comparison context; procedure (`round`, `slot`); structured observation keys; `run_key` and caller labels |
+| Environment | environment identity and system (OS, microcode); resource selection; condition measurements for load |
+| Execution context | protocol; procedure (`round`, `slot`); structured observation keys; `run_key` and caller labels |
 
 ### 4.3 Fingerprints
 
 The **reported-coordinate fingerprint** preserves the complete tuple before any policy: top-level project/source, the exact `benchmark` identity, and the `coordinates` object of §5.2. It never contains row IDs, an estimator, the axis revision, or attempt/run keys.
 
 ```text
-reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v1\0" + JCS(reported_coordinates))
+reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v2\0" + JCS(reported_coordinates))
 ```
 
-A project's **identity policy** projects and normalizes reported coordinates into a comparison-identity object, for example by normalizing equivalent source URIs, mapping exact benchmark revisions to declared versions, or omitting a coordinate it allows to vary. The policy carries an `identity_schema` that changes whenever projection semantics or continuity mappings change; an operational release that yields the same schema does not split history. Continuity mappings, which keep history across a benchmark rename, an added parameter, or a machine upgrade, are applied in this projection step; their shape, authoring, and audit trail are specified in a separate design document.
+A project's **identity policy** projects and normalizes reported coordinates into a comparison-identity object, for example by normalizing equivalent source URIs, mapping exact benchmark revisions to declared versions, or omitting a coordinate it allows to vary. It is one **projection** (`schemas/projection/0.1.0`): a projection names the `axis` a series follows, for the identity policy the designated subject revision, and gives every other fact a role, `match`, `normalize`, or `ignore`. An ignored fact never splits a series, but a change in it from one point to the next is recorded as a warning on the point, so detectors and views see it. The default (`examples/default.json`) matches every coordinate except `environment.system`, of which it matches only the runtime; one behaviour changes from the former split, in that a thread cap inherited from the shell no longer splits history (`benchmark-environments.md` §9 question 2). The policy carries an `identity_schema` that changes whenever projection semantics or continuity mappings change; an operational release that yields the same schema does not split history. Continuity mappings, which keep history across a benchmark rename, an added parameter, or a machine upgrade, are applied in this projection step; their shape, authoring, and audit trail are specified in a separate design document.
+
+Any other projection, such as a comparison profile (§5.5) or a sweep across kernel versions (`examples/kernel-sweep.json`), is materialized on request over the same results into series of the same form, and records the ingest watermark it was built from. Its axis may combine several facts, as in a two-factor study; a projection whose axis is not the code must match the subject tree unless it declares `mixed_code`, as a trend over time does.
 
 ```text
 comparison_fingerprint = SHA-256("benchmark-comparison-v1\0" + identity_schema + "\0" + JCS(comparison_identity))
@@ -212,7 +221,9 @@ A quantity declaration carries:
 - **`direction`** *(optional)*: `lower-is-better` or `higher-is-better`. Recorded because producers know it; excluded from identity and verdicts (rule 11).
 - **`deterministic`** *(optional)*: repetition under fixed conditions reproduces the value, as with simulated instruction counts or binary size. One observation is then complete evidence, not a weak sample.
 
-Percentiles are estimators, not quantities: tracked p99 latency is quantity `latency` with estimator `p99`, one series per percentile. The same physical quantity may be a measurand in one series and observed context in another; name and unit conventions are shared so a value moves between the two without translation.
+Percentiles are estimators, not quantities: tracked p99 latency is quantity `latency` with estimator `p99`, one series per percentile. The same physical quantity may be a measurand in one series and a condition measurement beside another; name and unit conventions are shared so a value moves between the two without translation.
+
+**Condition measurements.** A state the system passes through during an attempt, such as temperature or load, is a sibling result for its own quantity sharing the measurand's `attempt_key`, with `protocol.probe` naming the sensor and how it was read (Appendix B). A probe that cannot read yields status `skipped` with reason `probe-unavailable`. `examples/arrow-temperature.json` is the temperature sibling of `examples/arrow.json`.
 
 ### 4.5 Estimators and compound outputs
 
@@ -238,7 +249,7 @@ A **compound estimator** additionally declares semantic input roles and quantiti
 **How a compound result is created.** A compound is an ordinary result for its own quantity, produced by a short pipeline that runs after its inputs exist and reads only stored, immutable results:
 
 1. **Resolve inputs by role** within one `run_key`, and record each as a `(producer, ingest_key)` reference in `provenance.references`.
-2. **Check compatibility.** Inputs must share what the compound's series will claim: subject revision and tree, pinned components, environment, comparison context apart from quantity-specific instrumentation such as `protocol.timer`, `protocol.synchronization`, and `protocol.probe`, and, across attempts, `round`. Instrumentation may differ per input, as it does between CPU and GPU time; it stays on the referenced inputs, and the compound's own comparison context carries only the shared keys. Attempt integrity (§5.3) guarantees this for same-attempt inputs; the consuming profile (§5.5) does for cross-attempt ones.
+2. **Check compatibility.** Inputs must share what the compound's series will claim: subject revision and tree, pinned components, environment, protocol apart from quantity-specific instrumentation such as `protocol.timer`, `protocol.synchronization`, and `protocol.probe`, and, across attempts, `round`. Instrumentation may differ per input, as it does between CPU and GPU time; it stays on the referenced inputs, and the compound's own protocol carries only the shared keys. Attempt integrity (§5.3) guarantees this for same-attempt inputs; the consuming profile (§5.5) does for cross-attempt ones.
 3. **Pair observations** by ordinal or pair key. Pairing needs equal counts, which is why the profiles require interleaved rounds and equal repetitions.
 4. **Apply the derivation rule per pair**, such as `max` of CPU and GPU time or the ratio of narwhals to native time. The results are the compound's observation batch, kept as structured observations with their ordinals, and the rule is declared next to them in `measurement.derivation` as an estimator at `input_level: observations`.
 5. **Apply an ordinary estimator** to that batch, `median` say, as the producer estimate. Policy may materialize other estimators from the same batch later.
@@ -260,7 +271,6 @@ The indexed contract remains scalar: `median([cpu_times, gpu_times])` emits one 
 | **Identity facts** | reported source, `coordinates`, `reported_coordinates_fingerprint`, subject `revision_key`; project and benchmark identity when not thin |
 | **Attempt grouping** | `attempt_key` |
 | **Outcome** | `status`, optional reason, optional quantitative constraint |
-| **Observed context** | optional immutable condition snapshot |
 | **Producer evidence** | optional observation batch and immutable typed summaries |
 | **Method** | optional realized procedure JSON, including `round` within the run |
 | **Provenance** | producer/version, ingest/native/run/batch keys, caller labels, dirty tri-state flags and working-tree ids, references to input or anchor results, mapping version, timestamps, artifacts, payload URI/checksum |
@@ -280,7 +290,7 @@ Absence of a row means the variant was not reported. Telling a lost result from 
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {"name": "example.org/benchmark-adapter", "version": "4.0", "mapping_version": "native-to-benchx/v5"},
   "ingest_key": "ci-1234:parquet-read/snappy:wall-time",
   "attempt_key": "ci.example.org/runs/ci-1234/attempts/parquet-read-snappy-1",
@@ -299,20 +309,22 @@ Absence of a row means the variant was not reported. Telling a lost result from 
       "configuration": {"build_type": "release", "compiler": "clang-18"}
     },
     "quantity": {"name": "wall-time", "unit": "s"},
-    "comparison_context": {
-      "python": "3.12",
-      "protocol": {
-        "name": "benchmark-time",
-        "version": "v1",
-        "timer": "perf_counter",
-        "warmup": {"mode": "time", "seconds": 1},
-        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.01},
-        "filesystem_cache": "drop-before-attempt"
-      }
+    "protocol": {
+      "name": "benchmark-time",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {"mode": "time", "seconds": 1},
+      "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.01},
+      "filesystem_cache": "drop-before-attempt"
     },
     "environment": {
       "schema": "machine/v1",
-      "identity": {"runner": "bench-01", "cpu": "AMD EPYC 7R13", "cores": 8}
+      "identity": {"runner": "bench-01", "cpu": "AMD EPYC 7R13", "cores": 8},
+      "system": {
+        "os": {"kernel": "6.8.0-31-generic"},
+        "libc": {"version": "2.39"},
+        "runtime": {"python": "3.12"}
+      }
     }
   },
   "measurement": {
@@ -343,7 +355,6 @@ Absence of a row means the variant was not reported. Telling a lost result from 
       }
     ]
   },
-  "observed_context": {"kernel": "6.8.0-31-generic", "glibc": "2.39"},
   "procedure": {
     "inner_iterations": 100,
     "attempted_repetitions": 5,
@@ -372,7 +383,7 @@ A thin local message (§4.1) from a contributor's laptop omits `project` and `be
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "producer": {"name": "example.org/benchx-cli", "version": "0.1.0", "mapping_version": "timeit-to-benchx/v1"},
   "ingest_key": "session-7f3a:truncate/role=variant:round-1:wall-time",
   "attempt_key": "urn:uuid:7c9e6679-7425-40de-944b-e07fc1f90ae7",
@@ -388,19 +399,16 @@ A thin local message (§4.1) from a contributor's laptop omits `project` and `be
       ]
     },
     "quantity": {"name": "wall-time", "unit": "s"},
-    "comparison_context": {
-      "python": "3.12",
-      "protocol": {
-        "name": "timeit",
-        "version": "v1",
-        "timer": "perf_counter",
-        "warmup": {"mode": "repetitions", "n_warmup": 1},
-        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.2},
-        "repetitions": {"mode": "fixed", "n_repeat": 5},
-        "schedule": {"unit": "attempt", "rule": "alternating", "rounds": 5}
-      }
+    "protocol": {
+      "name": "timeit",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {"mode": "repetitions", "n_warmup": 1},
+      "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.2},
+      "repetitions": {"mode": "fixed", "n_repeat": 5},
+      "schedule": {"unit": "attempt", "rule": "alternating", "rounds": 5}
     },
-    "environment": {"schema": "local/v1", "identity": {"hostname": "rok-laptop"}}
+    "environment": {"schema": "local/v1", "identity": {"hostname": "rok-laptop"}, "system": {"runtime": {"python": "3.12"}}}
   },
   "measurement": {
     "status": "success",
@@ -454,16 +462,16 @@ After accepting the Arrow message above, the server may materialize points such 
 **Derived projections**
 
 - A result contributes to a series when it has a producer estimate for that estimator or enough observations for the server to derive one. The value is stored in `series_point`; a producer estimate for the same estimator stays unchanged, and a material discrepancy is recorded as a point warning.
-- Producers never send a comparison fingerprint, series identifier, series point, or identity-policy schema. Reported coordinates and producer evidence are immutable; derived indexes change only by adding or rebuilding policy-versioned materializations, and schemas are retained side by side.
-- `observed_context` is excluded from reported coordinates and never enters identity; analyses may annotate, filter, or stratify by it.
+- Producers never send a comparison fingerprint, series identifier, series point, or projection. Reported coordinates and producer evidence are immutable; derived indexes change only by adding or rebuilding policy-versioned materializations, and schemas are retained side by side.
+- Condition measurements are ordinary results and never enter comparison identity; analyses may annotate, filter, or stratify by them.
 
 **Attempts and keys**
 
 - A harness invocation reporting several quantities yields one result per quantity sharing `attempt_key`; corresponding observations share group/ordinal or pair keys.
-- **Attempt integrity.** Results sharing an `attempt_key` must agree on project, designated source, subject revision, benchmark revision, dirty flags, working-tree ids, workload variant, subject descriptor, environment identity, and `run_key`. They may differ in quantity, resource selection, and quantity-specific instrumentation. Disagreement with a stored sibling is an *attempt conflict* (§5.4). Resource selection is what lets GPU 0 and GPU 1 results share one host environment.
+- **Attempt integrity.** Results sharing an `attempt_key` must agree on project, designated source, subject revision, benchmark revision, dirty flags, working-tree ids, workload variant, subject descriptor, environment identity and system, and `run_key`. They may differ in quantity, resource selection, and quantity-specific instrumentation. Disagreement with a stored sibling is an *attempt conflict* (§5.4). Resource selection is what lets GPU 0 and GPU 1 results share one host environment.
 - Two results are **code-identical** when their `subject_tree` ids match, and likewise for `benchmark_tree`. This is the comparison unit for local work: a dirty checkout against HEAD is two distinct trees, and repeated rounds of the same dirty checkout are one tree. Detection and history still use the revision axis; how a project charts results not marked `clean` is its policy, and the tree id is what lets it annotate them honestly.
 - `run_key` comes from the run author, who may also attach `provenance.labels`, a string map such as `{"env": "numpy-2.0"}`, for selecting sides of a comparison. The executor creates a globally namespace-qualified `attempt_key`, such as a URI-like key or UUID, and producers preserve or deterministically map it. Keys and labels never enter identity. Identical retries of `(producer, ingest_key)` return the existing result; different payloads conflict.
-- Pairing across attempts, such as interleaved baseline and contender runs (UC-03), is expressed by matching `procedure.round` on the attempts and matching pair keys on structured observations. `round` is assigned by the run author, increases monotonically within a run, and is kept by a retry, which gets a new attempt key but the same round so that pairing survives. It is never placed in comparison context, which would split the series. `procedure.slot` is the attempt's position in the run's realized order across all sides, so a comparator can verify the schedule it was given, whether alternating or random, and regress estimates on slot to detect drift. When a harness interleaves at the observation level, as Google Benchmark's random interleaving does, each observation carries its own `slot` and `pair` instead. The intended schedule is `protocol.schedule` in comparison context (Appendix B); the slots are the realized fact.
+- Pairing across attempts, such as interleaved baseline and contender runs (UC-03), is expressed by matching `procedure.round` on the attempts and matching pair keys on structured observations. `round` is assigned by the run author, increases monotonically within a run, and is kept by a retry, which gets a new attempt key but the same round so that pairing survives. It is never placed in the protocol, which would split the series. `procedure.slot` is the attempt's position in the run's realized order across all sides, so a comparator can verify the schedule it was given, whether alternating or random, and regress estimates on slot to detect drift. When a harness interleaves at the observation level, as Google Benchmark's random interleaving does, each observation carries its own `slot` and `pair` instead. The intended schedule is `protocol.schedule` (Appendix B); the slots are the realized fact.
 - `provenance.started_at` is required on every result. It is the measurement start on the producer's clock and the only fact that orders attempts across runs; ingest time is never used for ordering.
 - Ratios, confidence bounds, and faster/slower classifications produced by a comparison are a separate comparison document, not fields of a result; the comparator design specifies it.
 - Ground-truth values never leave the runner. What is recorded is what the runner derived from them: an error norm or mismatch count as another quantity under the same attempt, and the observed check as `quality.validation.correctness` (`pass` or `fail`). The verdict that acts on it is decision policy. A full dependency manifest is a provenance artifact; only the components policy treats as identity are pinned in the subject descriptor.
@@ -484,14 +492,14 @@ The ingest object (§5.2) is the message; transport is a deployment choice. The 
 
 ### 5.5 Comparison profiles
 
-Results carry facts; a **profile** is a comparator-time check that a set of results sharing a `run_key` is fit for one kind of comparison. Profiles are not declared by producers and add no schema fields. Each use case in `docs/use-cases/` names one; the comparator validates it before producing a comparison document and refuses to compare otherwise.
+Results carry facts; a **profile** is a comparator-time check that a set of results sharing a `run_key` is fit for one kind of comparison. A profile is a built-in projection (§4.3) whose axis is the coordinate it varies; `schemas/projection/0.1.0/examples/revisions-profile.json` is `revisions`. Profiles are not declared by producers and add no schema fields. Each use case in `docs/use-cases/` names one; the comparator validates it before producing a comparison document and refuses to compare otherwise.
 
 | Profile | Varies | Must agree | Invariants checked over the run |
 |---|---|---|---|
-| `single-run` ([UC-01](../use-cases/UC-01-short-slug.md)) | workload parameters | comparison context | none beyond attempt integrity |
-| `variants` ([UC-02](../use-cases/UC-02-variants.md)) | one or more workload parameters chosen by the caller, `parameters.role` by default | subject tree id, subject configuration, environment, comparison context, every other workload parameter | equal attempt counts per side; sides alternate by `procedure.slot` |
-| `revisions` ([UC-03](../use-cases/UC-03-compare.md)) | subject tree id | workload variant, subject configuration, environment, comparison context | equal attempt counts per side; sides alternate by `procedure.slot`; each side has exactly one tree id and the two differ; every result of both sides is `clean` (`subject_dirty` and `benchmark_dirty`; `dirty` and `unknown` both fail), invariant `clean-tree` |
-| `environments` ([UC-04](../use-cases/UC-04-cross-env.md)) | one pinned component or subject configuration, named by `labels` | subject revision, workload variant, host environment, comparison context | exactly two label values whose reported coordinates differ; equal attempt counts per label; sides alternate by `procedure.slot` |
+| `single-run` ([UC-01](../use-cases/UC-01-short-slug.md)) | workload parameters | protocol | none beyond attempt integrity |
+| `variants` ([UC-02](../use-cases/UC-02-variants.md)) | one or more workload parameters chosen by the caller, `parameters.role` by default | subject tree id, subject configuration, environment, protocol, every other workload parameter | equal attempt counts per side; sides alternate by `procedure.slot` |
+| `revisions` ([UC-03](../use-cases/UC-03-compare.md)) | subject tree id | workload variant, subject configuration, environment, protocol | equal attempt counts per side; sides alternate by `procedure.slot`; each side has exactly one tree id and the two differ; every result of both sides is `clean` (`subject_dirty` and `benchmark_dirty`; `dirty` and `unknown` both fail), invariant `clean-tree` |
+| `environments` ([UC-04](../use-cases/UC-04-cross-env.md)) | one pinned component or subject configuration, named by `labels` | subject revision, workload variant, host environment, protocol | exactly two label values whose reported coordinates differ; equal attempt counts per label; sides alternate by `procedure.slot` |
 | `cross-machine` (template example, pending a use case) | environment identity | subject tree id, workload variant, subject configuration | each side references an anchor result from the same run via `provenance.references` |
 
 **Sides are chosen at comparison time.** The coordinate a profile varies is an argument to the comparator, not a declaration by the producer. Workload parameters are always recorded, so any parameter or set of parameters can be the varying one: `stable` for a sort-algorithm study, `fast_path` for a fast-path deficit, `{role, size}` for a two-factor design. Each distinct assignment of the chosen parameters is one side, and every other coordinate must agree. `role` is only the conventional name that UC-02's `--baseline`/`--variant` flags write; nothing in the schema privileges it. A comparison that was not planned when the run was made is therefore the same operation as one that was, provided the run contains the sides; what a run did not measure, the comparator cannot invent, and a planned run is what guarantees the interleaving invariant.
@@ -500,7 +508,7 @@ A comparison in which any side is not `clean` is **local-only** under the profil
 
 A revision may hold several attempts with identical coordinates, since every attempt is its own point, so viewers and comparators must expect more than one result per coordinates and revision. A comparison document therefore lists the `(producer, ingest_key)` of every result it consumed. That is also what lets a saved baseline be reused by reference instead of re-measured (Arrow local story).
 
-A trend over ad hoc attempts, ordered by run and `round` and then by `started_at`, is likewise built by the comparator under a local policy from the stored facts. The store never materializes such a series: `series` and `series_point` follow the revision axis only, and no timestamp or counter in a result implies code identity.
+A trend over ad hoc attempts, ordered by run and `round` and then by `started_at`, is likewise a projection over the stored facts, with `mixed_code` unless it matches the subject tree (§4.3); no timestamp or counter in a result implies code identity.
 
 ## 6. Migration contract
 
@@ -514,21 +522,21 @@ Importers must be idempotent, retain source payload and mapping version, report 
 
 | Source | Core mapping | Important caveat |
 |---|---|---|
-| **ASV** | hardware → environment; OS → observed context; environment/dependencies/build → subject descriptor or comparison context by semantics; benchmark + parameters → workload variant; result → **median estimate**; samples → observations; CI99 → median confidence interval | `null` is failed and `NaN` is skipped. Preserve exact benchmark version as benchmark identity; map its declared semantic version conservatively into comparison context. |
-| **Conbench** | native case → workload variant; hardware → environment; source → designated source/revision; context fields split among subject, comparison context, and observed context; data → observations; times → procedure | Derive quantity and estimator; do not copy `history_fingerprint`. Use the source deployment's configured summary policy. |
+| **ASV** | hardware → environment; OS → environment system; environment/dependencies/build → subject descriptor, protocol, or environment system by semantics; benchmark + parameters → workload variant; result → **median estimate**; samples → observations; CI99 → median confidence interval | `null` is failed and `NaN` is skipped. Preserve exact benchmark version as benchmark identity; map its declared semantic version conservatively into protocol. |
+| **Conbench** | native case → workload variant; hardware → environment; source → designated source/revision; context fields split among subject, protocol, and environment system; data → observations; times → procedure | Derive quantity and estimator; do not copy `history_fingerprint`. Use the source deployment's configured summary policy. |
 | **Bencher** | Project/Testbed/Benchmark/Measure → project/environment/workload variant/quantity; Metric → source-defined estimate; Report → provenance | Bounds are adapter-defined. Keep opaque bounds as `source_bounds`; threshold direction is decision policy. |
-| **Codespeed** | Project/source/revision → project and designated axis; Executable → subject descriptor; Benchmark → workload variant + quantity; Environment → environment/observed context; Result aggregates → summaries | `Benchmark.data_type` selects mean or median. Snapshot mutable unit definitions. |
-| **LNT** | suite → project; Machine fields split among subject, environment, comparison context, and observed context; Test → workload variant; metric → quantity; list/scalar → observations/estimate; Run → provenance | Preserve native order, status/hash, and source metadata. Opaque machine identity is thin. |
+| **Codespeed** | Project/source/revision → project and designated axis; Executable → subject descriptor; Benchmark → workload variant + quantity; Environment → environment identity/system; Result aggregates → summaries | `Benchmark.data_type` selects mean or median. Snapshot mutable unit definitions. |
+| **LNT** | suite → project; Machine fields split among subject, environment identity, protocol, and environment system; Test → workload variant; metric → quantity; list/scalar → observations/estimate; Run → provenance | Preserve native order, status/hash, and source metadata. Opaque machine identity is thin. |
 | **Nyrkiö** | test path → workload variant; metric name/unit → quantity; value → source-defined estimate; source attributes → revision | Preserve per-metric direction as source decision metadata; conflicts require review. |
 | **github-action-benchmark** | suite/project; name → workload variant; tool/unit → quantity; value → source-defined estimate; commit/date → revision/provenance | Interpret `range` by adapter version; otherwise retain it as an opaque summary. History may be truncated. |
-| **OpenTelemetry Benchmarks** | scenario ID/workload → workload variant/comparison context; tracked package version → revision; `name`/`unit`/`value` → quantity/estimate; `extra` → environment/observed context/provenance | Its current output is github-action-benchmark's `{name, unit, value, extra}` format. Estimator and direction come from the scenario document; observations and uncertainty are absent. |
-| **rustc-perf** | artifact → revision; pstat dimensions → workload variant/comparison context/quantity; collection → run/attempt/observation grouping | Group compatible collection rows into observations. Environment is thin unless collector metadata can be joined. |
+| **OpenTelemetry Benchmarks** | scenario ID/workload → workload variant/protocol; tracked package version → revision; `name`/`unit`/`value` → quantity/estimate; `extra` → environment identity/system/provenance | Its current output is github-action-benchmark's `{name, unit, value, extra}` format. Estimator and direction come from the scenario document; observations and uncertainty are absent. |
+| **rustc-perf** | artifact → revision; pstat dimensions → workload variant/protocol/quantity; collection → run/attempt/observation grouping | Group compatible collection rows into observations. Environment is thin unless collector metadata can be joined. |
 | **CodSpeed** | aggregate-only source estimate | No reviewed public export schema supports a migration contract. |
 
 ### 6.2 Live harness adapters
 
-- **Google Benchmark:** iteration rows become observations; aggregate rows remain producer summaries; secondary metrics become sibling results sharing `attempt_key`; split mixed context into comparison context, environment, observed context, procedure, and provenance.
-- **pytest-benchmark:** round data becomes observations; requested warmup/timing strategy goes in comparison context, realized rounds, iterations, and warmups in procedure.
+- **Google Benchmark:** iteration rows become observations; aggregate rows remain producer summaries; secondary metrics become sibling results sharing `attempt_key`; split mixed context into protocol, environment identity, environment system, procedure, and provenance.
+- **pytest-benchmark:** round data becomes observations; requested warmup/timing strategy goes in protocol, realized rounds, iterations, and warmups in procedure.
 - **JMH:** preserve fork grouping; map `scoreConfidence` as a 99.9% confidence interval; mode and secondary metrics define quantity/estimator semantics.
 - **cargo-criterion:** pair `iteration_count` with `measured_values`; retain typical/mean/median/MAD/slope estimates and bounds.
 - **BenchmarkDotNet:** detailed measurements become observations; retain parameters, job, host, statistics, confidence interval, and percentiles with source semantics.
@@ -537,13 +545,13 @@ Importers must be idempotent, retain source payload and mapping version, report 
 
 OpenTelemetry defines no general benchmark-result convention; its benchmark repository reports through github-action-benchmark, and OTLP Metrics is a generic time-series transport. Compatibility is therefore an adapter concern.
 
-For OTLP export, map environment to `Resource`, producer name/version to `Scope`, quantity/unit to a `Metric`, the exported `series_point` estimate to a `Gauge` point, and project/source/workload variant/comparison context/resource selection/revision/estimator to point attributes. Export only usable scalar estimates: OTLP has no lossless representation for observations, source bounds, intervals, errors/skips, or idempotency keys, so the result store remains the system of record. Because OTLP treats attributes as stream identity, do not export observed context as metric attributes when one continuous downstream series is required; put it on a linked log/span instead. When ingesting OpenTelemetry CI/CD metadata, map `vcs.repository.url.full` to source URI, `vcs.ref.head.revision` to revision key, `cicd.pipeline.run.id` to run key, and `cicd.worker.id` to environment identity, preserving the original attributes and schema URL in provenance.
+For OTLP export, map environment to `Resource`, producer name/version to `Scope`, quantity/unit to a `Metric`, the exported `series_point` estimate to a `Gauge` point, and project/source/workload variant/protocol/resource selection/revision/estimator to point attributes. Export only usable scalar estimates: OTLP has no lossless representation for observations, source bounds, intervals, errors/skips, or idempotency keys, so the result store remains the system of record. Because OTLP treats attributes as stream identity, do not export ignored `environment.system` fields as metric attributes when one continuous downstream series is required; put them on a linked log/span instead. When ingesting OpenTelemetry CI/CD metadata, map `vcs.repository.url.full` to source URI, `vcs.ref.head.revision` to revision key, `cicd.pipeline.run.id` to run key, and `cicd.worker.id` to environment identity, preserving the original attributes and schema URL in provenance.
 
 ## 7. Scope and simplifications
 
 The following do not justify core tables for current use cases:
 
-- **Measurement procedure, measuring system, and model:** covered by comparison context, observed context, procedure, and provenance.
+- **Measurement procedure, measuring system, and model:** covered by protocol, environment system, condition measurements, procedure, and provenance.
 - **Runs/events:** `run_key` and `attempt_key` group results without a transactional parent.
 - **Observation rows, uncertainty budgets, covariance, and multidimensional data:** inline typed JSON for the common case; artifacts for the large or specialist case.
 - **Unit and estimator tables:** the quantity stores its unit; policy lists the estimators it projects.
@@ -573,6 +581,16 @@ A structure becomes first-class only when it participates in comparison identity
 
 The pinned primary-source links above are the review record included with this draft.
 
+## 9. Open questions from the placement revision
+
+1. **Scoped roles.** A projection gives a fact one role for every result it covers, so an allocator suite that must match the glibc version and a Parquet suite that should not cannot share one identity policy without matching it for both. Roles scoped by workload or quantity would solve this at the cost of precedence rules.
+2. **Conditions on measurements.** A projection cannot yet keep only results whose sibling measurement satisfies a bound, such as attempts with no throttle events. Conditioning on a state the workload itself drives, such as temperature, would bias the series.
+3. **Envelope weight.** Each condition measurement is a full result repeating the attempt's coordinates. Should one message be able to carry several sibling measurements?
+4. **Addressing pinned components.** JSON Pointers address array members by index; a release-line rule for one pinned component needs to address `subject.components` by `role`.
+5. **The system boundary.** For self-modifying systems, such as a warmed JIT or an on-disk kernel cache, whether a value is a coordinate or a measurement depends on whether "the system" is the code or the running process.
+6. **Stale materializations.** Who rebuilds a projection materialized on top of the identity policy, and when: on read, on a schedule, or only on request?
+7. **Sources of facts.** Whether a fact was declared, detected, or reported by a collector (`benchmark-environments.md` §9 question 1) has no home now that the observed-context record is retired; one option is a provenance map from JSON Pointer to source.
+
 ## Appendix A: Example quantities (non-normative)
 
 Illustrations of the open vocabulary (§4.4), with canonical UCUM units. None of these names is required; projects declare what they measure.
@@ -599,32 +617,42 @@ Illustrations of the open vocabulary (§4.4), with canonical UCUM units. None of
 | `throughput-items` | `1/s` | items/operations per second | ops/s, tokens/s, IOPS |
 | `energy` | `J` | energy consumed | RAPL, Scaphandre |
 | `power` | `W` | average power draw | SPECpower, mobile benchmarks |
-| `cpu-frequency` | `MHz` | observed frequency; often observed context instead | pyperf metadata |
-| `temperature` | `Cel` | sensor temperature; often observed context instead | pyperf metadata |
+| `cpu-frequency` | `MHz` | observed frequency; often a condition measurement instead | pyperf metadata |
+| `cpu-temperature` | `Cel` | sensor temperature; often a condition measurement instead | pyperf metadata |
+| `load-average` | `1` | 1-minute load average; a condition measurement | `/proc/loadavg`, pyperf |
+| `throttle-events` | `1` | thermal or power throttle events across the attempt; a condition measurement | throttle counters, NVML |
 | `binary-size` | `By` | linked artifact size; deterministic | rustc-perf `size:*`, LNT, Chromium |
 | `build-time` | `s` | time to build the artifact | LNT, Bencher tutorials |
 | `compression-ratio` | `1` | output/input size ratio | zstd, lzbench |
 | `score` | `1` | quality metric paired with performance | LNT `score`, MLPerf accuracy |
 
-## Appendix B: Recommended protocol and procedure keys (non-normative)
+## Appendix B: Recommended protocol, system, and procedure keys (non-normative)
 
-Comparison context and procedure are open objects (§4.2). These keys are recommended spellings for common acquisition settings so that adapters agree. Intended settings go under `comparison_context.protocol`; realized facts go under `procedure`; settings that change the artifact under test go under `subject.configuration`.
+Protocol, `environment.system`, and procedure are open objects (§4.2). These keys are recommended spellings for common acquisition settings so that adapters agree. Intended settings go under `protocol`; realized facts go under `procedure`; facts about the system go under `environment.system`; settings that change the artifact under test go under `subject.configuration`.
 
 | Key | Placement | Meaning | Example values |
 |---|---|---|---|
-| `protocol.name`, `protocol.version` | comparison context | Declared measurement protocol identity | `benchmark-time` / `v1` |
-| `protocol.timer` | comparison context | Clock or event source for a time quantity | `perf_counter`, `process_time`, `cuda-events`, `cuda-synchronize`, `rdtsc` |
-| `protocol.synchronization` | comparison context | Device synchronization before reading a timer | `none`, `stream`, `device` |
-| `protocol.warmup` | comparison context | Warmup policy | `{"mode": "none"}`, `{"mode": "repetitions", "n_warmup": 3}`, `{"mode": "time", "seconds": 1}` |
-| `protocol.calibration` | comparison context | How inner iterations are chosen; an adaptive target may be a compound of several quantities | `{"mode": "adaptive", "minimum_sample_seconds": 0.01}`, `{"mode": "adaptive", "minimum_sample_seconds": 0.01, "target": "max(cpu-time, gpu-time)"}`, `{"mode": "fixed", "inner_iterations": 100}` |
-| `protocol.repetitions` | comparison context | How many observations are requested. A harness that repeats at more than one level, as pyperf does with worker processes each producing several values, states the levels outermost first | `{"mode": "fixed", "n_repeat": 10}`, `{"mode": "adaptive", "max_seconds": 5}`, `{"mode": "fixed", "levels": [{"unit": "process", "n": 20}, {"unit": "value", "n": 3}]}` |
-| `protocol.filesystem_cache` | comparison context | Requested cache action | `unchanged`, `drop-before-attempt`, `drop-before-repetition` |
-| `protocol.gc` | comparison context | Garbage-collector policy during timing | `enabled`, `disabled`, `collect-before-repetition` |
-| `protocol.probe` | comparison context | Instrumentation for a non-time quantity | `{"name": "OSSMemoryProbe", "counter": "rss", "sampling_ms": 10}` |
-| `protocol.threads` | comparison context | A harness's own threading mode, when it is not settable per variant. Thread caps set through environment variables are **workload-variant parameters** instead (§4.2), so that one thread and ten can be compared within a suite | `{"mode": "harness-managed"}` |
-| `protocol.affinity` | comparison context | Requested CPU or NUMA pinning | `{"cpus": "0-7", "numa_node": 0}` |
-| `protocol.schedule` | comparison context | Intended interleaving: the unit alternated between sides, the ordering rule, and the number of rounds | `{"unit": "attempt", "rule": "alternating", "rounds": 5}`, `{"unit": "observation", "rule": "random", "rounds": 12}`, `{"unit": "pair", "rule": "random"}`, `{"unit": "attempt", "rule": "concurrent"}` |
+| `protocol.name`, `protocol.version` | protocol | Declared measurement protocol identity | `benchmark-time` / `v1` |
+| `protocol.timer` | protocol | Clock or event source for a time quantity | `perf_counter`, `process_time`, `cuda-events`, `cuda-synchronize`, `rdtsc` |
+| `protocol.synchronization` | protocol | Device synchronization before reading a timer | `none`, `stream`, `device` |
+| `protocol.warmup` | protocol | Warmup policy | `{"mode": "none"}`, `{"mode": "repetitions", "n_warmup": 3}`, `{"mode": "time", "seconds": 1}` |
+| `protocol.calibration` | protocol | How inner iterations are chosen; an adaptive target may be a compound of several quantities | `{"mode": "adaptive", "minimum_sample_seconds": 0.01}`, `{"mode": "adaptive", "minimum_sample_seconds": 0.01, "target": "max(cpu-time, gpu-time)"}`, `{"mode": "fixed", "inner_iterations": 100}` |
+| `protocol.repetitions` | protocol | How many observations are requested. A harness that repeats at more than one level, as pyperf does with worker processes each producing several values, states the levels outermost first | `{"mode": "fixed", "n_repeat": 10}`, `{"mode": "adaptive", "max_seconds": 5}`, `{"mode": "fixed", "levels": [{"unit": "process", "n": 20}, {"unit": "value", "n": 3}]}` |
+| `protocol.filesystem_cache` | protocol | Requested cache action | `unchanged`, `drop-before-attempt`, `drop-before-repetition` |
+| `protocol.gc` | protocol | Garbage-collector policy during timing | `enabled`, `disabled`, `collect-before-repetition` |
+| `protocol.probe` | protocol | Instrumentation for a non-time quantity, including a condition measurement and how it was sampled | `{"name": "OSSMemoryProbe", "counter": "rss", "sampling_ms": 10}`, `{"name": "hwmon", "sensor": "coretemp/package", "sampling": {"mode": "interval", "seconds": 1}}` |
+| `protocol.threads` | protocol | A harness's own threading mode, when it is not settable per variant. Thread caps set through environment variables are **workload-variant parameters** instead (§4.2), so that one thread and ten can be compared within a suite | `{"mode": "harness-managed"}` |
+| `protocol.affinity` | protocol | Requested CPU or NUMA pinning | `{"cpus": "0-7", "numa_node": 0}` |
+| `protocol.schedule` | protocol | Intended interleaving: the unit alternated between sides, the ordering rule, and the number of rounds | `{"unit": "attempt", "rule": "alternating", "rounds": 5}`, `{"unit": "observation", "rule": "random", "rounds": 12}`, `{"unit": "pair", "rule": "random"}`, `{"unit": "attempt", "rule": "concurrent"}` |
 | `configuration.execution_mode` | subject descriptor | JIT versus ahead-of-time execution of the subject | `jit`, `aot` |
+| `os.family`, `os.release`, `os.kernel` | system | Operating system and kernel | `linux`, `ubuntu-24.04`, `6.8.0-31-generic` |
+| `libc.name`, `libc.version` | system | C library | `glibc`, `2.39` |
+| `cpu.microcode`, `cpu.governor`, `cpu.boost`, `cpu.smt` | system | CPU firmware and settings as read before the attempt | `0xa20120e`, `performance`, `false`, `true` |
+| `gpu.driver`, `gpu.uuids`, `gpu.clocks_locked_mhz` | system | Accelerator driver, device ids, and a clock lock if set | `550.90.07`, `["GPU-3f2a..."]`, `1500` |
+| `container.image_digest` | system | Image the attempt ran in | `sha256:4f1c...` |
+| `runtime.python`, `runtime.implementation`, `runtime.compiler`, `runtime.cflags` | system | Language runtime of the measured process | `3.12.4`, `cpython`, `GCC 13.2.0`, `-O3` |
+| `process.environment`, `process.cgroup` | system | Allowlisted environment variables and cgroup limits of the measured process | `{"OMP_NUM_THREADS": "1"}`, `{"cpu_max": "max"}` |
+| `<collector>.*` | system | Facts a context collector reported, under its name (`harness-adapter.md` §5.1) | `{"numpy-build": {"blas": "openblas-0.3.27"}}` |
 | `inner_iterations` | procedure | Inner iterations actually used per observation | `100` |
 | `attempted_repetitions`, `completed_repetitions` | procedure | Observations requested and obtained | `5`, `5` |
 | `repetition_levels` | procedure | Per level, outermost first, repetitions requested and obtained, as totals over the attempt. For harnesses that repeat at several levels | `[{"unit": "process", "attempted": 20, "completed": 18}, {"unit": "value", "attempted": 60, "completed": 54}]` |

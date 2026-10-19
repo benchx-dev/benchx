@@ -38,7 +38,7 @@
       "$ref": "#/$defs/estimator"
     },
     "identity_schema": {
-      "description": "Identity-policy schema under which series membership and comparability were decided.",
+      "description": "Projection (schemas/projection/0.1.0) under which series membership and comparability were decided.",
       "$ref": "#/$defs/token"
     },
     "local_only": {
@@ -249,8 +249,8 @@
           "description": "Why the verdict is indeterminate, such as insufficient-history or duplicate-points.",
           "$ref": "#/$defs/token"
         },
-        "observed_context_differences": {
-          "description": "Observed-context keys whose values differ between target and reference.",
+        "unmatched_differences": {
+          "description": "Coordinates the projection does not match, by JSON Pointer, whose values differ between target and reference.",
           "type": "array",
           "uniqueItems": true,
           "items": {

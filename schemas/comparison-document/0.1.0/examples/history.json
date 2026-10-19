@@ -67,8 +67,8 @@
       "noise_source": "reference-points",
       "threshold": 0.012,
       "verdict": "no-change-detected",
-      "observed_context_differences": [
-        "kernel"
+      "unmatched_differences": [
+        "/coordinates/environment/system/os/kernel"
       ]
     }
   ],

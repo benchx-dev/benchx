@@ -76,21 +76,22 @@ Placement follows the schema (§4.2); nothing new is introduced:
 
 | Fact | Schema destination |
 |---|---|
-| runner name, CPU model, cores, accelerators, memory, instance type | `coordinates.environment` identity and metadata |
+| runner name, CPU model, cores, accelerators, memory, instance type | `coordinates.environment` identity and system |
 | the core set, GPU, or partition one result used | `coordinates.resource_selection` |
 | build type, compiler and flags, install method, BLAS backend, JIT or AOT | `coordinates.subject.configuration` |
 | dependency versions that policy treats as identity | pinned components of `coordinates.subject` |
-| thread caps, affinity, host runtime version | `coordinates.comparison_context` (`protocol.threads`, `protocol.affinity`) |
-| kernel, libc, driver, microcode, governor, turbo, load, temperature, image digest | `observed_context` |
+| thread caps, affinity | `coordinates.protocol` (`protocol.threads`, `protocol.affinity`) |
+| kernel, libc, driver, microcode, governor, turbo, image digest, host runtime version | `coordinates.environment.system` |
+| load, temperature | condition measurements: sibling results sharing `attempt_key` (schema §4.4) |
 | full package inventory | dependency manifest artifact in `provenance` |
-| preparation playbook or image version | declared; `environment.metadata` by default, identity if the project's identity policy says so |
+| preparation playbook or image version | declared; `environment.system`, matched if the project's identity policy says so |
 | `how_built`, `activation`, `shell`, target provider | declared; `provenance.info`, never identity |
 
-Declared and detected map onto the schema's existing split between intended and realized. A declared setting is an intended value and lands in comparison context or the subject descriptor. The matching detected value is the realized one and lands in procedure or observed context. When a setting is detectable but nobody declared an intent, as with a thread cap inherited from the shell, the realized value is recorded as the intended one too. When declared and detected disagree, both are kept where this rule puts them; benchx picks no winner, and a comparator can see the disagreement.
+Declared and detected map onto the schema's split between requested and read (schema §4.2). A coordinate holds the detected value wherever one exists; a declared value fills it only when nothing can be read back, with a warning such as `build-config-unverified`. When a setting is detectable but nobody declared it, as with a thread cap inherited from the shell, the detected value is recorded. When declared and detected disagree, the detected value is recorded, the declaration stays in the work order the result cites, and the result carries `requested-value-mismatch`.
 
 Every environment fact carries its source: `declared`, `detected`, or the name of the plugin that reported it. How the source is represented in the message is an open question (§9).
 
-Which conditions are identity and which are annotation is project policy, not a property of the condition (schema §1). The default above treats kernel and libc as observed context; a project benchmarking `malloc` promotes libc into identity through its identity policy, and producers do not move fields on their own.
+Which facts split history is project policy, not a property of the fact (schema §1). The default identity policy ignores kernel and libc; a project benchmarking `malloc` matches on the libc version in its identity policy, and producers do not move fields on their own.
 
 ## 4. Recommendations for every environment
 
@@ -138,7 +139,7 @@ A machine reserved for benchmarking, as in Apache Arrow's Conbench deployment, i
 **Identity and history**
 
 - Assign each node a stable name and declare it. Conbench keys history to the machine, and the Arrow story reports both failure modes that follow from getting identity wrong: a change that silently splits history, and, worse, one that silently blends incomparable results into one chart.
-- Decide deliberately what is machine identity. If OS, kernel, or driver versions are identity, every routine upgrade fragments history. If they are recorded nowhere, upgrades are invisible. The schema's answer is to keep them in observed context, so they annotate a series without splitting it, and to treat a real hardware succession as a continuity event.
+- Decide deliberately what is machine identity. If OS, kernel, or driver versions are identity, every routine upgrade fragments history. If they are recorded nowhere, upgrades are invisible. The schema's answer is to keep them in `environment.system`, which the default identity policy ignores, so they annotate a series without splitting it, and to treat a real hardware succession as a continuity event.
 - A replacement machine is a new environment even under the old name. Run old and new side by side on the same commits for a while before retiring the old one, so the offset between them is measured rather than guessed.
 
 **Quiet by construction**
@@ -162,7 +163,7 @@ A machine reserved for benchmarking, as in Apache Arrow's Conbench deployment, i
 **Triggering**
 
 - Treat pull-request code as untrusted. A long-lived tuned node that executes arbitrary contributor code needs a trigger restricted to trusted people, and isolation and cleanup between jobs. Both belong to the CI system.
-- Keep precision settings the same for baseline and contender, and know what they cost. The Arrow local story notes that CI's short repetitions can be less precise than a careful local run; precision is a budget decision, and it is recorded in comparison context either way.
+- Keep precision settings the same for baseline and contender, and know what they cost. The Arrow local story notes that CI's short repetitions can be less precise than a careful local run; precision is a budget decision, and it is recorded in the protocol either way.
 
 ### 5.4 Cloud and ephemeral instances
 
@@ -179,7 +180,7 @@ Self-hosted runners provisioned on demand, as OpenBLAS does through cirun, are t
 
 - Select devices in the work order, or in the calling script with `CUDA_VISIBLE_DEVICES` or the vendor's equivalent. A work order that requests a device the node lacks is refused. benchx records the selection as resource selection; on a multi-GPU host, results for GPU 0 and GPU 1 then share one host environment and differ in resource selection.
 - Keep the device in a steady state across runs: driver persistence enabled, exclusive use by the benchmark, and clocks and power limits fixed where the hardware permits. Accelerators throttle thermally like laptops do, and the advice on interleaving and on distrusting long trends applies.
-- Driver and runtime versions are observed context by default. A project whose subject is sensitive to them, such as one tracking kernel launch overhead, promotes them to identity in its policy.
+- Driver versions are ignored by the default identity policy. A project whose subject is sensitive to them, such as one tracking kernel launch overhead, matches on them in its policy.
 - Device synchronization, JIT warmup, and on-disk kernel caches vary by array library and sometimes by workload variant. They belong to the harness and the timer (see the timer design), never to the environment setup. What matters for the environment is that the cache state is the same for both sides: either both cold or both warm, and declared.
 - Partitioned devices such as MIG slices are resource selection; the partitioning scheme is part of the environment's identity.
 
@@ -187,7 +188,7 @@ Self-hosted runners provisioned on demand, as OpenBLAS does through cirun, are t
 
 A container is a good way to package L2 and a poor way to get a quiet machine.
 
-- Declare the image digest. It is the most compact honest description of a software environment there is, and by default it is observed context.
+- Declare the image digest. It is the most compact honest description of a software environment there is, and by default the identity policy ignores it.
 - A container does not isolate performance. The host's kernel, governor, other tenants, and tuning apply unchanged, so everything in §5.3 still applies to the host.
 - CPU quotas distort timing in ways that look like regressions. Give the container whole CPUs with a cpuset rather than a fractional quota. benchx records the cgroup limits it sees, so a quota at least does not go unnoticed.
 - Profilers and hardware counters usually need capabilities that default container profiles withhold. Granting them is the operator's decision (`profiling.md`).
@@ -206,11 +207,11 @@ Environments change. The aim is that a change is visible, attributable, and does
 
 | Change | What to do | How it shows up |
 |---|---|---|
-| OS, kernel, driver, or libc upgrade | upgrade between runs; re-measure a known commit before and after | observed context differs from that point on; the comparator carries the difference as a caveat (`comparator.md` §3) |
+| OS, kernel, driver, or libc upgrade | upgrade between runs; re-measure a known commit before and after | `environment.system` differs from that point on; the comparator carries the difference as a caveat (`comparator.md` §3) |
 | compiler or toolchain upgrade | same; declare the new toolchain | subject configuration changes; a new series under the default policy, joined by a continuity mapping if the project chooses |
-| tuning or playbook change | bump and declare the playbook version | environment metadata, or identity if the project's policy says so |
+| tuning or playbook change | bump and declare the playbook version | `environment.system`, matched only if the project's policy says so |
 | hardware swap or new machine | overlap old and new on the same commits | a new environment; history continues only through an explicit continuity event |
-| a thread cap or affinity that differs from last time | usually an accident: fix the calling script | comparison context differs, so results land in a different series rather than silently blending |
+| a thread cap or affinity that differs from last time | usually an accident: fix the calling script | the protocol or a workload parameter differs, so results land in a different series rather than silently blending |
 
 Continuity events and their audit trail are specified in a separate design document (schema §4.3).
 
@@ -245,7 +246,7 @@ This document removes building from the runner and limits enforcement to the pro
 ## 9. Open questions
 
 1. How is the source of a fact (§3.4) represented in the message: a marker per field, or one provenance map from field path to `declared`, `detected`, or a plugin name?
-2. Recording a realized value as the intended one lets an accidental setting, such as a leftover `OMP_NUM_THREADS`, enter comparison context and start a new series. That is visible, which is the point, but noisy. Should undeclared settings stay in observed context until a project's policy promotes them?
+2. An inherited setting, such as a leftover `OMP_NUM_THREADS`, is recorded in `environment.system`, which the default identity policy ignores, so it no longer starts a new series; a change in it is flagged on the series point instead (schema §4.3). Should the default policy match on the thread-control variables?
 3. Which harnesses can interleave sides on their own, and what do UC-02 and UC-03 look like on one that cannot? For UC-04 the loop is necessarily the caller's; for UC-03 it is the workbench's session loop (`system-decomposition.md` §3.4).
 4. Where do declarations live: in the work order, in a per-project configuration file, in a per-node file an operator maintains, or all three with a defined precedence?
 5. ~~Is the default allowlist of environment variables (§3.1) part of the core, or does each adapter contribute the variables its ecosystem cares about?~~ Both. The core holds the default, a project extends it, and an adapter adds the variables its ecosystem cares about; the runner composes one list and every record of the environment, including artifacts an adapter keeps, is limited to it.
