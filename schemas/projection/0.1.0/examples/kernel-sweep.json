@@ -1,0 +1,16 @@
+{
+  "identity_schema": "arrow/kernel-sweep/v1",
+  "description": "One Arrow tree measured across kernel versions: the kernel is the axis, the code is held fixed.",
+  "default": "match",
+  "rules": [
+    {
+      "scope": { "project": "arrow" },
+      "paths": {
+        "/coordinates/environment/facts/os/kernel": { "axis": { "order": "version" } },
+        "/provenance/subject_tree": "match",
+        "/coordinates/environment/facts": "ignore",
+        "/coordinates/environment/facts/runtime": "match"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:env-identity:0.1.0",
   "title": "BenchX environment identity",
-  "description": "The shape of coordinates.environment when coordinates.environment.schema is \"benchx/env-identity/0.1.0\" (docs/design/runner-schema.md §5.2). identity holds the fields that name the machine and key its environment record; facts holds everything else known about the system during the attempt. Neither placement decides what a comparison fixes: identity policy does (schemas/identity-policy/0.1.0), and the default policy matches identity and ignores facts other than runtime.",
+  "description": "The shape of coordinates.environment when coordinates.environment.schema is \"benchx/env-identity/0.1.0\" (docs/design/runner-schema.md §5.2). identity holds the fields that name the machine and key its environment record; facts holds everything else known about the system during the attempt. What a comparison fixes is a projection's business (schemas/projection/0.1.0).",
   "$comment": "coordinates.environment.identity is deliberately open in schemas/measurement-result/0.1.0 (minProperties: 1 only), to allow other identity schemas. A validator applies this schema to a result's coordinates.environment object only when its schema field equals \"benchx/env-identity/0.1.0\". GPU UUIDs are facts, not identity, so that swapping a card of the same model keeps naming the same machine; the device a result used is coordinates.resource_selection, not here.",
   "type": "object",
   "additionalProperties": false,

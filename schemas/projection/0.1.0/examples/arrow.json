@@ -1,0 +1,31 @@
+{
+  "identity_schema": "arrow/identity/v4",
+  "description": "Arrow's identity policy: the default, benchmark revisions mapped to a suite version, the C library fixed for allocator workloads, and Parquet wall time kept only for unthrottled attempts.",
+  "default": "match",
+  "estimators": [
+    { "name": "median", "method_version": "benchx/median/v1", "input_level": "observations" },
+    { "name": "min", "method_version": "benchx/min/v1", "input_level": "observations" }
+  ],
+  "rules": [
+    {
+      "scope": { "project": "arrow" },
+      "paths": {
+        "/revision/key": { "axis": { "order": "revision-graph" } },
+        "/source/uri": { "normalize": { "rule": "canonical-uri" } },
+        "/coordinates/environment/facts": "ignore",
+        "/coordinates/environment/facts/runtime": "match",
+        "/benchmark/revision/key": {
+          "normalize": { "rule": "map", "map": { "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e": "suite-v3" } }
+        }
+      }
+    },
+    {
+      "scope": { "project": "arrow", "workload": "alloc-*" },
+      "paths": { "/coordinates/environment/facts/libc/version": { "normalize": { "rule": "version-prefix", "depth": 2 } } }
+    },
+    {
+      "scope": { "project": "arrow", "workload": "parquet-*", "quantity": "wall-time" },
+      "conditions": [{ "quantity": "throttle-events", "estimator": "max", "op": "eq", "value": 0 }]
+    }
+  ]
+}

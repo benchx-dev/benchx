@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:projection:0.1.0",
+  "title": "BenchX projection",
+  "description": "How stored results become series (docs/design/benchmark-result-schema.md section 4.3): which results are covered, which fact is the axis, which facts must match as is or normalized, which are ignored, conditions on sibling measurements, and invariants a set of results must pass. A project's identity policy is the projection the store maintains on ingest; any other projection, including the comparison profiles of section 5.5, can be materialized over the same results into series of the same form.",
+  "$comment": "Rules the server enforces: paths are JSON Pointers into the result, limited to the reported coordinates (project, source, benchmark, coordinates) plus /revision/key and /provenance/subject_tree; exactly one axis applies to each result; the most specific scope wins, then the later rule, then the longest path; a null fact never equals anything; an identity policy's axis is /revision/key; a projection whose axis is not /revision/key or /provenance/subject_tree must match /provenance/subject_tree unless mixed_code is true; any change other than description needs a new identity_schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identity_schema", "default", "rules"],
+  "properties": {
+    "identity_schema": {
+      "description": "Versioned name of the projection. Enters comparison_fingerprint, so series of different projections never mix.",
+      "$ref": "#/$defs/token"
+    },
+    "description": { "type": "string" },
+    "default": {
+      "description": "Role of every reported fact no rule names.",
+      "enum": ["match", "ignore"]
+    },
+    "mixed_code": {
+      "description": "True when the projection deliberately puts results of different code at one axis value, such as a trend over time.",
+      "type": "boolean",
+      "default": false
+    },
+    "estimators": {
+      "description": "Estimators to materialize series for. Used when the projection is maintained as series; a comparison names its own.",
+      "type": "array",
+      "items": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/estimator" }
+    },
+    "invariants": {
+      "description": "Checks a set of results must pass before any comparison under this projection (section 5.5).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["one-run", "two-sides", "one-tree-per-side", "equal-attempts", "alternating-slots", "clean-tree", "anchor-reference"] }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "token": { "type": "string", "minLength": 1, "pattern": "^\\S+$" },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope"],
+      "anyOf": [ { "required": ["paths"] }, { "required": ["conditions"] } ],
+      "properties": {
+        "scope": {
+          "description": "Results the rule applies to; every member present must match, and an empty scope covers everything. Specificity is the number of members.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": { "$ref": "#/$defs/token" },
+            "benchmark": { "description": "Benchmark source URI.", "type": "string", "minLength": 1 },
+            "subject": { "$ref": "#/$defs/token" },
+            "workload": { "description": "Workload name or glob.", "type": "string", "minLength": 1 },
+            "quantity": { "$ref": "#/$defs/token" }
+          }
+        },
+        "description": { "type": "string" },
+        "paths": {
+          "type": "object",
+          "propertyNames": { "type": "string", "pattern": "^(/[^/]+)+$" },
+          "additionalProperties": { "$ref": "#/$defs/role" }
+        },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/condition" }
+        }
+      }
+    },
+    "role": {
+      "oneOf": [
+        { "description": "match: equal values share a series. ignore: kept on the result and shown beside the series, never splits it.", "enum": ["match", "ignore"] },
+        {
+          "description": "The fact a series follows, and how its values are ordered.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["axis"],
+          "properties": {
+            "axis": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["order"],
+              "properties": { "order": { "enum": ["revision-graph", "version", "numeric", "time", "unordered"] } }
+            }
+          }
+        },
+        {
+          "description": "Match after normalizing: version-prefix keeps the first depth components (2.39.1 at depth 2 is 2.39); map replaces values by a table, keeping unlisted ones; canonical-uri normalizes a source URI.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalize"],
+          "properties": {
+            "normalize": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule"],
+              "properties": {
+                "rule": { "enum": ["version-prefix", "map", "canonical-uri"] },
+                "depth": { "type": "integer", "minimum": 1 },
+                "map": { "type": "object" }
+              },
+              "allOf": [
+                { "if": { "properties": { "rule": { "const": "version-prefix" } } }, "then": { "required": ["depth"] } },
+                { "if": { "properties": { "rule": { "const": "map" } } }, "then": { "required": ["map"] } }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "condition": {
+      "description": "Keeps only results whose sibling measurement (same attempt_key) satisfies a bound. Conditioning on a state the workload itself drives can bias the series (section 4.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quantity", "estimator", "op", "value"],
+      "properties": {
+        "quantity": { "$ref": "#/$defs/token" },
+        "estimator": { "$ref": "#/$defs/token" },
+        "op": { "enum": ["eq", "lt", "le", "gt", "ge"] },
+        "value": { "type": "number" },
+        "missing": { "description": "When the sibling is absent or not success.", "enum": ["exclude", "keep"], "default": "exclude" }
+      }
+    }
+  }
+}

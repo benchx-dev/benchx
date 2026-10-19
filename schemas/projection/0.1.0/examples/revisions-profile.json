@@ -1,0 +1,16 @@
+{
+  "identity_schema": "benchx/profile/revisions/v1",
+  "description": "The revisions profile (UC-03): two subject trees from one run, everything else matching as under the default.",
+  "default": "match",
+  "invariants": ["one-run", "two-sides", "one-tree-per-side", "equal-attempts", "alternating-slots", "clean-tree"],
+  "rules": [
+    {
+      "scope": {},
+      "paths": {
+        "/provenance/subject_tree": { "axis": { "order": "unordered" } },
+        "/coordinates/environment/facts": "ignore",
+        "/coordinates/environment/facts/runtime": "match"
+      }
+    }
+  ]
+}

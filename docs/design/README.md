@@ -5,7 +5,7 @@ designed around it (see the repository README for the philosophy).
 
 | Document | What it defines | Status |
 |---|---|---|
-| [`benchmark-result-schema.md`](benchmark-result-schema.md) | What a result is: series identity, the open quantity vocabulary, the result and ingest contracts, where each kind of fact is placed and how an identity policy assigns roles to facts, comparison profiles, migration from existing tools | draft |
+| [`benchmark-result-schema.md`](benchmark-result-schema.md) | What a result is: series identity, the open quantity vocabulary, the result and ingest contracts, where each kind of fact is placed and how projections turn facts into series, comparison profiles, migration from existing tools | draft |
 | [`system-decomposition.md`](system-decomposition.md) | The ten components, their roles and boundaries, traceability to user stories | draft |
 | [`runner.md`](runner.md) | Executing benchmark work on one node: work orders, pipeline, failure handling. Runs prebuilt targets and never builds; enforces only on the process it launches | draft |
 | [`runner-schema.md`](runner-schema.md) | JSON schemas for the runner's contract: work order, environment policy, environment identity and facts, condition measurements (the observed-context record is retired). Aligned with `runner.md` and `benchmark-environments.md` | draft |
@@ -20,5 +20,5 @@ Parquet form of a result (`measurement-result-parquet.md`, #30).
 
 Not yet designed (roles fixed in the decomposition, documents pending):
 workbench, scheduler internals, change detector, alerting & annotations,
-views, series continuity and identity-policy authoring, the environment
+views, series continuity and projection authoring, the environment
 plugin interface, importers (beyond schema §6).

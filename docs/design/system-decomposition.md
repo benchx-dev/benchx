@@ -52,8 +52,9 @@ results itself.
 
 - Accepts results in the schema's ingest form; validates, normalizes units,
   and stores them idempotently with full provenance.
-- Maintains series identity: assigns each result to its series, computes
-  fingerprints, and guards immutability of identity.
+- Maintains series identity: assigns each result to its series under the
+  project's identity policy, computes fingerprints, guards immutability of
+  identity, and materializes series for other projections on request.
 - Records **continuity events** — a benchmark rename, a machine succession, an
   identity-policy change — so that history survives evolution of the suite and
   the fleet instead of silently fragmenting or silently blending.
@@ -256,7 +257,8 @@ project does about a change (that is policy, expressed in alerts and review).
 
 **Role:** Watch each series' history and find the moments it truly changed.
 
-- Runs continuously over series in the store, flagging step changes and slow
+- Runs continuously over the identity policy's series, or any other projection
+  a project maintains, flagging step changes and slow
   drifts, calibrated to each series' own noise level.
 - Places changes at revisions: its output is "this series changed at (or
   near) this commit," with confidence and supporting evidence, ready for a

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:measurement-result:0.1.0",
   "title": "BenchX measurement result ingest object",
-  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message. Coordinates are constitutive facts about the attempt; conditions the attempt passes through, such as temperature or load, are sibling results sharing attempt_key. Which facts a comparison fixes is decided by identity policy (schemas/identity-policy/0.1.0), never by where a fact is placed here.",
+  "description": "One measurement attempt for one quantity and one workload variant, as reported by a producer. See docs/design/benchmark-result-schema.md section 5. Producers report coordinates and evidence; comparison identity, series, and series points are derived by the server and are never part of this message. Coordinates are constitutive facts about the attempt; conditions the attempt passes through, such as temperature or load, are sibling results sharing attempt_key. Which facts a series or comparison fixes is decided by a projection (schemas/projection/0.1.0), never by where a fact is placed here.",
   "$comment": "Rules the schema cannot express and the server enforces at ingest: the primary subject component's source, when present, equals the top-level source URI; a quantity's unit never changes once used in a project; at most one estimate summary per estimator declaration; results sharing an attempt_key agree on the fields listed in section 5.3, including environment facts; identical (producer, ingest_key) payloads are idempotent and differing ones conflict; UCUM unit syntax; interval lower bounds not exceeding upper bounds; completed_repetitions never exceeding attempted_repetitions, and likewise completed never exceeding attempted at each repetition level; exactly one provenance.references entry per compound input role; comparison profiles (section 5.5) are checked by the comparator, not here. A result without project or benchmark is thin (section 4.1): valid, comparable within its run, and joinable to tracked series only through an approved mapping.",
   "type": "object",
   "additionalProperties": false,
@@ -67,7 +67,7 @@
       }
     },
     "coordinates": {
-      "description": "Reported coordinates: constitutive facts about the attempt, meaning what was measured, by which method, on which system. A coordinate is a fact read from the attempt as it ran, not a request (intent lives in the work order) and not a statement that comparisons must match on it (that is identity policy). Fingerprinted as reported; identity policy projects them into comparison identity. A condition the system passes through during the attempt, such as temperature, load, or clock frequency, is not a coordinate: it is a sibling result for its own quantity, sharing attempt_key.",
+      "description": "Reported coordinates: constitutive facts about the attempt, meaning what was measured, by which method, on which system. A coordinate is a fact read from the attempt as it ran, not a request (intent lives in the work order) and not a statement that comparisons must match on it (that is a projection). Fingerprinted as reported. A condition the system passes through during the attempt, such as temperature, load, or clock frequency, is not a coordinate: it is a sibling result for its own quantity, sharing attempt_key.",
       "type": "object",
       "additionalProperties": false,
       "required": ["workload", "subject", "quantity", "method", "environment"],
@@ -154,7 +154,7 @@
               "$ref": "#/$defs/token"
             },
             "identity": {
-              "description": "Fields that name the host or allocation under the named schema; their fingerprint keys the environment record. Naming a host is not a statement that comparisons must match on these fields; identity policy decides that.",
+              "description": "Fields that name the host or allocation under the named schema; their fingerprint keys the environment record. Naming a host says nothing about what comparisons match on.",
               "type": "object",
               "minProperties": 1
             },

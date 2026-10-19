@@ -4,7 +4,7 @@
 **Companion to:** `system-decomposition.md` §3.6, `benchmark-result-schema.md`
 
 Terms follow the schema's vocabulary (§2): a *series* is one comparison identity
-× one estimator under one identity-policy schema, and a *series point* is the
+× one estimator under one projection, and a *series point* is the
 estimate one result contributes to it (§4.1).
 
 ## 1. Role
@@ -62,8 +62,8 @@ comparator has no reference to evaluate against.
 
 ### 2.2 History mode
 
-The target and reference points belong to one series under one identity-policy
-schema and use one estimator. The target is explicit so a comparison remains
+The target and reference points belong to one series under one projection and
+use one estimator. The target is explicit so a comparison remains
 stable when newer results arrive. Reference points precede the target and are
 selected by a versioned method, for example from a bounded ancestral window.
 
@@ -107,7 +107,7 @@ Before computing a verdict, the comparator checks, in both modes, that:
   replaced by an older successful point;
 - every reference point or baseline result satisfies the configured status and
   quality rules;
-- target and reference use the same estimator and identity-policy schema; and
+- target and reference use the same estimator and projection; and
 - the evidence is enough for the configured method, or the method declares a
   provisional rule that applies.
 
@@ -121,24 +121,21 @@ In history mode it additionally checks that:
   Otherwise the affected comparison is indeterminate with reason
   `duplicate-points`; the comparator never picks one implicitly.
 
-In run mode it additionally checks the profile's invariants over the run (schema
-§5.5): the two sides differ only in the varying coordinate, attempt counts per
-side are equal, and sides alternate by `procedure.slot`; under `revisions`,
-that every result of both sides has a `clean` subject and benchmark tree
-(`clean-tree`, UC-03 §10). A run that fails an invariant is not compared: the comparison document records the failed invariant
-and contains no verdicts for the units it affects.
+In run mode it additionally checks the invariants of the profile's projection
+(schema §5.5). A run that fails one is not compared: the comparison document
+records the failed invariant and contains no verdicts for the units it affects.
 
 Excluded points and their reasons remain visible in the output. Facts the
-identity policy or profile does not require to match do not split a series, but
+projection does not require to match do not split a series, but
 those that differ between the target and its reference are listed as unmatched
 differences, by JSON Pointer, so that a kernel upgrade or another recorded fact
 is not hidden from the reader. Condition measurements of the two sides, such as
 load or temperature, are reported beside the verdict for the same reason.
 
-An intentional comparison across an identity difference outside a single run
-requires the store to materialize the series under an explicit identity policy
-that projects that difference out. The comparator never bypasses the resulting
-series boundary.
+A comparison across a fact the identity policy matches, such as two kernels,
+uses a projection with that fact as its axis (schema §4.3). The comparator
+evaluates it over stored results or reads its materialized series, and records
+it in the comparison document (`identity_schema`, `projection_sha256`).
 
 ## 4. Comparison method and verdict
 
@@ -192,7 +189,7 @@ evaluation it records:
 - the mode, and the target and exact reference inputs: reference points in
   history mode; the `run_key`, profile, varying coordinate, sides, and pairing
   in run mode;
-- the series fingerprint, identity-policy schema, estimator, and ordering or
+- the series fingerprint, projection, estimator, and ordering or
   ancestry used;
 - the reference window, reset or continuity boundaries, comparison method and
   version, and complete configuration;

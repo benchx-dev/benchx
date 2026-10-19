@@ -38,8 +38,13 @@
       "$ref": "#/$defs/estimator"
     },
     "identity_schema": {
-      "description": "Identity-policy schema under which series membership and comparability were decided.",
+      "description": "The projection (schemas/projection/0.1.0) under which series membership and comparability were decided: the project's identity policy, a profile, or any other projection.",
       "$ref": "#/$defs/token"
+    },
+    "projection_sha256": {
+      "description": "SHA-256 of the JCS form of that projection document, so a projection evaluated on demand is identified exactly.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     },
     "local_only": {
       "description": "True when any input is not clean; such a comparison never promotes into tracked history.",
@@ -50,7 +55,7 @@
       "$ref": "#/$defs/token"
     },
     "profile": {
-      "description": "Run mode: the comparison profile the run was checked against (benchmark-result-schema.md section 5.5).",
+      "description": "Run mode: the comparison profile, a built-in projection, the run was checked against (benchmark-result-schema.md section 5.5).",
       "enum": [
         "single-run",
         "variants",
@@ -250,7 +255,7 @@
           "$ref": "#/$defs/token"
         },
         "unmatched_differences": {
-          "description": "Reported facts the identity policy or profile did not require to match, named by JSON Pointer into the reported coordinates, whose values differ between target and reference, such as /coordinates/environment/facts/os/kernel.",
+          "description": "Reported facts the projection did not require to match, named by JSON Pointer into the reported coordinates, whose values differ between target and reference, such as /coordinates/environment/facts/os/kernel.",
           "type": "array",
           "uniqueItems": true,
           "items": {

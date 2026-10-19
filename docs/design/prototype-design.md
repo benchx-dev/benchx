@@ -361,10 +361,10 @@ store the directory of result files is ingested into first, for results that
 were never delivered to the local one. The request names the run, the profile, and the baseline value of the
 varying coordinate:
 
-| Profile | Varying coordinate | `--baseline` names | Sides must agree on |
-|---|---|---|---|
-| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment identity, method |
-| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment identity, method |
+| Profile | Axis (schema §5.5) | `--baseline` names |
+|---|---|---|
+| `revisions` | subject tree id | a revision or tree id prefix |
+| `environments` | subject configuration, named by the label `--label` gives | the label value |
 
 Before any verdict, the eligibility guard (§3) checks the profile's
 invariants over the run: exactly two sides that differ only in the varying

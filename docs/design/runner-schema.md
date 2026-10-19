@@ -95,13 +95,13 @@ Where results are delivered (store URL, local file) is an invocation argument, n
 
 A policy (`benchx/environment-policy/0.1.0`) is a named, versioned list of rules. Each rule has a **check**, a **tier**, parameters, and an `on_fail` action. The tier sets both what the runner does and where the fact lands in the result.
 
-| Tier | Runner action | On failure | Lands in result as | Default role |
-|---|---|---|---|---|
-| `enforce` | Sets the condition on the launched process before execution; never changes machine state | Refuse the order | `coordinates.environment.identity` (policy name + version + enforced values) | match |
-| `verify` | Checks before, and optionally after, execution | `refuse` or `warn`, per rule | Value read in `environment.facts` (a setting) or a condition measurement (a state, such as quiescence); failures in `quality.warnings` | ignore |
-| `record` | Observes only | Never fails; unreadable = `null` fact or `skipped` measurement | `environment.facts` or condition measurements (§5.3) | ignore |
+| Tier | Runner action | On failure | Lands in result as |
+|---|---|---|---|
+| `enforce` | Sets the condition on the launched process before execution; never changes machine state | Refuse the order | `coordinates.environment.identity` (policy name + version + enforced values) |
+| `verify` | Checks before, and optionally after, execution | `refuse` or `warn`, per rule | Value read in `environment.facts` (a setting) or a condition measurement (a state, such as quiescence); failures in `quality.warnings` |
+| `record` | Observes only | Never fails; unreadable = `null` fact or `skipped` measurement | `environment.facts` or condition measurements (§5.3) |
 
-The last column is the default identity policy's choice (`benchmark-result-schema.md` §4.3), not a property of the tier; a project can match on a verified fact, such as the governor, in its own policy. Changing a policy's version changes environment identity, so under the default policy it splits the series: the "series-splitting event, not a silent change" of `runner.md` §5.
+Changing a policy's version changes environment identity, so under the default identity policy it splits the series: the "series-splitting event, not a silent change" of `runner.md` §5.
 
 ### 4.1 Core check vocabulary
 
@@ -147,7 +147,7 @@ The runner fills existing measurement-result fields and defines no new ones. Wha
 
 ### 5.2 Environment identity: `benchx/env-identity/0.1.0`
 
-This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. `identity` holds the fields that name the machine and key its environment record; `facts` holds everything else read about its system (§5.3). Neither placement decides what splits history: the default identity policy matches identity and ignores facts other than `runtime`, and a project overrides that per scope.
+This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. `identity` holds the fields that name the machine and key its environment record; `facts` holds everything else read about its system (§5.3). What splits history is a projection's business (`benchmark-result-schema.md` §4.3).
 
 - **identity:** `machine_id` (salted hash of `/etc/machine-id` or equivalent), `cpu.model`, `cpu.logical_cores`, `memory_bytes`, `gpus[] {model, memory_bytes}`, `os.family`, `virtualization` (`bare-metal` | `vm` | `container` | `wsl`), `policy` (`name@version`), `enforced{}` (the values actually applied)
 - **facts:** hostname, GPU UUIDs, BIOS/firmware strings, and the system facts of §5.3
@@ -180,7 +180,7 @@ The runner reads two kinds of thing about the machine, and they land in two plac
 | `cpu-temperature`, `gpu-temperature` | `Cel` | hwmon or thermal zones; NVML for GPUs | `interval` |
 | `throttle-events` | `1` | throttle counters, after minus before; NVML throttle reasons | `delta` |
 
-Throttle evidence is measured separately from temperature. It's the signal that can explain a slower result, and it's available on some machines that don't expose temperature. Because condition measurements are results, an identity policy can restrict a series by them, such as keeping only attempts with zero `throttle-events` (`benchmark-result-schema.md` §4.3).
+Throttle evidence is measured separately from temperature. It's the signal that can explain a slower result, and it's available on some machines that don't expose temperature. Because condition measurements are results, a projection can restrict a series by them, such as keeping only attempts with zero `throttle-events` (`benchmark-result-schema.md` §4.3).
 
 ## 6. Outcome statuses
 
@@ -215,7 +215,7 @@ All three schemas use the same scheme as `schemas/measurement-result/0.1.0`: sem
 | Environment policy | `schemas/environment-policy/0.1.0/` | detecting a policy edited without a version bump |
 | Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema` |
 | Observed-context record (retired) | `schemas/observed-context-record/0.1.0/` | not hashed; retired with result `schema_version` 6, which removes `observed_context`. Its schema description maps each field to its new place |
-| Identity policy | `schemas/identity-policy/0.1.0/` | `identity_schema` names the projection and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
+| Projection | `schemas/projection/0.1.0/` | `identity_schema` names the projection and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
 
 Orders and policies are hashed the same way the result schema hashes its fingerprints:
 
