@@ -23,7 +23,6 @@ from .errors import SessionError
 from .identity import normalize_remote
 
 PROFILES = ("revisions", "environments")
-HARNESS = harnesses.PYPERF  # the default; `adapter` picks another
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -46,7 +45,7 @@ def parse_label(text: str) -> tuple[str, str, str]:
 KINDS = ("build", "working_tree")
 
 
-def _side(spec: str, suite: str, operation: str, harness=None, environment_variables=None) -> dict:
+def _side(spec: str, suite: str, operation: str, harness, environment_variables=None, provider=None) -> dict:
     """Locate and identify one side before anything runs.
 
     `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or a
@@ -57,9 +56,8 @@ def _side(spec: str, suite: str, operation: str, harness=None, environment_varia
     usable, as the runner will, so a side it would refuse is refused before
     any round runs.
     """
-    harness = harness or HARNESS
     try:
-        description = target_mod.resolve(spec, operation=operation)
+        description = target_mod.resolve(spec, operation=operation, provider=provider)
     except target_mod.TargetError as e:
         raise SessionError(str(e)) from None
     source = None
@@ -101,7 +99,7 @@ def _side(spec: str, suite: str, operation: str, harness=None, environment_varia
             "text": target_mod.text(description), "labels": dict((description or {}).get("labels", {}))}
 
 
-def _order(side: dict, *, harness, suite, filter, quantity, precision, environment_variables, project, run_key,
+def _order(side: dict, *, harness, suite, filter, quantities, precision, environment_variables, project, run_key,
            source_uri, round_=None, slot=None, labels=None, case_s=orders.CASE_TIMEOUT_S,
            order_s=orders.ORDER_TIMEOUT_S) -> dict:
     """One side's order; for one round and slot of a comparison, or neither (`bx bench`)."""
@@ -109,20 +107,30 @@ def _order(side: dict, *, harness, suite, filter, quantity, precision, environme
               "source": {"uri": source_uri, "type": "git"}, **side["text"]}
     try:
         return orders.make_order(suite=harness.suite_entry(suite, filter), target=target, precision=precision,
-                                 quantity=quantity, run_key=run_key, project=project,
+                                 quantities=quantities, run_key=run_key, project=project,
                                  labels={**side["labels"], **(labels or {})}, case_s=case_s, order_s=order_s,
                                  environment_variables=environment_variables, round_=round_, slot=slot)
     except orders.OrderError as e:
         raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
 
 
-def _harness(adapter, flags, cwd) -> tuple:
-    """The harness named by `adapter` (default pyperf), its complete precision
-    from `flags` over its defaults, and the config file it read (or None).
-    A flag the harness does not take is refused here, before any side is resolved."""
-    harness = harnesses.get(adapter) if adapter else HARNESS
-    precision, config_path = harness.precision(harness.flags_to_precision(**(flags or {})), start=cwd)
-    return harness, precision, config_path
+def _harness(adapter, flags, file_precision=None, quantities=None) -> tuple:
+    """The harness named by `adapter`, and its complete precision from `flags` over
+    the config file's precision over its defaults. A flag the harness does not
+    take, a precision or a quantity it cannot apply, is refused here, before any
+    side is resolved."""
+    if not adapter:
+        raise SessionError("no adapter given: pass --adapter, or set adapter.name in benchx.json")
+    harness = harnesses.get(adapter)
+    precision = harness.precision(harness.flags_to_precision(**(flags or {})), file_precision)
+    try:
+        adapters.get(harness.name).protocol(precision)
+    except Unsupported as e:
+        raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
+    unknown = sorted(set(quantities or ()) - set(adapters.get(harness.name).QUANTITIES))
+    if unknown:
+        raise SessionError(f"{harness.name} does not report {', '.join(unknown)}")
+    return harness, precision
 
 
 def _source_uri(sides, source_uri) -> str:
@@ -147,37 +155,38 @@ def _run_side(side: dict, path: Path, store=None, **order) -> tuple[dict, dict |
     return summary, store.ingest_paths(summary["files"]) if store else None
 
 
-def bench_target(target: str, *, suite: str, store=None, adapter=None, flags=None, environment_variables=None,
-                 filter=None, quantity="wall-time", project=None, run_key=None, out=None, source_uri=None,
-                 case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, progress=None, build=True,
-                 cwd=".") -> dict:
+def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=None, file_precision=None,
+                 environment_variables=None, filter=None, quantities=("wall-time",), project=None, run_key=None,
+                 out=None, source_uri=None, case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S,
+                 progress=None, build=True, provider=None, config_path=None, results_dir=None) -> dict:
     """Run one target once: a comparison session of one order, with no round,
     slot or comparison. Results are delivered to `store` unless it is None.
 
     `target` is `@CONFIG[=SOURCE_REF]` or a bare path, which the harness reads
     (see `_side`); `adapter`, `flags` and the rest are as for `compare_targets`.
-    Returns the runner's summary, with the store's `outcome`, the `precision`
-    and the `config` file (or None) it came from. Raises SessionError when the
-    run cannot start, and runner.Refused when the runner refuses the order.
+    Returns the runner's summary, with the store's `outcome` and the `precision`.
+    Raises SessionError when the run cannot start, and runner.Refused when the
+    runner refuses the order.
     """
-    harness, precision, config_path = _harness(adapter, flags, cwd)
-    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables)
+    harness, precision = _harness(adapter, flags, file_precision, quantities)
+    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables, provider)
     source_uri = _source_uri([side], source_uri)
     run_key = run_key or orders.default_run_key("bench")
-    out = Path(out) if out else Path("results") / run_key.replace("/", "_")
+    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
     if progress:
         progress(f"precision: {harness.describe_precision(precision, config_path)}")
     summary, outcome = _run_side(side, out / "orders" / "order.json", store, harness=harness, suite=suite,
-                                 filter=filter, quantity=quantity, precision=precision,
+                                 filter=filter, quantities=quantities, precision=precision,
                                  environment_variables=environment_variables, project=project, run_key=run_key,
                                  source_uri=source_uri, case_s=case_s, order_s=order_s)
-    return {**summary, "outcome": outcome, "precision": precision, "config": config_path}
+    return {**summary, "outcome": outcome, "precision": precision}
 
 
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
-                    adapter=None, flags=None, environment_variables=None, filter=None, quantity="wall-time",
-                    project=None, label=None, run_key=None, out=None, source_uri=None, k=3.0, min_rounds=3,
-                    progress=None, build=True, cwd=".") -> dict:
+                    adapter, flags=None, file_precision=None, environment_variables=None, filter=None,
+                    quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
+                    k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
+                    case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None) -> dict:
     """Alternate baseline and contender over `rounds` rounds, deliver every
     result to `store`, and return the run-mode comparison document.
 
@@ -186,9 +195,10 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     it is only asked to `describe`. For `environments`,
     `label` is (name, baseline value, contender value).
 
-    `adapter` names the harness (default pyperf); `flags` are its
-    precision flags by keyword (`harnesses.Harness.FLAGS`), over its defaults
-    and, for pyperf, the config file found from `cwd`. `environment_variables`
+    `adapter` names the harness; `flags` are its precision flags by keyword
+    (`harnesses.Harness.FLAGS`), over `file_precision` (the config file's) and
+    its defaults. `provider` is the (command, directory) a `@CONFIG` target
+    calls. `quantities` are collected in every order. `environment_variables`
     are set for both sides alike, and so become workload parameters of both.
     Raises SessionError when the session cannot start, and runner.Refused when
     the runner refuses an order.
@@ -201,9 +211,9 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError("the environments profile needs --label NAME=BASE,CONTENDER")
     if profile == "revisions" and label is not None:
         raise SessionError("--label names the sides of an environments comparison; revisions are named by their trees")
-    harness, precision, _ = _harness(adapter, flags, cwd)
+    harness, precision = _harness(adapter, flags, file_precision, quantities)
     operation = "prepare" if build else "describe"
-    sides = [_side(spec, suite, operation, harness, environment_variables) for spec in (baseline, contender)]
+    sides = [_side(spec, suite, operation, harness, environment_variables, provider) for spec in (baseline, contender)]
     if profile == "revisions":
         # UC-03 §10: refuse before any measurement, not after R rounds.
         for name, side in zip(("baseline", "contender"), sides):
@@ -213,17 +223,17 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     source_uri = _source_uri(sides, source_uri)
 
     run_key = run_key or orders.default_run_key("compare")
-    out = Path(out) if out else Path("results") / run_key.replace("/", "_")
+    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
 
     slot = 0
     for round_ in range(rounds):
         for name, side, side_labels in zip(("baseline", "contender"), sides, labels):
             summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store,
-                                         harness=harness, suite=suite, filter=filter, quantity=quantity,
+                                         harness=harness, suite=suite, filter=filter, quantities=quantities,
                                          precision=precision, environment_variables=environment_variables,
                                          project=project, run_key=run_key, source_uri=source_uri,
-                                         round_=round_, slot=slot, labels=side_labels)
+                                         round_=round_, slot=slot, labels=side_labels, case_s=case_s, order_s=order_s)
             if outcome["rejected"]:
                 codes = sorted({r["code"] for r in outcome["rejected"]})
                 raise SessionError(f"the store rejected results of round {round_} ({name}): {', '.join(codes)}")
