@@ -96,7 +96,21 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         if not identity:
             raise SessionError(f"cannot identify the working tree {source}")
     return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
+            "benchmark": _benchmark(harness, path, suite, identity["path"]),
             "text": target_mod.text(description), "labels": dict((description or {}).get("labels", {}))}
+
+
+def _benchmark(harness, path: Path, suite: str, subject_source: str) -> dict | None:
+    """The order's `benchmark` entry when the suite's code is not in the subject's
+    checkout (see snapshot.benchmark_identity), else None. A suite that is a built
+    binary is the subject's own."""
+    if not adapters.get(harness.name).SUITE_IS_SOURCE:
+        return None
+    found = snapshot.benchmark_identity(path / suite, subject_source)
+    if found is None:
+        return None
+    return {"source": {"uri": found["uri"], "type": found["type"]},
+            **({"revision": found["revision"]} if "revision" in found else {})}
 
 
 def _order(side: dict, *, harness, suite, filter, quantities, precision, environment_variables, project, run_key,
@@ -109,7 +123,8 @@ def _order(side: dict, *, harness, suite, filter, quantities, precision, environ
         return orders.make_order(suite=harness.suite_entry(suite, filter), target=target, precision=precision,
                                  quantities=quantities, run_key=run_key, project=project,
                                  labels={**side["labels"], **(labels or {})}, case_s=case_s, order_s=order_s,
-                                 environment_variables=environment_variables, round_=round_, slot=slot)
+                                 environment_variables=environment_variables, round_=round_, slot=slot,
+                                 benchmark=side.get("benchmark"))
     except orders.OrderError as e:
         raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
 
@@ -221,6 +236,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                 raise SessionError(f"{name} tree {side['source']} is {side['identity']['dirty']}; "
                                    "a revisions comparison needs clean trees (UC-03 §10)")
     source_uri = _source_uri(sides, source_uri)
+    if len({json.dumps((side.get("benchmark") or {}).get("source")) for side in sides}) != 1:
+        raise SessionError("the sides' suites come from different sources; give --suite as one absolute path")
 
     run_key = run_key or orders.default_run_key("compare")
     out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")

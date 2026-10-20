@@ -162,6 +162,39 @@ def source_uri(source_dir) -> str:
     return Path(source_dir, common).resolve().parent.as_uri() if common else Path(source_dir).resolve().as_uri()
 
 
+def blob_id(path) -> str | None:
+    """The git blob id of a file: what `git hash-object FILE` prints."""
+    try:
+        content = Path(path).read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha1(b"blob %d\0" % len(content) + content).hexdigest()
+
+
+def benchmark_identity(suite_file, subject_source) -> dict | None:
+    """Where the suite's own code lives, when that is not the subject's checkout:
+    None when the file is inside `subject_source`.
+
+    The file is the unit, not its directory (runner-schema.md §3.3). Its tree id
+    is its blob id. In a git checkout the source is that repository, with its
+    HEAD as the revision, and the file is `clean` when it equals HEAD's version
+    and `dirty` otherwise, including when HEAD has none. Outside git the source
+    is the file's directory as a `file://` URI, with no revision, and the file is
+    `dirty`: nothing says it was ever committed.
+    """
+    suite = Path(suite_file).resolve()
+    if suite.is_relative_to(Path(subject_source).resolve()):
+        return None
+    tree = blob_id(suite)
+    top = _run(["git", "rev-parse", "--show-toplevel"], cwd=suite.parent)
+    head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
+    if head:
+        committed = _run(["git", "rev-parse", f"HEAD:{suite.relative_to(Path(top).resolve()).as_posix()}"], cwd=top)
+        return {"uri": source_uri(top), "type": "git", "revision": head, "tree": tree,
+                "dirty": "clean" if committed == tree else "dirty"}
+    return {"uri": suite.parent.as_uri(), "type": "directory", "tree": tree, "dirty": "dirty"}
+
+
 _SKIPPED_DIRS = {".git", ".benchx", "__pycache__"}
 
 
