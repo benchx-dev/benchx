@@ -51,6 +51,32 @@
         { "$ref": "#/$defs/targetArtifact" }
       ]
     },
+    "collectors": {
+      "description": "Context collectors (harness-adapter.md §5.1): commands the runner runs once, before the cases, in the harness's working directory and environment. Each prints one JSON object of facts, recorded under coordinates.environment.system.<name>. The runner executes these commands, so `bx run` refuses an order that has them unless told to allow it.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "command"],
+        "properties": {
+          "name": { "$ref": "#/$defs/token" },
+          "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "timeout_s": { "type": "number", "exclusiveMinimum": 0 },
+          "verify": {
+            "description": "how_built: every key of the target's how_built object must be in the collected facts with exactly the same value.",
+            "const": "how_built"
+          },
+          "expect": {
+            "description": "Facts the collected output must contain, by exact value.",
+            "type": "object"
+          },
+          "on_fail": {
+            "description": "What a failed verify or expect does: refuse the order (the default) or warn in every result.",
+            "enum": ["refuse", "warn"]
+          }
+        }
+      }
+    },
     "benchmark": {
       "description": "Where the benchmark suite's own code lives, when different from target (§3.3 addendum). Absent means the benchmarks live in the same checkout as target. The revision is absent when the suite is not under version control; the runner then identifies the suite file by its content hash.",
       "type": "object",
@@ -344,9 +370,11 @@
       "type": "object",
       "properties": {
         "how_built": {
-          "description": "What the user did to build the target, such as the cmake commands or the name of the build script.",
-          "type": ["string", "null"],
-          "maxLength": 8192
+          "description": "What the user did to build the target, such as the cmake commands or the name of the build script; or, as an object, structured facts about the build that a collector with verify: how_built must observe exactly (an object is never parsed from text). A string is never checked.",
+          "oneOf": [
+            { "type": ["string", "null"], "maxLength": 8192 },
+            { "type": "object" }
+          ]
         },
         "activation": {
           "description": "What the user ran to enter the target's environment, such as sourcing an activate script, loading modules, or exporting library paths. The user activates before invoking benchx; the runner records the environment it inherited beside this declaration.",

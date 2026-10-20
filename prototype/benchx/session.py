@@ -115,7 +115,7 @@ def _benchmark(harness, path: Path, suite: str, subject_source: str) -> dict | N
 
 def _order(side: dict, *, harness, suite, filter, quantities, precision, environment_variables, project, run_key,
            source_uri, round_=None, slot=None, labels=None, case_s=orders.CASE_TIMEOUT_S,
-           order_s=orders.ORDER_TIMEOUT_S) -> dict:
+           order_s=orders.ORDER_TIMEOUT_S, collectors=None) -> dict:
     """One side's order; for one round and slot of a comparison, or neither (`bx bench`)."""
     target = {"kind": side["kind"], "path": str(side["path"]), "source_dir": side["source"],
               "source": {"uri": source_uri, "type": "git"}, **side["text"]}
@@ -124,7 +124,7 @@ def _order(side: dict, *, harness, suite, filter, quantities, precision, environ
                                  quantities=quantities, run_key=run_key, project=project,
                                  labels={**side["labels"], **(labels or {})}, case_s=case_s, order_s=order_s,
                                  environment_variables=environment_variables, round_=round_, slot=slot,
-                                 benchmark=side.get("benchmark"))
+                                 benchmark=side.get("benchmark"), collectors=collectors)
     except orders.OrderError as e:
         raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
 
@@ -166,14 +166,16 @@ def _run_side(side: dict, path: Path, store=None, **order) -> tuple[dict, dict |
     store's outcome (None without a store)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_order(side, **order), indent=1) + "\n")
-    summary = runner.run(path, path.parent.parent)
+    # The order is this session's own, built from the user's configuration: its collectors may run.
+    summary = runner.run(path, path.parent.parent, allow_collectors=True)
     return summary, store.ingest_paths(summary["files"]) if store else None
 
 
 def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=None, file_precision=None,
                  environment_variables=None, filter=None, quantities=("wall-time",), project=None, run_key=None,
                  out=None, source_uri=None, case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S,
-                 progress=None, build=True, provider=None, config_path=None, results_dir=None) -> dict:
+                 progress=None, build=True, provider=None, config_path=None, results_dir=None,
+                 collectors=None) -> dict:
     """Run one target once: a comparison session of one order, with no round,
     slot or comparison. Results are delivered to `store` unless it is None.
 
@@ -193,7 +195,7 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
     summary, outcome = _run_side(side, out / "orders" / "order.json", store, harness=harness, suite=suite,
                                  filter=filter, quantities=quantities, precision=precision,
                                  environment_variables=environment_variables, project=project, run_key=run_key,
-                                 source_uri=source_uri, case_s=case_s, order_s=order_s)
+                                 source_uri=source_uri, case_s=case_s, order_s=order_s, collectors=collectors)
     return {**summary, "outcome": outcome, "precision": precision}
 
 
@@ -201,7 +203,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                     adapter, flags=None, file_precision=None, environment_variables=None, filter=None,
                     quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
                     k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
-                    case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None) -> dict:
+                    case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
+                    collectors=None) -> dict:
     """Alternate baseline and contender over `rounds` rounds, deliver every
     result to `store`, and return the run-mode comparison document.
 
@@ -250,7 +253,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                                          harness=harness, suite=suite, filter=filter, quantities=quantities,
                                          precision=precision, environment_variables=environment_variables,
                                          project=project, run_key=run_key, source_uri=source_uri,
-                                         round_=round_, slot=slot, labels=side_labels, case_s=case_s, order_s=order_s)
+                                         round_=round_, slot=slot, labels=side_labels, case_s=case_s, order_s=order_s,
+                                         collectors=collectors)
             if outcome["rejected"]:
                 codes = sorted({r["code"] for r in outcome["rejected"]})
                 raise SessionError(f"the store rejected results of round {round_} ({name}): {', '.join(codes)}")

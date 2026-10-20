@@ -71,7 +71,7 @@ def test_session_refusals(tmp, builds, kwargs, message):
 
 
 def test_a_refused_order_stops_the_session(tmp, builds, monkeypatch):
-    def refuse(*_):
+    def refuse(*_, **__):
         raise runner.Refused("deferred")
     monkeypatch.setattr(runner, "run", refuse)
     with pytest.raises(runner.Refused):
