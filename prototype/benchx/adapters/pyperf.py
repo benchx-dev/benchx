@@ -26,6 +26,8 @@ from .. import snapshot
 from .base import Unsupported
 
 NAME = "pyperf"
+# The suite is a Python source file, which may live outside the subject's checkout.
+SUITE_IS_SOURCE = True
 CONTEXT_KEY = "pyperf"
 WORKLOAD_PARAMETERS = False
 PRODUCER = {"name": "benchx/pyperf-adapter", "version": "0.1.0", "mapping_version": "pyperf-to-benchx/v1"}
