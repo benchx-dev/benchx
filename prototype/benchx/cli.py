@@ -2,12 +2,13 @@
 
 Every command reads the project's `benchx.conf.json` (benchx.config), found from the
 working directory upward. The local store and the result files are in the
-project root unless that file says otherwise. A command-line argument wins over
+project root unless that file says otherwise, or `$BENCHX_HOME` relocates the store. A command-line argument wins over
 the file, and the file over a built-in default.
 """
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -206,7 +207,8 @@ def _resolved(cfg):
     yield row("environment_variables", cfg.data.get("environment_variables"), {})
     yield row("timeouts.case_s", timeouts.get("case_s"), orders.CASE_TIMEOUT_S)
     yield row("timeouts.order_s", timeouts.get("order_s"), orders.ORDER_TIMEOUT_S)
-    yield "paths.store", str(cfg.store_path), "file" if "store" in cfg.section("paths") else "default"
+    store_from = "$BENCHX_HOME" if os.environ.get(config_mod.HOME_ENV) else "file" if "store" in cfg.section("paths") else "default"
+    yield "paths.store", str(cfg.store_path), store_from
     yield "paths.results", str(cfg.results_dir), "file" if "results" in cfg.section("paths") else "default"
     yield row("compare.profile", compare.get("profile"))
     yield row("compare.rounds", compare.get("rounds"))
