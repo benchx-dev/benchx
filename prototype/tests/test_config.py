@@ -51,6 +51,14 @@ def test_paths_are_relative_to_the_root_unless_absolute(tree, tmp):
     assert cfg.results_dir == tmp / "elsewhere"
 
 
+def test_benchx_home_relocates_the_store_over_the_file(tree, tmp, monkeypatch):
+    write_config(tree, paths={"store": "data/s.parquet"})
+    monkeypatch.setenv("BENCHX_HOME", str(tmp / "home"))
+    assert config.load(tree).store_path == tmp / "home" / "store.parquet"
+    monkeypatch.setenv("BENCHX_HOME", "")
+    assert config.load(tree).store_path == tree.resolve() / "data" / "s.parquet"
+
+
 def test_the_provider_runs_in_the_root(tree):
     write_config(tree, provider={"command": ["./provider.sh"]})
     assert config.load(tree).provider == (["./provider.sh"], tree.resolve())
