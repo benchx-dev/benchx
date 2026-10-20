@@ -15,6 +15,8 @@ from pathlib import Path
 from .base import Unsupported
 
 NAME = "google-benchmark"
+# The suite is a binary built from the subject's source, so its benchmarks are the subject's own.
+SUITE_IS_SOURCE = False
 CONTEXT_KEY = "google_benchmark"
 WORKLOAD_PARAMETERS = False
 PRODUCER = {"name": "benchx/gbench-adapter", "version": "0.1.0", "mapping_version": "gbench-to-benchx/v1"}

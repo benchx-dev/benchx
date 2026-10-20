@@ -88,8 +88,6 @@ def check(order: dict) -> Iterator[Refusal]:
         yield Refusal(f"no adapter for {suite['adapter']!r}")
     if order["target"]["kind"] not in ("build", "working_tree"):
         yield Refusal(f"only build and working_tree targets are supported; {order['target']['kind']!r} is deferred")
-    if "benchmark" in order:
-        yield Refusal("only benchmarks in the subject's own checkout are supported")
     if "include" in suite or "exclude" in suite:
         yield Refusal("only a single suites[].filter is supported, not include/exclude")
     if adapter is not None:
@@ -106,6 +104,18 @@ def check(order: dict) -> Iterator[Refusal]:
             adapter.protocol(order["precision"])
         except Unsupported as e:
             yield from e.problems
+
+
+def _benchmark_mismatches(stated: dict | None, found: dict | None):
+    """Refusals when the order's `benchmark` is not what the suite file turns out to be."""
+    if stated is None:
+        return
+    if found is None:
+        yield Refusal("the order names a benchmark source, but the suite is in the subject's own checkout")
+    elif (stated["source"]["uri"], stated.get("revision")) != (found["uri"], found.get("revision")):
+        yield Refusal(f"the order names benchmark {stated['source']['uri']}"
+                      f"{'@' + stated['revision'] if 'revision' in stated else ''}, "
+                      f"but the suite is in {found['uri']}{'@' + found['revision'] if 'revision' in found else ''}")
 
 
 def run(order_path, out_dir) -> dict:
@@ -138,6 +148,14 @@ def run(order_path, out_dir) -> dict:
     if source is None:
         # runner.md §2: a result that cannot state its revision is a defect.
         refusals.append(Refusal("cannot locate the checkout the target was built from; set target.source_dir"))
+    benchmark = None
+    if source is not None and getattr(adapter, "SUITE_IS_SOURCE", False):
+        # The suite's own code, when it is not in the subject's checkout (runner-schema.md §3.3):
+        # found as it is, whatever the order says; an order that says otherwise is refused.
+        benchmark = snapshot.benchmark_identity(target_path / order["suites"][0]["suite"], source["path"])
+        refusals += _benchmark_mismatches(order.get("benchmark"), benchmark)
+    elif "benchmark" in order:
+        refusals.append(Refusal(f"{adapter.NAME} suites are the subject's own; the order names a benchmark source"))
     if refusals:
         raise Refused(refusals)
 
@@ -226,13 +244,15 @@ def run(order_path, out_dir) -> dict:
                 "started_at": _timestamp(started),
                 "ended_at": _timestamp(started + duration),
                 "subject_dirty": source["dirty"],
-                "benchmark_dirty": source["dirty"],
+                "benchmark_dirty": benchmark["dirty"] if benchmark else source["dirty"],
                 "runner": RUNNER,
                 **({} if condition else {"artifacts": artifacts}),
                 "info": info,
             }
             if "tree" in source:
                 provenance["subject_tree"] = provenance["benchmark_tree"] = source["tree"]
+            if benchmark:
+                provenance["benchmark_tree"] = benchmark["tree"]
             if "labels" in order:
                 provenance["labels"] = order["labels"]
             workload = {"name": workload_name}
@@ -250,10 +270,13 @@ def run(order_path, out_dir) -> dict:
                 **({"project": order["project"]} if "project" in order else {}),
                 "source": order["target"]["source"],
                 "revision": {"key": source["revision"]},
-                "benchmark": {"source": order["target"]["source"],
-                              # An unversioned tree is identified by its hash in provenance, not by a revision.
-                              **({} if source["revision"].startswith("directory-")
-                                 else {"revision": {"key": source["revision"]}})},
+                "benchmark": ({"source": {"uri": benchmark["uri"], "type": benchmark["type"]},
+                               **({"revision": {"key": benchmark["revision"]}} if "revision" in benchmark else {})}
+                              if benchmark else
+                              {"source": order["target"]["source"],
+                               # An unversioned tree is identified by its hash in provenance, not by a revision.
+                               **({} if source["revision"].startswith("directory-")
+                                  else {"revision": {"key": source["revision"]}})}),
                 "coordinates": {
                     "workload": workload,
                     "subject": subject,
