@@ -13,12 +13,13 @@ Relative paths in the file, and the defaults for the store and the results, are
 relative to the root, never to the working directory.
 
 Precedence, for every value: the command line, then this file, then a built-in
-default. A value that is required and has none of the three is a hard failure
+default; the one exception is the store, which `$BENCHX_HOME` relocates over the file. A value that is required and has none of the three is a hard failure
 that names the flag and the key (`Config.pick`).
 """
 
 import copy
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,7 @@ CONFIG_FILE = "benchx.conf.json"
 # Files of the format this one replaced. They are not read; finding one is an error, so
 # no setting silently stops applying.
 LEGACY_FILES = (Path(".benchx") / "provider.json", Path(".benchx") / "config.json")
+HOME_ENV = "BENCHX_HOME"
 DEFAULT_STORE = "store.parquet"
 DEFAULT_RESULTS = "results"
 REQUIRED = object()
@@ -80,6 +82,10 @@ class Config:
 
     @property
     def store_path(self) -> Path:
+        """The store: `$BENCHX_HOME/store.parquet` when that is set (it wins over the
+        file, as it relocates the store for tests and CI), else `paths.store`."""
+        if home := os.environ.get(HOME_ENV):
+            return Path(home).expanduser() / DEFAULT_STORE
         return self._path(self.section("paths").get("store", DEFAULT_STORE))
 
     @property
