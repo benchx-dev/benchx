@@ -80,7 +80,7 @@ a TARGET ending in `.py` selects it.
 walking up from the working directory; its directory is the root, and with no file the
 root is the working directory (`schemas/config/0.1.0`). It holds `project`, `source.uri`,
 `provider.command`, an `adapter` block (`name`, `suite`, `quantities`, `precision`),
-`environment_variables`, `timeouts`, `paths.store` and `paths.results` (default
+`environment_variables`, `collectors`, `timeouts`, `paths.store` and `paths.results` (default
 `store.parquet` and `results/` in the root, and relative to the root), and `compare`
 (`profile`, `rounds`, `k`, `min_rounds`). A command-line argument wins; if it is missing the
 value is read from the file; if that is missing too, a built-in default applies, where one
@@ -319,6 +319,24 @@ the same way report the same configuration. Nobody declared these, so the detect
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
   land in `environment.system.setup`, which the default identity policy matches.
+- **Context collectors** (`harness-adapter.md` §5.1), named under `collectors` in
+  `benchx.conf.json` and copied into the work order. The runner runs each command once,
+  before the cases, in the harness's working directory and environment (`{root}` in an
+  argument is the project root), under `timeout_s` (default 60). It prints one JSON object.
+  The runner saves it whole as an artifact, and puts its `summary` object and its
+  sha256 into every result's `environment.system.<name>`. A collector that fails adds no
+  facts and gives the results `collector-failed`. Only `before`, once per order, is
+  implemented. The commands are executed, so `bx run` refuses an order that has
+  collectors unless given `--allow-collectors`; `bx bench` and `bx compare` build the
+  order from the user's own configuration and allow them.
+- **Verification** of a collector's facts: `verify: "how_built"` requires every key of the
+  target's `how_built`, when that is an object (a provider may declare facts there; as a
+  string it is text and never checked), to be among the collected facts with exactly the
+  same value, at any depth; extra collected keys are fine. `expect` requires facts by
+  value. A failed check, or a collector that cannot run, refuses the order before any case
+  (`on_fail: refuse`, the default), or with `on_fail: warn` gives every result the
+  warning `collector-mismatch`. `prototype/examples/numpy-bench` uses this to check that
+  the numpy a provider described is the numpy the workers import.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
 (`detected`, `declared`, or a plugin name). The prototype does not record it

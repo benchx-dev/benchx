@@ -55,7 +55,7 @@ def cmd_run(args):
     out = Path(args.out) if args.out else cfg.results_dir
     snapshot.ignore(cfg.store_path, cfg.results_dir, out)
     try:
-        summary = runner.run(args.order, out)
+        summary = runner.run(args.order, out, allow_collectors=args.allow_collectors)
     except runner.Refused as e:
         return _refused(e)
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
@@ -127,6 +127,7 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         "source_uri": args.source_uri or cfg.section("source").get("uri"),
         "build": not args.no_build,
         "provider": cfg.provider,
+        "collectors": cfg.collectors,
         "results_dir": cfg.results_dir,
         # An asv case is every round of its benchmark, each bounded by the benchmark's own timeout.
         "case_s": cfg.pick(getattr(args, "case_timeout", None), timeouts.get("case_s"),
@@ -465,6 +466,8 @@ def main(argv=None):
     p.add_argument("--out", help="directory for result files (default ./results)")
     p.add_argument("--no-ingest", action="store_true",
                    help="only write the result files; do not deliver them to the local store")
+    p.add_argument("--allow-collectors", action="store_true",
+                   help="run the order's context collectors: commands the order names (otherwise refused)")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("bench", help="benchmark one target: the single-target form of bx compare",

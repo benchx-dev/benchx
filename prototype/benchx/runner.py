@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__, adapters, core, snapshot
+from . import __version__, adapters, collectors, core, snapshot
 from . import target as target_mod
 from .adapters.base import Unsupported
 from .core import Refusal, Rejected
@@ -118,8 +118,10 @@ def _benchmark_mismatches(stated: dict | None, found: dict | None):
                       f"but the suite is in {found['uri']}{'@' + found['revision'] if 'revision' in found else ''}")
 
 
-def run(order_path, out_dir) -> dict:
-    """Execute one order; write results and the order into out_dir."""
+def run(order_path, out_dir, allow_collectors=False) -> dict:
+    """Execute one order; write results and the order into out_dir. The order's
+    context collectors are commands the runner would execute, so they run only
+    if `allow_collectors`."""
     inspection = core.inspect(Path(order_path), "work-order")
     if inspection.data is None:
         raise Refused(inspection.errors)
@@ -127,6 +129,9 @@ def run(order_path, out_dir) -> dict:
     refusals = list(check(order))
     if refusals:
         raise Refused(refusals)
+    if order.get("collectors") and not allow_collectors:
+        raise Refused([Refusal("the order names context collectors, which are commands to run; "
+                               "pass --allow-collectors to run it")])
     adapter = adapters.get(order["suites"][0]["adapter"])
     applied_protocol, invocation = adapter.protocol(order["precision"])
 
@@ -176,6 +181,11 @@ def run(order_path, out_dir) -> dict:
     slot, round_ = order.get("slot"), order.get("round")
     artifacts_dir = out_dir / "artifacts" / (f"slot-{slot}" if slot is not None else ref[7:19])
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    collected = collectors.run_all(order.get("collectors", []), declared=order["target"].get("how_built"),
+                                   cwd=target_path, env=child_env, artifacts_dir=artifacts_dir, taken=system)
+    if collected.refusals:
+        raise Refused(collected.refusals)
+    system.update(collected.system)
     order_file = out_dir / f"workorder-{ref[7:]}.json"
     order_file.write_bytes(core.pretty(order))
 
@@ -207,6 +217,7 @@ def run(order_path, out_dir) -> dict:
         if native_path.exists():
             artifacts.insert(0, _artifact("native-output", "application/json", native_path))
         artifacts += [_artifact(kind, media_type, path) for kind, media_type, path in run_.get("artifacts", [])]
+        artifacts += [_artifact(kind, media_type, path) for kind, media_type, path in collected.artifacts]
         native_system, native_info = adapter.context_facts(run_["native"])
         case_system, case_warnings = snapshot.merge(system, native_system), []
         if hasattr(adapter, "observed_environment"):
@@ -288,7 +299,7 @@ def run(order_path, out_dir) -> dict:
                 "procedure": procedure,
                 "provenance": provenance,
             }
-            warnings = [] if condition else ([setup_warning] if setup_warning else []) + case_warnings
+            warnings = [] if condition else ([setup_warning] if setup_warning else []) + collected.warnings + case_warnings
             if warnings:
                 document["quality"] = {"warnings": warnings}
             errors = core.check(document, "measurement-result")

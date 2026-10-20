@@ -236,6 +236,8 @@ def _declared(document) -> dict:
     runner saw: the declarations are recorded as given and never judged."""
     info = document["provenance"].get("info", {})
     side = {k: info[k] for k in ("how_built", "activation", "shell", "target_provider") if k in info}
+    if isinstance(side.get("how_built"), dict):  # facts, shown as the JSON text they are
+        side["how_built"] = json.dumps(side["how_built"], sort_keys=True, separators=(",", ":"))
     system = document["coordinates"]["environment"].get("system") or {}
     if env := (system.get("process") or {}).get("environment"):
         side["observed_env"] = env
