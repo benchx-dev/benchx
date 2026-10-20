@@ -289,7 +289,7 @@ the same way report the same configuration. Nobody declared these, so the detect
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
-  land in `environment.system.setup`, which the default identity policy ignores.
+  land in `environment.system.setup`, which the default identity policy matches.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
 (`detected`, `declared`, or a plugin name). The prototype does not record it

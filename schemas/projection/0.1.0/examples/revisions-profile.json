@@ -4,8 +4,14 @@
   "axis": [{ "path": "/provenance/subject_tree", "order": "unordered" }],
   "default": "match",
   "paths": {
-    "/coordinates/environment/system": "ignore",
-    "/coordinates/environment/system/runtime": "match"
+    "/coordinates/environment/system/hostname": "ignore",
+    "/coordinates/environment/system/os": "ignore",
+    "/coordinates/environment/system/libc": "ignore",
+    "/coordinates/environment/system/cpu": "ignore",
+    "/coordinates/environment/system/gpu": "ignore",
+    "/coordinates/environment/system/firmware": "ignore",
+    "/coordinates/environment/system/container": "ignore",
+    "/coordinates/environment/system/process/cgroup": "ignore"
   },
   "invariants": ["one-run", "two-sides", "one-tree-per-side", "equal-attempts", "alternating-slots", "clean-tree"]
 }

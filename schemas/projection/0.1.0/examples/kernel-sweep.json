@@ -5,7 +5,13 @@
   "default": "match",
   "paths": {
     "/provenance/subject_tree": "match",
-    "/coordinates/environment/system": "ignore",
-    "/coordinates/environment/system/runtime": "match"
+    "/coordinates/environment/system/hostname": "ignore",
+    "/coordinates/environment/system/os": "ignore",
+    "/coordinates/environment/system/libc": "ignore",
+    "/coordinates/environment/system/cpu": "ignore",
+    "/coordinates/environment/system/gpu": "ignore",
+    "/coordinates/environment/system/firmware": "ignore",
+    "/coordinates/environment/system/container": "ignore",
+    "/coordinates/environment/system/process/cgroup": "ignore"
   }
 }

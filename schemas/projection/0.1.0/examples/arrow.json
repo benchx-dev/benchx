@@ -5,8 +5,14 @@
   "default": "match",
   "paths": {
     "/source/uri": { "normalize": { "rule": "canonical-uri" } },
-    "/coordinates/environment/system": "ignore",
-    "/coordinates/environment/system/runtime": "match",
+    "/coordinates/environment/system/hostname": "ignore",
+    "/coordinates/environment/system/os": "ignore",
+    "/coordinates/environment/system/libc": "ignore",
+    "/coordinates/environment/system/cpu": "ignore",
+    "/coordinates/environment/system/gpu": "ignore",
+    "/coordinates/environment/system/firmware": "ignore",
+    "/coordinates/environment/system/container": "ignore",
+    "/coordinates/environment/system/process/cgroup": "ignore",
     "/benchmark/revision/key": {
       "normalize": { "rule": "map", "map": { "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e": "suite-v3" } }
     }

@@ -81,10 +81,10 @@ Placement follows the schema (§4.2); nothing new is introduced:
 | build type, compiler and flags, install method, BLAS backend, JIT or AOT | `coordinates.subject.configuration` |
 | dependency versions that policy treats as identity | pinned components of `coordinates.subject` |
 | thread caps, affinity | `coordinates.protocol` (`protocol.threads`, `protocol.affinity`) |
-| kernel, libc, driver, microcode, governor, turbo, image digest, host runtime version | `coordinates.environment.system` |
+| kernel, libc, driver, microcode, governor, turbo, image digest, host runtime version (`runtime`) | `coordinates.environment.system` |
 | load, temperature | condition measurements: sibling results sharing `attempt_key` (schema §4.4) |
 | full package inventory | dependency manifest artifact in `provenance` |
-| preparation playbook or image version | declared; `environment.system`, matched if the project's identity policy says so |
+| preparation playbook or image version | declared; `environment.system` |
 | `how_built`, `activation`, `shell`, target provider | declared; `provenance.info`, never identity |
 
 Declared and detected map onto the schema's split between requested and read (schema §4.2). A coordinate holds the detected value wherever one exists; a declared value fills it only when nothing can be read back, with a warning such as `build-config-unverified`. When a setting is detectable but nobody declared it, as with a thread cap inherited from the shell, the detected value is recorded. When declared and detected disagree, the detected value is recorded, the declaration stays in the work order the result cites, and the result carries `requested-value-mismatch`.
@@ -209,9 +209,9 @@ Environments change. The aim is that a change is visible, attributable, and does
 |---|---|---|
 | OS, kernel, driver, or libc upgrade | upgrade between runs; re-measure a known commit before and after | `environment.system` differs from that point on; the comparator carries the difference as a caveat (`comparator.md` §3) |
 | compiler or toolchain upgrade | same; declare the new toolchain | subject configuration changes; a new series under the default policy, joined by a continuity mapping if the project chooses |
-| tuning or playbook change | bump and declare the playbook version | `environment.system`, matched only if the project's policy says so |
+| tuning or playbook change | bump and declare the playbook version | `environment.system`; a new series unless the project's policy ignores it |
 | hardware swap or new machine | overlap old and new on the same commits | a new environment; history continues only through an explicit continuity event |
-| a thread cap or affinity that differs from last time | usually an accident: fix the calling script | the protocol or a workload parameter differs, so results land in a different series rather than silently blending |
+| a thread cap or affinity that differs from last time | usually an accident: fix the calling script | the protocol, a workload parameter, or the process environment differs, so results land in a different series rather than silently blending |
 
 Continuity events and their audit trail are specified in a separate design document (schema §4.3).
 
@@ -246,7 +246,7 @@ This document removes building from the runner and limits enforcement to the pro
 ## 9. Open questions
 
 1. How is the source of a fact (§3.4) represented in the message: a marker per field, or one provenance map from field path to `declared`, `detected`, or a plugin name?
-2. An inherited setting, such as a leftover `OMP_NUM_THREADS`, is recorded in `environment.system`, which the default identity policy ignores, so it no longer starts a new series; a change in it is flagged on the series point instead (schema §4.3). Should the default policy match on the thread-control variables?
+2. An inherited setting, such as a leftover `OMP_NUM_THREADS`, is recorded in `environment.system` (`process.environment`), which the default identity policy matches, so it starts a new series. That is visible, which is the point, but noisy. Should a project's policy ignore it until someone declares it?
 3. Which harnesses can interleave sides on their own, and what do UC-02 and UC-03 look like on one that cannot? For UC-04 the loop is necessarily the caller's; for UC-03 it is the workbench's session loop (`system-decomposition.md` §3.4).
 4. Where do declarations live: in the work order, in a per-project configuration file, in a per-node file an operator maintains, or all three with a defined precedence?
 5. ~~Is the default allowlist of environment variables (§3.1) part of the core, or does each adapter contribute the variables its ecosystem cares about?~~ Both. The core holds the default, a project extends it, and an adapter adds the variables its ecosystem cares about; the runner composes one list and every record of the environment, including artifacts an adapter keeps, is limited to it.
