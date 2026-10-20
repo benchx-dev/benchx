@@ -42,6 +42,15 @@ Optional hooks (the runner calls them when present)
                               (None drops one), warnings go to `quality.warnings`.
                               For an adapter that can see the environment its
                               harness actually had.
+    workload(case, runnable) -> (name, parameters): the workload a case measures,
+                              when the harness has structured parameters (ASV's
+                              params). Without it the case is the name. The
+                              parameters join the order's environment variables
+                              in `workload.parameters`.
+    case_protocol(applied, run, case) -> the protocol this case ran under, for a
+                              harness whose benchmarks declare their own precision
+                              (ASV's number, repeat, warmup_time). Without it every
+                              case reports the order's protocol.
     repetition_levels(applied, run, case) -> `procedure.repetition_levels`: per level,
                               `{unit, attempted, completed}` as totals over the
                               attempt. For a harness that repeats at several levels.

@@ -31,6 +31,10 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
 bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
+bx asv [PATH] [-b REGEX] [--rounds N] [--repeat N] [--number N | --sample-time S] [--warmups N]
+       [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
+       [--case-timeout S] [--out DIR] [--no-ingest]
+                                         # an asv benchmark suite, timed by pyperf: order → results → store → table
 ```
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
@@ -71,6 +75,30 @@ functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
 `examples/pyperf-bench` is a runnable walk-through.
+
+`bx asv` runs an [asv](https://asv.readthedocs.io) benchmark suite unchanged, reading
+asv's benchmark format as a language and timing it with pyperf; neither asv nor
+asv_runner is used. PATH is a directory holding `asv.conf.json` (its `benchmark_dir`
+is the suite) or the benchmark directory itself; the run is `bx bench` with the `asv`
+harness (`bx bench . --adapter asv --suite benchmarks` is the same order). `adapters/asv_runtime.py` discovers
+the benchmarks as asv does (names, `params`, `setup`/`teardown`/`setup_cache`, skips,
+and asv's `version` hash all agree with asv_runner's; a test checks it). The
+benchmarks run in the `python` first on `PATH`, which must import pyperf and the
+project you are measuring. Each `time_*` benchmark and each of its parameter
+combinations is a case, with the parameters in `workload.parameters` as asv's
+`repr()` strings; other benchmark types, and modules that fail to import, are
+listed and skipped. Each case is one pyperf run from a scratch directory (an unbuilt
+checkout of the project cannot shadow the installed one): the manager runs
+`setup_cache` once, and each worker runs the setups, then pyperf's warmups and
+values. With setup hooks, every timed call sees fresh state (asv#966): one call
+per loop, or setup re-run between calls outside the timer. The flags are pyperf's
+levels (`--rounds` → processes, `--repeat` → values, `--number` → loops,
+`--sample-time` → `--min-time`, `--warmups`); what they leave out comes from each
+benchmark's own `repeat`, `number`, `sample_time`, `warmup_time` and `timeout`, then
+asv's defaults, and each result records its own case's protocol. The harness in
+every result is pyperf. Results also record the installed project's version
+(`observed_context.asv.project`) and asv's hash of the benchmark's code
+(`comparison_context.benchmark_version`).
 
 ## What it does
 
@@ -117,7 +145,7 @@ order, so `bx run results/KEY/orders/order.json` replays any bench run.
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 304 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 316 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 
@@ -166,7 +194,9 @@ benchx/
   snapshot.py        what the runner records (benchmark-environments.md §3)
   adapters/gbench.py Google Benchmark, driving and translating halves
   adapters/pyperf.py pyperf, both halves, for Python functions
-  bench.py           bx bench: the MODULE.py shorthand, and the results table
+  adapters/asv.py    asv's benchmark format, timed by pyperf (bx asv)
+  adapters/asv_runtime.py  asv's discovery and setup semantics, standalone, copied beside each driver
+  bench.py           bx bench: the MODULE.py shorthand, bx asv's suite, and the results table
   config.py          .benchx/config.json: the pyperf precision defaults and their template
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare

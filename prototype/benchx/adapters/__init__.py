@@ -1,8 +1,8 @@
 """Harness adapters (harness-adapter.md). The contract is in `base`."""
 
-from . import gbench, pyperf
+from . import asv, gbench, pyperf
 
-ADAPTERS = {gbench.NAME: gbench, pyperf.NAME: pyperf}
+ADAPTERS = {asv.NAME: asv, gbench.NAME: gbench, pyperf.NAME: pyperf}
 
 
 def get(name: str):

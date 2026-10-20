@@ -12,7 +12,7 @@ def test_every_harness_has_a_runner_adapter():
 
 def test_unknown_harness_is_refused():
     with pytest.raises(SessionError, match="no harness"):
-        harnesses.get("asv")
+        harnesses.get("no-such-harness")
 
 
 def test_exact_filter_matches_names_exactly():

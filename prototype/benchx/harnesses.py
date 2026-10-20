@@ -114,9 +114,23 @@ class Pyperf(Harness):
         return f"{reps['process']} processes x {reps['value']} values (config: {config_path or 'none, pyperf defaults'})"
 
 
+class Asv(Pyperf):
+    """asv's benchmark format, timed by pyperf: pyperf's flags and config file.
+    Only the process level has a default; what the flags leave out, each
+    benchmark's own `repeat`, `number`, `sample_time` and `warmup_time` decide."""
+
+    name = "asv"
+    BARE_PATH_KIND = "working_tree"  # the suite is run as found, against the installed project
+
+    def describe_precision(self, precision, config_path=None):
+        reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
+        return f"{reps['process']} rounds x {reps.get('value', 'per-benchmark')} repeat (config: {config_path or 'none'})"
+
+
 GOOGLE_BENCHMARK = GoogleBenchmark()
 PYPERF = Pyperf()
-HARNESSES = {h.name: h for h in (GOOGLE_BENCHMARK, PYPERF)}
+ASV = Asv()
+HARNESSES = {h.name: h for h in (GOOGLE_BENCHMARK, PYPERF, ASV)}
 # Every precision flag some harness takes, each once, in a stable order (for a CLI).
 FLAG_NAMES = tuple(dict.fromkeys(name for h in HARNESSES.values() for name in h.FLAGS))
 

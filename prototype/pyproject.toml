@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pyperf"]
+test = ["pytest", "pyperf", "asv_runner"]
 
 [project.scripts]
 bx = "benchx.cli:main"

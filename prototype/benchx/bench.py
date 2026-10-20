@@ -4,8 +4,8 @@
 resolves the target and builds the order the way a comparison session does
 (no round, no slot, no comparison). What is left here is the shorthand
 `bx bench MODULE.py [FUNCTION ...]`, which names a Python module's checkout as
-the target and the module's path in it as the suite, and the table that
-summarizes the results.
+the target and the module's path in it as the suite, the benchmark directory
+`bx asv PATH` names, and the table that summarizes the results.
 """
 
 import json
@@ -36,6 +36,17 @@ def module_target(module, tree=None) -> tuple[str, str]:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
 
 
+def asv_suite(path) -> Path:
+    """The benchmark directory named by `path`: a directory holding asv.conf.json
+    (its `benchmark_dir`, default `benchmarks`), or the benchmark directory itself."""
+    from .adapters import asv
+    path = Path(path).resolve()
+    for name in asv.CONF_NAMES:
+        if (path / name).is_file():
+            return (path / asv._read_conf(path / name).get("benchmark_dir", "benchmarks")).resolve()
+    return path
+
+
 def summarize(files) -> list[dict]:
     """One row per result document among `files`."""
     rows = []
@@ -46,8 +57,10 @@ def summarize(files) -> list[dict]:
         measurement = document["measurement"]
         # An observation is a number, or an object carrying one with its metadata (pyperf's).
         values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
+        workload = document["coordinates"]["workload"]
+        parameters = ", ".join(f"{k}={v}" for k, v in workload.get("parameters", {}).items())
         rows.append({
-            "case": document["coordinates"]["workload"]["name"],
+            "case": workload["name"] + (f" [{parameters}]" if parameters else ""),
             "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
             "n": len(values),
             "median": statistics.median(values) if values else None,

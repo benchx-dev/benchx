@@ -112,6 +112,48 @@ def cmd_bench(args):
     return _report(summary["outcome"])
 
 
+def cmd_asv(args):
+    """Run an asv benchmark suite, timed by pyperf: `bx bench` with the asv harness,
+    the suite's tree as the target and its benchmark directory as the suite."""
+    try:
+        env = _environment(args.env)
+        if args.number is not None and args.sample_time is not None:
+            raise UsageError("--number and --sample-time both set calibration; give one")
+        benchmark_dir = bench_mod.asv_suite(args.path)
+        if not benchmark_dir.is_dir():
+            raise UsageError(f"no such benchmark directory: {benchmark_dir}")
+        root = bench_mod.tree_of(benchmark_dir, args.tree)
+        try:
+            suite = benchmark_dir.relative_to(root).as_posix()
+        except ValueError:
+            raise UsageError(f"{benchmark_dir} is not inside the tree {root}; give --tree") from None
+    except UsageError as e:
+        print(f"bx asv: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    store = None if args.no_ingest else Store()
+    try:
+        summary = session.bench_target(
+            str(root), suite=suite, store=store, adapter="asv",
+            # asv's names for pyperf's levels: rounds are processes, repeat values, number loops.
+            flags={"processes": args.rounds, "values": args.repeat, "loops": args.number,
+                   "min_time": args.sample_time, "warmups": args.warmups},
+            environment_variables=env, filter="|".join(f"(?:{b})" for b in args.bench) if args.bench else None,
+            project=args.project, run_key=args.run_key or orders.default_run_key("asv"), out=args.out,
+            source_uri=args.source_uri, case_s=args.case_timeout, build=False,
+            progress=lambda message: print(message, file=sys.stderr))
+    except (session.SessionError, config_mod.ConfigError) as e:
+        print(f"bx asv: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    except runner.Refused as e:
+        return _refused(e)
+    print(bench_mod.render(bench_mod.summarize(summary["files"])))
+    print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
+    if store is None:
+        return EXIT_OK
+    print(f"{store.path}: ", end="")
+    return _report(summary["outcome"])
+
+
 def cmd_config(args):
     try:
         path = config_mod.write_template(args.dir)
@@ -349,6 +391,36 @@ def main(argv=None):
                    help="seconds before one case is stopped (default %(default)s)")
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
+
+    p = sub.add_parser("asv", help="run an asv benchmark suite, timed by pyperf",
+                       description="bx asv [PATH]: PATH holds asv.conf.json (its benchmark_dir is the suite) "
+                                   "or is the benchmark directory itself. Each time_* benchmark, and each of its "
+                                   "parameter combinations, is a case. The benchmarks run in the `python` first "
+                                   "on PATH, which must import pyperf; asv itself is not used. "
+                                   "Flags override what each benchmark declares; what they leave out, asv "
+                                   "decides per benchmark.")
+    p.add_argument("path", nargs="?", default=".", help="directory with asv.conf.json, or the benchmark directory")
+    p.add_argument("-b", "--bench", action="append", metavar="REGEX",
+                   help="benchmarks to run, as asv run --bench: searched in the name, and in name(p0, p1) "
+                        "for each parameter combination (repeatable: any may match)")
+    p.add_argument("--tree", help="the tree being measured (default: the suite's git checkout or directory)")
+    p.add_argument("--rounds", type=int, help="processes per benchmark (asv default 2)")
+    p.add_argument("--repeat", type=int, help="samples per round (default: the benchmark's own repeat)")
+    p.add_argument("--number", type=int, help="fixed calls per sample (default: the benchmark's own number)")
+    p.add_argument("--sample-time", type=float, help="adaptive calibration: target seconds per sample")
+    p.add_argument("--warmups", type=int, help="warmup values per process (default: 1, or 0 if the benchmark "
+                                               "sets warmup_time = 0)")
+    p.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
+                   help="set an environment variable for the benchmark (repeatable)")
+    p.add_argument("--project", help="name a project, so results join its series; omit for an ad hoc run")
+    p.add_argument("--run-key", help="default: asv-<UTC timestamp>")
+    p.add_argument("--source-uri", help="the source's URI (default: the checkout's origin remote)")
+    p.add_argument("--out", help="directory for the order and result files (default ./results/RUN_KEY)")
+    p.add_argument("--case-timeout", type=float, default=1800,
+                   help="seconds allowed per case, all rounds (default %(default)s); each round also "
+                        "stops at the benchmark's own timeout")
+    p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
+    p.set_defaults(fn=cmd_asv)
 
     p = sub.add_parser("config", help="manage .benchx/config.json")
     p.add_argument("action", choices=["init"], help="init: write a template stating pyperf's defaults")

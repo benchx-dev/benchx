@@ -16,6 +16,15 @@ wheels = [
 ]
 
 [[package]]
+name = "asv-runner"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/b9/1e7191ff2f03c1ca24a13709ae2baeb67e7d39fc5723206590ce41ff8642/asv_runner-0.3.1.tar.gz", hash = "sha256:71a82d653bf7b53977485a835601e982af97250a94951a5f1ff94a9045f5d1b3", size = 47673, upload-time = "2026-08-15T18:19:52.202Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/48/ae/e297569c2f219a424f7a2389346dd4544c70102738b6d3621fac0f60ab44/asv_runner-0.3.1-py3-none-any.whl", hash = "sha256:0eeb530b106051c831a82b4f8fd3b36d381ab59fd208e1dc071b295161e14906", size = 51746, upload-time = "2026-08-15T18:19:50.827Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -38,12 +47,14 @@ dependencies = [
 
 [package.optional-dependencies]
 test = [
+    { name = "asv-runner" },
     { name = "pyperf" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "asv-runner", marker = "extra == 'test'" },
     { name = "jsonpointer", specifier = ">=2.0" },
     { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.18" },
     { name = "pyarrow", specifier = ">=19" },
