@@ -25,6 +25,7 @@ from .core import loader
 
 SIDECAR = ".benchx-target.json"
 TEXT_FIELDS = ("how_built", "activation", "shell", "provider")
+MAX_FACTS_CHARS = 65536  # how_built as an object, serialized; as text it is limited to 8192
 
 
 class TargetError(Exception):
@@ -78,6 +79,9 @@ def _validated(raw: str, where: str) -> dict:
     if errors:
         problems = "; ".join(str(error) for error in errors)
         raise TargetError(f"{where} is not a target description: {problems}")
+    facts = description.get("how_built")
+    if isinstance(facts, dict) and len(json.dumps(facts)) > MAX_FACTS_CHARS:
+        raise TargetError(f"{where}: how_built facts are over {MAX_FACTS_CHARS} characters as JSON")
     return description
 
 

@@ -27,7 +27,8 @@ def default_run_key(prefix: str) -> str:
 
 def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quantities=("wall-time",),
                case_s: float = CASE_TIMEOUT_S, order_s: float = ORDER_TIMEOUT_S, project=None, labels=None,
-               environment_variables=None, round_=None, slot=None, benchmark=None) -> dict:
+               environment_variables=None, round_=None, slot=None, benchmark=None,
+               collectors=None) -> dict:
     """One resolved work order. Optional fields that are None or empty are left out.
 
     Raises OrderError when the result is not a valid work order.
@@ -59,6 +60,8 @@ def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quan
         order["project"] = project
     if benchmark:
         order["benchmark"] = benchmark
+    if collectors:
+        order["collectors"] = list(collectors)
     errors = core.check(order, "work-order")
     if errors:
         raise OrderError("; ".join(str(error) for error in errors))

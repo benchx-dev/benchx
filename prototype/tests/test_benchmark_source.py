@@ -61,7 +61,7 @@ def bench(subject, suite, run_key, *extra):
 
 
 def result(run_key):
-    path = next(p for p in sorted((RESULTS / run_key).glob("*.json")) if not p.name.startswith("workorder-"))
+    path = next(p for p in sorted((RESULTS / run_key).glob("*_wall-time.json")))
     document = json.loads(path.read_text())
     assert core.check(document, "measurement-result") == []
     return document
