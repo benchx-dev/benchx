@@ -41,25 +41,29 @@ def summarize(files) -> list[dict]:
     rows = []
     for path in files:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
-        if document.get("schema_version") == "benchx/work-order/0.1.0":
-            continue
-        measurement = document["measurement"]
-        # An observation is a number, or an object carrying one with its metadata (pyperf's).
-        values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
-        rows.append({
-            "case": document["coordinates"]["workload"]["name"],
-            "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
-            "n": len(values),
-            "median": statistics.median(values) if values else None,
-            "mean": statistics.fmean(values) if values else None,
-            "stdev": statistics.stdev(values) if len(values) > 1 else None,
-            "min": min(values) if values else None,
-            "max": max(values) if values else None,
-            "loops": document["procedure"].get("inner_iterations"),
-            "warnings": [w.get("code", str(w)) if isinstance(w, dict) else str(w)
-                         for w in document.get("quality", {}).get("warnings", [])],
-        })
+        if document.get("schema_version") != "benchx/work-order/0.1.0":
+            rows.append(row_of(document))
     return rows
+
+
+def row_of(document: dict) -> dict:
+    """The table row of one result document."""
+    measurement = document["measurement"]
+    # An observation is a number, or an object carrying one with its metadata (pyperf's).
+    values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
+    return {
+        "case": document["coordinates"]["workload"]["name"],
+        "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
+        "n": len(values),
+        "median": statistics.median(values) if values else None,
+        "mean": statistics.fmean(values) if values else None,
+        "stdev": statistics.stdev(values) if len(values) > 1 else None,
+        "min": min(values) if values else None,
+        "max": max(values) if values else None,
+        "loops": document["procedure"].get("inner_iterations"),
+        "warnings": [w.get("code", str(w)) if isinstance(w, dict) else str(w)
+                     for w in document.get("quality", {}).get("warnings", [])],
+    }
 
 
 def _time(seconds) -> str:
@@ -71,9 +75,10 @@ def _time(seconds) -> str:
     return f"{seconds / 1e-9:.4g} ns"
 
 
-def render(rows) -> str:
-    header = ("case", "median", "mean ± sd", "min .. max", "n", "status")
-    body = [(r["case"], _time(r["median"]),
+def render(rows, leading=()) -> str:
+    """The table; `leading` names row keys to show as columns before the case."""
+    header = (*leading, "case", "median", "mean ± sd", "min .. max", "n", "status")
+    body = [(*(str(r[key]) for key in leading), r["case"], _time(r["median"]),
              f"{_time(r['mean'])} ± {_time(r['stdev'])}" if r["mean"] is not None else "-",
              f"{_time(r['min'])} .. {_time(r['max'])}" if r["min"] is not None else "-",
              str(r["n"]), r["status"] + (f"  [{', '.join(r['warnings'])}]" if r["warnings"] else ""))

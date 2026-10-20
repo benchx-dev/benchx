@@ -98,16 +98,24 @@ class Store:
                 return json.loads(text)
         return None
 
-    def head(self, n: int = 10) -> tuple[int, list[dict]]:
+    def head(self, n: int = 10, project: str | None = None, workload: str | None = None) -> tuple[int, list[dict]]:
         """The store's size and its latest n results, newest first. Rows are in
-        ingest order, since every ingest appends to the rewritten file."""
+        ingest order, since every ingest appends to the rewritten file. `project`
+        keeps one store project's results; `workload` keeps those whose benchmark
+        name contains it. Both are applied before n."""
         table = self._table(["ingest_key", "revision", "coordinates", "measurement", "provenance",
                              "store_project", "document"])
         if table is None:
             return 0, []
+        projects = table.column("store_project").to_pylist()
+        names = table.column("coordinates").combine_chunks().field("workload").field("name").to_pylist()
+        kept = [i for i, (pr, name) in enumerate(zip(projects, names))
+                if (project is None or pr == project) and (workload is None or workload in name)]
+        kept = kept[max(0, len(kept) - n):]
+        if not kept:
+            return table.num_rows, []
         rows = []
-        for position, row in enumerate(table.slice(max(0, table.num_rows - n)).to_pylist(),
-                                       start=max(0, table.num_rows - n)):
+        for position, row in zip(kept, table.take(kept).to_pylist()):
             values = [o["value"] for o in row["measurement"]["observations"] or []]
             rows.append({
                 "row": position,

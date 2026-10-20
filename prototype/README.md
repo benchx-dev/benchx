@@ -10,7 +10,7 @@ bx run <order.json> [--out DIR] [--no-ingest]
 bx ingest <dir|file>                     # result files and work orders → the local store
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--json]                 # the latest results in the store, newest first
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
                                          # read mode: compare results already measured

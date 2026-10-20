@@ -42,6 +42,36 @@ def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys
     assert {d["coordinates"]["workload"]["name"] for d in Store().documents("g1")} == {QUIET, NOISY}
 
 
+def test_head_table_prints_the_bench_columns_of_the_stored_results(build, capsys):
+    assert cli.main(["bench", str(build), *GBENCH, "--run-key", "h1"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["head", "--table"]) == cli.EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1].split()[:3] == ["revision", "run", "project"]
+    assert all("h1" in line and "success" in line for line in lines[3:]) and len(lines) == 5
+    assert QUIET in lines[3] + lines[4] and NOISY in lines[3] + lines[4]
+    with pytest.raises(SystemExit):  # one shape at a time
+        cli.main(["head", "--table", "--json"])
+
+
+def test_head_filters_by_project_and_workload_before_taking_n(build, capsys):
+    assert cli.main(["bench", str(build), *GBENCH, "--run-key", "f1", "--project", "alpha"]) == cli.EXIT_OK
+    assert cli.main(["bench", str(build), *GBENCH, "--run-key", "f2", "--project", "beta"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    def listed(*args):
+        assert cli.main(["head", "--table", *args]) == cli.EXIT_OK
+        return capsys.readouterr().out.splitlines()[3:]
+
+    assert len(listed("-n", "100")) == 4
+    # the two newest rows are beta's; alpha's are older, and -n 2 still finds them
+    assert [line.split()[1:3] for line in listed("-n", "2", "--project", "alpha")] == [["f1", "alpha"]] * 2
+    only = listed("-n", "100", "--workload", "Noisy")
+    assert len(only) == 2 and all(NOISY in line for line in only)
+    assert [line.split()[1:3] for line in listed("--project", "beta", "--workload", "Quiet")] == [["f2", "beta"]]
+    assert listed("--project", "nonesuch") == []
+
+
 def test_the_source_comes_from_cmake_cache(build, repo, tmp):
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "g2", "--no-ingest"]) == cli.EXIT_OK
     assert order_of(tmp, "g2")["target"]["source_dir"] == str(repo["wt-head"].resolve())

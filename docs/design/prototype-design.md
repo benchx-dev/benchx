@@ -19,7 +19,7 @@ bx run <order.json> [--out DIR] [--no-ingest]
 bx ingest <dir|file>                     # sweep documents into the store
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--json]                 # the latest results in the store, newest first
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
                                          # read mode: compare results already measured
@@ -371,7 +371,10 @@ columns, which is fine at prototype scale; a real deployment would index them.
 
 `bx head` shows the store's size and its latest results, newest first, with
 run key, workload, quantity, status, median, revision, project, and labels;
-with `--json` it prints the stored documents instead. Recency is ingest
+with `--json` it prints the stored documents instead, and with `--table` the `bx bench`
+table (median, mean ± sd, range, n, status) of each, led by revision, run key and project.
+`--project` keeps one store project's results and `--workload` those whose benchmark name
+contains it; both apply before `-n`. Recency is ingest
 order, since every ingest appends to the rewritten file.
 
 `bx series` and `bx history` are queries over the derived `series` and

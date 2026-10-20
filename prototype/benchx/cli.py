@@ -155,12 +155,17 @@ def cmd_history(args):
 
 def cmd_head(args):
     store = Store()
-    total, rows = store.head(args.n)
+    total, rows = store.head(args.n, args.project, args.workload)
     if args.json:
         for row in rows:
             print(row["document"])
         return EXIT_OK
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
+    if args.table:  # the columns of `bx bench`, led by where each result came from
+        print(bench_mod.render([{**bench_mod.row_of(json.loads(r["document"])), "revision": r["revision"][:10],
+                                 "run": r["run_key"], "project": r["project"]} for r in rows],
+                               leading=("revision", "run", "project")))
+        return EXIT_OK
     cells = []
     for r in rows:
         median = f"{r['median']:.6g} {r['unit']}" if r["median"] is not None else "-"
@@ -370,7 +375,12 @@ def main(argv=None):
 
     p = sub.add_parser("head", help="the latest results in the store, newest first")
     p.add_argument("-n", type=int, default=10, help="how many (default 10)")
-    p.add_argument("--json", action="store_true", help="print the stored documents instead")
+    p.add_argument("--project", help="only this store project's results (e.g. numpy, local/HOST)")
+    p.add_argument("--workload", help="only results whose benchmark name contains this")
+    shape = p.add_mutually_exclusive_group()
+    shape.add_argument("--json", action="store_true", help="print the stored documents instead")
+    shape.add_argument("--table", action="store_true",
+                       help="the `bx bench` table (median, mean ± sd, range, n, status) with revision, run and project")
     p.set_defaults(fn=cmd_head)
 
     p = sub.add_parser("target", help="ask for a target's description (schemas/target-description/0.1.0)",
