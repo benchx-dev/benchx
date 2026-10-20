@@ -297,7 +297,10 @@ landing where its §3.4 puts it:
   neither locates a checkout the runner refuses the order, because a result
   must state its revision (`runner.md` §2), and `runner-schema.md` §5.1 refuses
   an order with no revision to record. The benchmark code is the subject's own
-  checkout, so the benchmark revision, dirty flag, and tree are the subject's
+  checkout, so the benchmark revision, dirty flag, and tree are the subject's,
+  unless the harness's suite is a source file (pyperf) outside that checkout: then
+  the order carries `benchmark`, and the result records the suite file's own
+  source, revision (when under git) and blob id as `benchmark_tree`
   (`runner-schema.md` §3.3).
 - **Build configuration**, from a built-in plugin that reads
   `CMakeCache.txt` in the build directory: build type, compiler and version,
