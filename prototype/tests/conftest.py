@@ -124,6 +124,7 @@ def _isolated(monkeypatch, tmp_path):
     benchx.conf.json the working directory is the root, so the store and the results
     land in the test's directory."""
     monkeypatch.delenv("BENCHX_SETUP_FILE", raising=False)
+    monkeypatch.delenv("BENCHX_HOME", raising=False)
     monkeypatch.chdir(tmp_path)
     snapshot.ignore()
     yield

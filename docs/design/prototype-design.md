@@ -92,7 +92,7 @@ and one run collects all of them. `--no-project` makes the run ad hoc, filed in 
 as `local/<hostname>`, whatever the file's `project` says. The provider is needed only by an
 `@CONFIG` target. The store and the results directory are left out of the identity of a
 measured tree they sit in, so a run's own output does not mark it dirty. The earlier
-`.benchx/provider.json`, `.benchx/config.json` and `~/.benchx` home are gone and not read;
+`.benchx/provider.json`, `.benchx/config.json` and the `~/.benchx` home directory are gone and not read (only `$BENCHX_HOME` survives, as a store override);
 `.benchx/setup.json` (declared environment facts, §3) is a separate file.
 `schemas/config/0.1.0/examples` has recommended settings for each harness.
 
@@ -121,6 +121,8 @@ runner for each order and then the comparator.
 
 The local store has one place per project, `store.parquet` in the project root
 unless `paths.store` in `benchx.conf.json` says otherwise; no command takes another.
+`$BENCHX_HOME`, when set, relocates the store to `$BENCHX_HOME/store.parquet` and wins over
+`paths.store` (for tests, CI and keeping a demo out of your real store).
 `bx run` delivers what it measures there: it writes the result files,
 then ingests exactly those files. The `runner` module itself stays
 store-unaware (`runner.md` §2 principle 6); the command composes it with
