@@ -52,6 +52,22 @@
         "precision": { "description": "A work-order precision, possibly partial.", "type": "object" }
       }
     },
+    "collectors": {
+      "description": "Context collectors, by name (harness-adapter.md §5.1), copied into every work order. The commands run in the harness's working directory, so a command argument may contain {root}, replaced by the project root. verify: how_built requires the target's how_built object to be observed exactly; expect requires facts by exact value; on_fail says what a failure does.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "timeout_s": { "type": "number", "exclusiveMinimum": 0 },
+          "verify": { "const": "how_built" },
+          "expect": { "type": "object" },
+          "on_fail": { "enum": ["refuse", "warn"] }
+        }
+      }
+    },
     "environment_variables": {
       "description": "Set for the benchmark's processes; each becomes a workload parameter.",
       "type": "object",
