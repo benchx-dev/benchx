@@ -147,7 +147,7 @@ The runner fills existing measurement-result fields and defines no new ones. Wha
 
 ### 5.2 Environment identity: `benchx/env-identity/0.1.0`
 
-This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. A fact goes in `identity` if a change should split history, and in `system` otherwise.
+This goes in `coordinates.environment` with `schema = "benchx/env-identity/0.1.0"`. A fact goes in `identity` when it names the machine, and in `system` otherwise; whether either splits history is the identity policy's choice (`benchmark-result-schema.md` §4.3).
 
 - **identity:** `machine_id` (salted hash of `/etc/machine-id` or equivalent), `cpu.model`, `cpu.logical_cores`, `memory_bytes`, `gpus[] {model, memory_bytes}`, `os.family`, `virtualization` (`bare-metal` | `vm` | `container` | `wsl`), `policy` (`name@version`), `enforced{}` (the values actually applied)
 - **system:** hostname, GPU UUIDs, BIOS/firmware strings, and the fields of §5.3
