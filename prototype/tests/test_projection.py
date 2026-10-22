@@ -34,7 +34,17 @@ def test_the_prototype_policy_is_valid_and_pinned_to_its_name():
     assert validate(identity.POLICY_DATA) == []
     assert identity.IDENTITY_SCHEMA == "benchx/prototype-identity/v2"
     assert core.sha256_hex(core.canonical(identity.POLICY_DATA)) == \
-        "881c458d0c2d6b3dd838c923994b867865ee5aedbc187232bacd3c15743b9ccf"
+        "c9fd8f65dce235423700f55361918be479bde7cbe1c7afba60da7cdaed329f96"
+
+
+def test_adding_an_estimator_leaves_the_policy_and_its_series_alone():
+    """Estimators are configured beside the identity policy, not in it (§4.5):
+    another estimator adds series and changes none of the existing ones."""
+    minimum = {"name": "min", "method_version": "benchx/min/v1", "input_level": "observations"}
+    before = {p["series_fingerprint"] for p in identity.points(ARROW, "arrow")}
+    after = identity.points(ARROW, "arrow", estimators=(*identity.ESTIMATORS, minimum))
+    assert before < {p["series_fingerprint"] for p in after}
+    assert [p["value"] for p in after if p["estimator"] == minimum] == [min(ARROW["measurement"]["observations"])]
 
 
 def test_the_default_matches_what_it_does_not_name():

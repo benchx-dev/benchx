@@ -151,7 +151,6 @@ class Projection:
         self.axis = list(axis)
         self.default = policy["default"]
         self.paths = {**policy.get("paths", {}), **self.extra}
-        self.estimators = policy.get("estimators", [])
         self.invariants = list(invariants)
         for path in self.paths:
             if path not in NAMED_ONLY and path.split("/")[1] not in REPORTED:

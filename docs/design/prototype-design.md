@@ -359,7 +359,8 @@ counted (`ingested 42, duplicate 3, rejected 1 (unit-conflict)`). Re-running
 `bx ingest` on the same directory is a visible no-op (criterion 2).
 
 Series need an identity policy and a list of estimators (schema §4.3, §4.5).
-The prototype has one identity policy, which lists both, in code:
+The prototype has one of each, in code (`benchx/identity.py`), and keeps them
+apart, so adding an estimator never renames the policy:
 
 - **Identity policy** `benchx/prototype-identity/v2` (`benchx/identity.py`):
   the default policy (`schemas/identity-policy/0.1.0/examples/default.json`)
@@ -369,8 +370,8 @@ The prototype has one identity policy, which lists both, in code:
   every commit, so matching it would split history at every point (schema §1).
   Being ignored, its change is flagged on each point where it happens. A thin
   result's identity carries its implicit project.
-- **Estimators:** `median`, derived from observations, plus any producer
-  estimate a result carries.
+- **Estimators** (`ESTIMATORS`): `median`, derived from observations, plus
+  any producer estimate a result carries.
 
 The identity policy is the default projection, with the subject revision as
 its axis. The store can materialize any other projection built in code from
@@ -535,7 +536,7 @@ history grow from run to run, and the demo ends with `bx head`.
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
 - One identity policy, in code, and two profiles; median, mean, and min are
-  the only estimators it derives.
+  the only estimators the prototype can derive.
 - The store is one file, rewritten on every ingest that accepts something,
   with no concurrency story beyond the atomic rename; entities and series are
   computed on query, and ingest-time checks are scans, not indexes.

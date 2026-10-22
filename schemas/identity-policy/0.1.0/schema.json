@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:identity-policy:0.1.0",
   "title": "BenchX identity policy",
-  "description": "A project's identity policy (docs/design/benchmark-result-schema.md section 4.3): for every reported fact, whether it must match, as is or normalized, for two results to share a series, or is ignored. It is the project's default projection, whose axis is always the subject revision, so only the roles are stored; other projections, such as the comparison profiles of section 5.5, reuse these roles with a different axis.",
+  "description": "A project's identity policy (docs/design/benchmark-result-schema.md section 4.3): for every reported fact, whether it must match, as is or normalized, for two results to share a series, or is ignored. It is the project's default projection, whose axis is always the subject revision, so only the roles are stored; other projections, such as the comparison profiles of section 5.5, reuse these roles with a different axis. Which estimators a project derives series for is separate configuration (section 4.5): the estimator enters series_fingerprint on its own, so adding one never changes the policy.",
   "$comment": "Rules the server enforces: paths are JSON Pointers into the reported coordinates (project, source, benchmark, coordinates); the longest matching path wins, so a role on a subtree can be overridden for one member; a null fact never equals anything; an ignored fact whose value differs from the previous point of a series is recorded as a warning on that point; any change other than description needs a new identity_schema.",
   "type": "object",
   "additionalProperties": false,
@@ -22,11 +22,6 @@
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/pointer" },
       "additionalProperties": { "$ref": "#/$defs/role" }
-    },
-    "estimators": {
-      "description": "Estimators to materialize series for.",
-      "type": "array",
-      "items": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/estimator" }
     }
   },
   "$defs": {

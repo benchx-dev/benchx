@@ -16,12 +16,5 @@
     "/coordinates/environment/system/firmware": "ignore",
     "/coordinates/environment/system/container": "ignore",
     "/coordinates/environment/system/process/cgroup": "ignore"
-  },
-  "estimators": [
-    {
-      "name": "median",
-      "method_version": "benchx/median/v1",
-      "input_level": "observations"
-    }
-  ]
+  }
 }

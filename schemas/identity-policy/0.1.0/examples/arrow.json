@@ -1,6 +1,6 @@
 {
   "identity_schema": "arrow/identity/v4",
-  "description": "Arrow's identity policy: the default, with benchmark revisions mapped to a declared suite version and a minimum estimator.",
+  "description": "Arrow's identity policy: the default, with benchmark revisions mapped to a declared suite version.",
   "default": "match",
   "paths": {
     "/source/uri": {
@@ -24,17 +24,5 @@
         }
       }
     }
-  },
-  "estimators": [
-    {
-      "name": "median",
-      "method_version": "benchx/median/v1",
-      "input_level": "observations"
-    },
-    {
-      "name": "min",
-      "method_version": "benchx/min/v1",
-      "input_level": "observations"
-    }
-  ]
+  }
 }

@@ -29,11 +29,15 @@ POLICY_DATA = {
         "/coordinates/environment/system/container": "ignore",
         "/coordinates/environment/system/process/cgroup": "ignore",
     },
-    "estimators": [{"name": "median", "method_version": "benchx/median/v1", "input_level": "observations"}],
 }
 POLICY = Projection(POLICY_DATA, ["/revision/key"])
 IDENTITY_SCHEMA = POLICY.identity_schema
 MEDIAN = {"name": "median", "method_version": "benchx/median/v1", "input_level": "observations"}
+# The estimators the prototype derives series for (schema §4.5). Project
+# configuration beside the identity policy, not part of it: the estimator
+# enters series_fingerprint on its own, so adding one adds series without
+# renaming the policy or changing any existing series.
+ESTIMATORS = (MEDIAN,)
 
 
 def comparison_identity(doc: dict, project: str, projection: Projection = POLICY) -> dict:
@@ -45,15 +49,15 @@ def series_fingerprint(doc: dict, project: str, estimator: dict, projection: Pro
                                          estimator)
 
 
-def points(doc: dict, project: str, projection: Projection = POLICY) -> list[dict]:
-    """The series points a result contributes (§4.5): each of the projection's
-    estimators the prototype can derive from its observations, and each
-    producer estimate it carries."""
+def points(doc: dict, project: str, projection: Projection = POLICY, estimators=ESTIMATORS) -> list[dict]:
+    """The series points a result contributes (§4.5): each of `estimators`
+    the prototype can derive from its observations, and each producer
+    estimate it carries."""
     if doc["measurement"]["status"] not in ("success", "partial"):
         return []
     projected = projection.apply(doc, project)
     batch, found = values(doc), []
-    for estimator in projection.estimators:
+    for estimator in estimators:
         if (value := estimate(estimator, batch)) is not None:
             found.append((estimator, value, "server"))
     for summary in doc["measurement"].get("summaries", []):
