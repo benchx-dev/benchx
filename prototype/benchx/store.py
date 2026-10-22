@@ -23,6 +23,13 @@ import pyarrow.parquet as pq
 from . import core, identity, parquet
 from .core import loader
 from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, UnitConflict
+from .projection import Projection
+
+SCHEMA_VERSION = 6  # the result schema this store's rows were written under
+
+
+class StoreError(Exception):
+    """The store file cannot be read by this version of benchx."""
 
 # Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
 _ATTEMPT_FIELDS = ("project", "source", "revision", "benchmark")
@@ -63,15 +70,22 @@ class Store:
     # -- reading -------------------------------------------------------------
 
     def _table(self, columns=None) -> pa.Table | None:
-        return pq.read_table(self.path, columns=columns) if self.path.exists() else None
+        if not self.path.exists():
+            return None
+        versions = set(pq.read_table(self.path, columns=["schema_version"]).column("schema_version").to_pylist())
+        if versions - {SCHEMA_VERSION}:
+            # No migration in the prototype: v5 results put the quantity in coordinates.
+            raise StoreError(f"{self.path} holds results of schema version {sorted(versions - {SCHEMA_VERSION})}; "
+                             f"this benchx reads only version {SCHEMA_VERSION}. Move it aside and re-run.")
+        return pq.read_table(self.path, columns=columns)
 
     def _index(self) -> list[dict]:
         table = self._table(["producer", "ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
-                             "store_project", "coordinates"])
+                             "store_project", "measurement"])
         if table is None:
             return []
         producers = table.column("producer").combine_chunks().field("name").to_pylist()
-        quantity = table.column("coordinates").combine_chunks().field("quantity")
+        quantity = table.column("measurement").combine_chunks().field("quantity")
         rest = table.select(["ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
                              "store_project"]).to_pylist()
         return [dict(row, producer=p, quantity=q, unit=u) for row, p, q, u in
@@ -98,19 +112,23 @@ class Store:
                 return json.loads(text)
         return None
 
-    def head(self, n: int = 10, project: str | None = None, workload: str | None = None) -> tuple[int, list[dict]]:
+    def head(self, n: int = 10, project: str | None = None, workload: str | None = None,
+             measurands: bool = False) -> tuple[int, list[dict]]:
         """The store's size and its latest n results, newest first. Rows are in
         ingest order, since every ingest appends to the rewritten file. `project`
         keeps one store project's results; `workload` keeps those whose benchmark
-        name contains it. Both are applied before n."""
+        name contains it; `measurands` leaves out condition measurements (schema
+        §4.4). All are applied before n."""
         table = self._table(["ingest_key", "revision", "coordinates", "measurement", "provenance",
                              "store_project", "document"])
         if table is None:
             return 0, []
         projects = table.column("store_project").to_pylist()
         names = table.column("coordinates").combine_chunks().field("workload").field("name").to_pylist()
-        kept = [i for i, (pr, name) in enumerate(zip(projects, names))
-                if (project is None or pr == project) and (workload is None or workload in name)]
+        kinds = table.column("measurement").combine_chunks().field("kind").to_pylist()
+        kept = [i for i, (pr, name, kind) in enumerate(zip(projects, names, kinds))
+                if (project is None or pr == project) and (workload is None or workload in name)
+                and not (measurands and kind == "condition")]
         kept = kept[max(0, len(kept) - n):]
         if not kept:
             return table.num_rows, []
@@ -123,8 +141,8 @@ class Store:
                 "run_key": row["provenance"]["run_key"],
                 "project": row["store_project"],
                 "workload": row["coordinates"]["workload"]["name"],
-                "quantity": row["coordinates"]["quantity"]["name"],
-                "unit": row["coordinates"]["quantity"]["unit"],
+                "quantity": row["measurement"]["quantity"]["name"],
+                "unit": row["measurement"]["quantity"]["unit"],
                 "status": row["measurement"]["status"],
                 "median": statistics.median(values) if values else None,
                 "revision": row["revision"]["key"],
@@ -133,25 +151,38 @@ class Store:
             })
         return table.num_rows, rows[::-1]
 
-    def entities(self) -> dict[str, list[dict]]:
-        """The core tables of schema §4.1, derived from the rows."""
+    def entities(self, projection: Projection = identity.POLICY) -> dict[str, list[dict]]:
+        """The core tables of schema §4.1, derived from the rows; series and
+        points under `projection`, the identity policy unless another is asked
+        for (§4.3). Nothing is kept: every call materializes them again."""
         found = {}
         for doc in self._documents():
-            _add_entities(found, doc, store_project(doc))
+            _add_entities(found, doc, store_project(doc), projection)
         return {name: list(rows.values()) for name, rows in found.items()}
 
-    def series(self, workload=None, quantity=None) -> list[dict]:
-        rows = self.entities().get("series", [])
+    def series(self, workload=None, quantity=None, projection: Projection = identity.POLICY) -> list[dict]:
+        rows = self.entities(projection).get("series", [])
         return [s for s in rows if (workload is None or workload in s["workload"])
                 and (quantity is None or s["quantity"] == quantity)]
 
-    def history(self, fingerprint_prefix: str) -> list[dict]:
-        """A series' points. The prototype has no revision graph, so revision
-        order is unavailable (schema §4.1) and points are listed by measurement
-        start instead."""
-        points = [p for p in self.entities().get("series_point", [])
+    def history(self, fingerprint_prefix: str, projection: Projection = identity.POLICY) -> list[dict]:
+        """A series' points in axis order, each with the ignored facts that
+        changed since the point before it (§4.3). On the revision axis they
+        are listed by measurement start instead: the prototype has no revision
+        graph (schema §4.1)."""
+        points = [p for p in self.entities(projection).get("series_point", [])
                   if p["series_fingerprint"].startswith(fingerprint_prefix)]
-        return sorted(points, key=lambda p: (p["started_at"], p["ingest_key"]))
+        points.sort(key=lambda p: (projection.order_key(tuple(p["axis"])), p["started_at"], p["ingest_key"]))
+        previous = {}
+        for point in points:
+            ignored = point.pop("ignored")
+            if previous.get(point["series_fingerprint"]) is not None:
+                before = previous[point["series_fingerprint"]]
+                point["changed"] = sorted(k for k in set(before) | set(ignored) if before.get(k) != ignored.get(k))
+            else:
+                point["changed"] = []
+            previous[point["series_fingerprint"]] = ignored
+        return points
 
     # -- ingest --------------------------------------------------------------
 
@@ -198,7 +229,7 @@ class Store:
             canonical = core.canonical(doc)
             payload = core.sha256_hex(canonical)
             key = (doc["producer"]["name"], doc["ingest_key"])
-            quantity = doc["coordinates"]["quantity"]
+            quantity = doc["measurement"]["quantity"]
             known = units.get((project, quantity["name"]))
             signature = _attempt_signature(doc)
             if key in existing and existing[key] == payload:
@@ -268,7 +299,7 @@ _ENTITY_KEYS = {
 }
 
 
-def _add_entities(entities: dict, doc: dict, project: str) -> None:
+def _add_entities(entities: dict, doc: dict, project: str, projection: Projection) -> None:
     def put(name, row):
         entities.setdefault(name, {}).setdefault(_ENTITY_KEYS[name](row), row)
 
@@ -279,7 +310,7 @@ def _add_entities(entities: dict, doc: dict, project: str) -> None:
     put("source", {"project": project, "uri": doc["source"]["uri"]})
     put("workload_variant", {"project": project, "name": coordinates["workload"]["name"],
                              "parameters": parameters})
-    quantity = coordinates["quantity"]
+    quantity = doc["measurement"]["quantity"]
     put("quantity", {"project": project, "name": quantity["name"], "unit": quantity["unit"],
                      "direction": quantity.get("direction"), "deterministic": quantity.get("deterministic")})
     env_identity = {"schema": env["schema"], "identity": env["identity"]}
@@ -287,15 +318,15 @@ def _add_entities(entities: dict, doc: dict, project: str) -> None:
                         "fingerprint": core.sha256_hex(core.canonical(env_identity)),
                         "identity": core.canonical(env["identity"]).decode()})
     put("revision", {"source": doc["source"]["uri"], "key": doc["revision"]["key"]})
-    for point in identity.points(doc, project):
+    for point in identity.points(doc, project, projection):
         put("series", {"fingerprint": point["series_fingerprint"],
-                       "identity_schema": identity.IDENTITY_SCHEMA, "project": project,
+                       "identity_schema": projection.identity_schema, "project": project,
                        "workload": coordinates["workload"]["name"], "parameters": parameters,
                        "quantity": quantity["name"], "unit": quantity["unit"],
                        "estimator": core.canonical(point["estimator"]).decode(),
-                       "comparison_identity": core.canonical(identity.comparison_identity(doc, project)).decode()})
+                       "comparison_identity": core.canonical(point["identity"]).decode()})
         put("series_point", {"series_fingerprint": point["series_fingerprint"],
                              "producer": doc["producer"]["name"], "ingest_key": doc["ingest_key"],
                              "attempt_key": doc["attempt_key"], "revision": doc["revision"]["key"],
-                             "value": point["value"], "source": point["source"],
-                             "started_at": doc["provenance"]["started_at"]})
+                             "axis": list(point["axis"]), "value": point["value"], "source": point["source"],
+                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"]})

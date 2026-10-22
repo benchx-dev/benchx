@@ -17,7 +17,7 @@ from . import config as config_mod
 from . import core, harnesses, orders, runner, session
 from . import target as target_mod
 from .core.validation import Kind
-from .store import Store
+from .store import Store, StoreError
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -149,19 +149,20 @@ def cmd_history(args):
     points = Store().history(args.series)
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
-        print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}")
+        changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
+        print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}{changed}")
     return EXIT_OK
 
 
 def cmd_head(args):
     store = Store()
-    total, rows = store.head(args.n, args.project, args.workload)
+    total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
     if args.json:
         for row in rows:
             print(row["document"])
         return EXIT_OK
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
-    if args.table:  # the columns of `bx bench`, led by where each result came from
+    if args.table:  # the columns of `bx bench`, led by where each result came from; measurands only
         print(bench_mod.render([{**bench_mod.row_of(json.loads(r["document"])), "revision": r["revision"][:10],
                                  "run": r["run_key"], "project": r["project"]} for r in rows],
                                leading=("revision", "run", "project")))
@@ -428,7 +429,11 @@ def main(argv=None):
         args.functions += extra
     elif extra:
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except StoreError as e:
+        print(f"bx {args.cmd}: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
 
 
 if __name__ == "__main__":

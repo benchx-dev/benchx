@@ -78,6 +78,7 @@
       "name": "cpu-temperature",
       "unit": "Cel"
     },
+    "kind": "condition",
     "status": "success",
     "observations": [
       { "value": 61.0, "ordinal": 0, "time": "2026-07-18T09:12:44Z" },

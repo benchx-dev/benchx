@@ -30,7 +30,7 @@ def test_session_alternates_delivers_and_compares(repo, tmp, builds):
     for d in store.documents("s1"):
         by_slot.setdefault(d["procedure"]["slot"], []).append(d)
     assert sorted(by_slot) == list(range(12))  # 6 rounds x 2 sides, one order each
-    assert all(len(docs) == 2 for docs in by_slot.values())  # one result per case
+    assert all(len(docs) == 4 for docs in by_slot.values())  # per case, a result and its load average
     trees = [{d["provenance"]["subject_tree"] for d in by_slot[slot]} for slot in sorted(by_slot)]
     assert all(len(t) == 1 for t in trees)
     assert all(a != b for a, b in zip(trees, trees[1:]))  # every slot switches sides

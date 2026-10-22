@@ -74,7 +74,8 @@ print("provenance.info.how_built  :", info["how_built"].replace("\n", "\n" + " "
 print("provenance.info.activation :", info["activation"])
 print("provenance.info.shell      :", info["shell"])
 print("provenance.info.target_provider:", info["target_provider"])
-print("observed_context.env       :", doc["observed_context"].get("env"))
+system = doc["coordinates"]["environment"]["system"]
+print("environment.system.process.environment:", system.get("process", {}).get("environment"))
 print("coordinates.subject.configuration:", doc["coordinates"]["subject"].get("configuration"))'
 
 step "forget to activate: the declaration still says what you should have run, the observation says what you did"

@@ -127,8 +127,10 @@ def test_examples_fit(example):
 
 
 def test_censored_skipped_and_workorder_artifact_fit(adhoc):
+    quantity = adhoc["measurement"]["quantity"]
     censored = adhoc | {
         "measurement": {
+            "quantity": quantity,
             "status": "censored",
             "reason": "timeout",
             "constraint": {
@@ -139,7 +141,7 @@ def test_censored_skipped_and_workorder_artifact_fit(adhoc):
             },
         }
     }
-    skipped = adhoc | {"measurement": {"status": "skipped", "reason": "not-applicable"}}
+    skipped = adhoc | {"measurement": {"quantity": quantity, "status": "skipped", "reason": "not-applicable"}}
     linked = json.loads(json.dumps(adhoc))
     linked["provenance"]["artifacts"] = [
         {

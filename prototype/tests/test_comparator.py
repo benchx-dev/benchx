@@ -22,12 +22,12 @@ def result(side, round_, slot, value, workload="BM_W", **changes):
         "coordinates": {
             "workload": {"name": workload},
             "subject": {"name": "demo", "components": [{"role": "primary"}], "configuration": {"build_type": "Release"}},
-            "quantity": {"name": "wall-time", "unit": "s", "direction": "lower-is-better"},
-            "comparison_context": {"harness": {"name": "google-benchmark"}},
-            "environment": {"schema": "machine/v1", "identity": {"runner": "host"}},
+            "protocol": {"harness": {"name": "google-benchmark"}},
+            "environment": {"schema": "machine/v1", "identity": {"runner": "host"},
+                            "system": {"os": {"kernel": "6.8"}}},
         },
-        "measurement": {"status": "success", "observations": [value]},
-        "observed_context": {"kernel": "6.8"},
+        "measurement": {"quantity": {"name": "wall-time", "unit": "s", "direction": "lower-is-better"},
+                        "status": "success", "observations": [value]},
         "procedure": {"round": round_, "slot": slot},
         "provenance": {"run_key": "run", "subject_dirty": "clean", "benchmark_dirty": "clean", "subject_tree": side},
     }
@@ -99,13 +99,24 @@ def test_sides_agree():
     docs = run()
     for d in docs[1::2]:
         d["coordinates"]["subject"]["configuration"] = {"build_type": "Debug"}
+    doc = evaluate(docs)
+    assert invariants(doc) == ["sides-agree"]
+    assert doc["failed_invariants"][0]["detail"] == "/coordinates/subject/configuration/build_type differ"
+
+
+def test_anything_not_named_must_agree():
+    """A fact no projection names, such as a new runtime fact, must agree: the default matches it."""
+    docs = run()
+    for d in docs[1::2]:
+        d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.13"}
     assert invariants(evaluate(docs)) == ["sides-agree"]
 
 
 def test_exclusions():
     """C6: a failed attempt is listed and its round drops out of the pairing."""
     docs = run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
-    docs[2]["measurement"] = {"status": "error", "reason": "harness.error"}
+    docs[2]["measurement"] = {"quantity": docs[2]["measurement"]["quantity"], "status": "error",
+                              "reason": "harness.error"}
     doc = evaluate(docs)
     result = {"producer": "benchx/gbench-adapter", "ingest_key": docs[2]["ingest_key"]}
     assert doc["exclusions"] == [{"result": result, "reason": "error: harness.error"}]
@@ -119,18 +130,41 @@ def test_min_rounds():
     assert evaluate(run(rounds=2), min_rounds=2)["units"][0]["verdict"] == "regressed"
 
 
-def test_observed_context_differences():
-    """C10: a condition that differs between the sides is carried as a caveat."""
+def test_unmatched_differences():
+    """C10: a fact the profile ignores that differs between the sides is carried as a caveat."""
     docs = run()
     for d in docs[1::2]:
-        d["observed_context"] = {"kernel": "6.9", "load_avg_1m": 3.2}
-    assert evaluate(docs)["units"][0]["observed_context_differences"] == ["kernel"]
+        d["coordinates"]["environment"]["system"]["os"] = {"kernel": "6.9"}
+    assert evaluate(docs)["units"][0]["unmatched_differences"] == ["/coordinates/environment/system/os/kernel"]
+
+
+def test_condition_measurements_are_not_compared():
+    """A load-average sibling (schema §4.4), kind condition, is neither a unit nor an input."""
+    docs = run()
+    for d in list(docs):
+        load = copy.deepcopy(d)
+        load["ingest_key"] = d["ingest_key"].replace("wall-time", "load-average")
+        load["coordinates"]["protocol"] = {"probe": {"name": "os.getloadavg"}}
+        load["measurement"] = {"quantity": {"name": "load-average", "unit": "1"}, "kind": "condition",
+                               "status": "success", "observations": [5.0]}
+        docs.append(load)
+    doc = evaluate(docs)
+    assert [u["quantity"] for u in doc["units"]] == ["wall-time"] and len(doc["inputs"]) == 6
+
+
+def test_a_measurand_read_by_a_probe_is_compared():
+    """A measurand is compared however it was read: a probe alone marks nothing."""
+    docs = run()
+    for d in docs:
+        d["coordinates"]["protocol"] = {"probe": {"name": "OSSMemoryProbe", "counter": "rss"}}
+        d["measurement"]["quantity"] = {"name": "peak-rss", "unit": "By"}
+    assert [u["quantity"] for u in evaluate(docs)["units"]] == ["peak-rss"]
 
 
 def test_deterministic_quantities_are_deferred():
     docs = run()
     for d in docs:
-        d["coordinates"]["quantity"]["deterministic"] = True
+        d["measurement"]["quantity"]["deterministic"] = True
     unit = evaluate(docs)["units"][0]
     assert (unit["verdict"], unit["reason"]) == ("indeterminate", "deterministic-deferred")
 
@@ -139,3 +173,35 @@ def test_environments_needs_its_label():
     docs = copy.deepcopy(run())
     with pytest.raises(compare.CompareError, match="label"):
         compare.compare(docs, run_key="run", profile="environments", baseline="plain")
+
+
+def labeled(docs, configurations=("plain", "hardened")):
+    """The run as an environments run: one tree, sides named by a label and built differently."""
+    for d in docs:
+        side = 0 if d["revision"]["key"] == BASE else 1
+        d["revision"]["key"] = d["provenance"]["subject_tree"] = BASE
+        d["provenance"]["labels"] = {"build": ("plain", "hardened")[side]}
+        d["coordinates"]["subject"]["configuration"] = {"hardening": configurations[side]}
+    return docs
+
+
+def test_environments_sides_are_named_by_label():
+    doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build")
+    assert core.check(doc, "comparison-document") == []
+    assert (doc["varying"], doc["baseline"], doc["contender"]) == ("provenance.labels.build", "plain", "hardened")
+    assert doc["failed_invariants"] == [] and doc["units"][0]["verdict"] == "regressed"
+    assert doc["units"][0]["unmatched_differences"] == ["/coordinates/subject/configuration/hardening"]
+
+
+def test_environments_sides_must_differ_beyond_their_label():
+    doc = compare.compare(labeled(run(), ("same", "same")), run_key="run", profile="environments",
+                          baseline="plain", label="build")
+    assert invariants(doc) == ["sides-differ"]
+
+
+def test_environments_a_label_with_two_builds_is_three_sides():
+    """A side is its whole axis value: one label covering two builds does not blend them."""
+    docs = labeled(run())
+    docs[2]["coordinates"]["subject"]["configuration"] = {"hardening": "other"}
+    doc = compare.compare(docs, run_key="run", profile="environments", baseline="plain", label="build")
+    assert invariants(doc) == ["two-sides"]

@@ -88,7 +88,7 @@ def attempted(applied: dict) -> int:
 
 
 def harness(info: dict) -> dict:
-    """comparison_context.harness, from the provenance info context_facts gave."""
+    """protocol.harness, from the provenance info context_facts gave."""
     out = {"name": NAME}
     if info.get("library_version"):
         out["version"] = info["library_version"]
@@ -187,9 +187,11 @@ def _summaries(aggregates: dict, field: str) -> list[dict]:
 
 
 def context_facts(native: dict | None) -> tuple[dict, dict]:
-    """The native context split by meaning: (observed context, provenance info)."""
+    """The native context split by meaning: (environment.system facts, provenance
+    info). The load average is a condition the runner measures itself (schema
+    §4.4); the harness's copy stays in the native artifact."""
     context = (native or {}).get("context", {})
-    observed = {k: context[k] for k in ("cpu_scaling_enabled", "load_avg") if k in context}
+    system = {"cpu": {"scaling_enabled": context["cpu_scaling_enabled"]}} if "cpu_scaling_enabled" in context else {}
     info = {k: context[k] for k in ("host_name", "num_cpus", "mhz_per_cpu", "executable",
                                      "library_build_type", "library_version", "date") if k in context}
-    return observed, info
+    return system, info

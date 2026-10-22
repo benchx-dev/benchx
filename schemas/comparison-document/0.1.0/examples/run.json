@@ -15,7 +15,7 @@
     "method_version": "benchx/median/v1",
     "input_level": "observations"
   },
-  "identity_schema": "benchx/prototype-identity/v1",
+  "identity_schema": "benchx/profile/environments/v1+benchx/prototype-identity/v2",
   "local_only": true,
   "run_key": "urn:uuid:9b2e4f1a-6c3d-4e8b-a1f0-2d7c5b9e3a41",
   "profile": "environments",

@@ -18,6 +18,10 @@ from .adapters.base import Unsupported
 from .core import Refusal, Rejected
 
 RUNNER = {"name": "benchx-prototype", "version": __version__}
+# The runner's own probe: one condition measurement per attempt (schema §4.4).
+PROBE_PRODUCER = {"name": "benchx/runner-probe", "version": __version__, "mapping_version": "benchx-probe/v1"}
+LOAD = {"name": "load-average", "unit": "1"}
+LOAD_PROBE = {"name": "os.getloadavg", "sensor": "1-minute", "sampling": {"mode": "before-attempt"}}
 
 
 class Refused(Rejected):
@@ -63,6 +67,15 @@ def _subject_name(order) -> str:
 def _artifact(kind, media_type, path: Path) -> dict:
     return {"kind": kind, "media_type": media_type, "uri": path.resolve().as_uri(),
             "sha256": core.sha256_hex(path.read_bytes())}
+
+
+def _load_output(load: float | None) -> dict:
+    """The load-average sibling of a case's results, read before the case ran:
+    a condition measurement (schema §4.4), so tools keep it out of what they
+    compare and show."""
+    measurement = ({"status": "success", "observations": [load]} if load is not None
+                   else {"status": "skipped", "reason": "probe-unavailable"})
+    return {"quantity": LOAD, "measurement": {"kind": "condition", **measurement}, "procedure": {}, "info": {}}
 
 
 def check(order: dict) -> Iterator[Refusal]:
@@ -131,14 +144,14 @@ def run(order_path, out_dir) -> dict:
     parameters = dict(order.get("environment_variables", {}))
     environment = snapshot.environment()
     env_names = snapshot.env_allowlist(child_env, getattr(adapter, "ENV_ALLOWLIST", ()))
-    observed = snapshot.observed_context(child_env, env_names)
+    system = snapshot.merge(environment.pop("system"), snapshot.system_facts(child_env, env_names))
     # Declared by the user, recorded as given, never executed or checked (runner-schema.md §3.1).
     declared_text = target_mod.text(order["target"])
     if "provider" in declared_text:
         declared_text["target_provider"] = declared_text.pop("provider")
     setup, setup_warning = snapshot.setup_facts(source["path"], child_env)
     if setup:
-        observed["setup"] = setup  # declared; no placement rules in the prototype
+        system["setup"] = setup  # declared; no placement rules in the prototype, so matched as a whole
 
     out_dir = Path(out_dir)
     ref = core.order_ref(order)
@@ -157,6 +170,7 @@ def run(order_path, out_dir) -> dict:
     for index, case in enumerate(cases):
         stem = f"{index:04d}"
         native_path = artifacts_dir / f"{stem}.native.json"
+        load = snapshot.load_average()
         # The wall clock can step backwards mid-case (NTP, WSL2 resyncs): the duration comes from a monotonic clock.
         started, clock = time.time(), time.monotonic()
         run_ = adapter.run_case(runnable, case, invocation, child_env, order["timeouts"]["case_s"], native_path,
@@ -169,21 +183,26 @@ def run(order_path, out_dir) -> dict:
         if native_path.exists():
             artifacts.insert(0, _artifact("native-output", "application/json", native_path))
         artifacts += [_artifact(kind, media_type, path) for kind, media_type, path in run_.get("artifacts", [])]
-        native_observed, native_info = adapter.context_facts(run_["native"])
-        case_observed, case_warnings = observed, []
+        native_system, native_info = adapter.context_facts(run_["native"])
+        case_system, case_warnings = snapshot.merge(system, native_system), []
         if hasattr(adapter, "observed_environment"):
             facts, case_warnings = adapter.observed_environment(run_, case, env_names)
-            case_observed = {k: v for k, v in {**observed, **facts}.items() if v is not None}
+            case_system = snapshot.merge(case_system, facts)
         attempt_key = f"urn:benchx:attempt:{ref[7:23]}:{index}"
+        protocol = {**applied_protocol, "harness": adapter.harness(native_info)}
 
-        for output in adapter.translate(case, order["quantities"], run_, attempted):
-            procedure = dict(output["procedure"], duration_seconds=round(duration, 6))
+        for output in [*adapter.translate(case, order["quantities"], run_, attempted), _load_output(load)]:
+            condition = output["quantity"] is LOAD
+            procedure = dict(output["procedure"])
+            if not condition:
+                procedure["duration_seconds"] = round(duration, 6)
             if round_ is not None:
                 procedure["round"] = round_
             if slot is not None:
                 procedure["slot"] = slot
-            procedure["timeout_seconds"] = order["timeouts"]["case_s"]
-            if hasattr(adapter, "repetition_levels"):
+            if not condition:
+                procedure["timeout_seconds"] = order["timeouts"]["case_s"]
+            if hasattr(adapter, "repetition_levels") and not condition:
                 procedure["repetition_levels"] = adapter.repetition_levels(applied_protocol, run_, case)
             info = {"workorder_ref": ref, "requester": order["requester"], **output["info"]}
             if native_info:
@@ -198,7 +217,7 @@ def run(order_path, out_dir) -> dict:
                 "subject_dirty": source["dirty"],
                 "benchmark_dirty": source["dirty"],
                 "runner": RUNNER,
-                "artifacts": artifacts,
+                **({} if condition else {"artifacts": artifacts}),
                 "info": info,
             }
             if "tree" in source:
@@ -211,11 +230,10 @@ def run(order_path, out_dir) -> dict:
             subject = {"name": _subject_name(order), "components": [{"role": "primary"}]}
             if configuration:
                 subject["configuration"] = configuration
-            harness = adapter.harness(native_info)
             key = ingest_key(order["run_key"], case, parameters, output["quantity"]["name"], slot)
             document = {
-                "schema_version": 5,
-                "producer": adapter.PRODUCER,
+                "schema_version": 6,
+                "producer": PROBE_PRODUCER if condition else adapter.PRODUCER,
                 "ingest_key": key,
                 "attempt_key": attempt_key,
                 **({"project": order["project"]} if "project" in order else {}),
@@ -228,24 +246,23 @@ def run(order_path, out_dir) -> dict:
                 "coordinates": {
                     "workload": workload,
                     "subject": subject,
-                    "quantity": output["quantity"],
-                    "comparison_context": {"harness": harness, "protocol": applied_protocol,
-                                           **(adapter.comparison_extras(native_info)
-                                              if hasattr(adapter, "comparison_extras") else {})},
-                    "environment": environment,
+                    # A condition measurement's protocol is its probe alone (schema §4.4).
+                    "protocol": {"probe": LOAD_PROBE} if condition else protocol,
+                    "environment": {**environment, "system": case_system},
                 },
-                "measurement": output["measurement"],
-                "observed_context": {**case_observed, **({adapter.CONTEXT_KEY: native_observed} if native_observed else {})},
+                "measurement": {"quantity": output["quantity"], **output["measurement"]},
                 "procedure": procedure,
                 "provenance": provenance,
             }
-            warnings = ([setup_warning] if setup_warning else []) + case_warnings
+            warnings = [] if condition else ([setup_warning] if setup_warning else []) + case_warnings
             if warnings:
                 document["quality"] = {"warnings": warnings}
             errors = core.check(document, "measurement-result")
             if errors:
                 # harness-adapter.md §4.1: never drop a case, never emit an invalid document.
-                document["measurement"] = {"status": "error", "reason": "adapter.mapping-failed"}
+                document["measurement"] = {"quantity": output["quantity"],
+                                           **({"kind": "condition"} if condition else {}),
+                                           "status": "error", "reason": "adapter.mapping-failed"}
                 document["provenance"]["info"]["mapping_error"] = str(errors[0])
                 document["procedure"] = {k: v for k, v in procedure.items()
                                          if k not in ("inner_iterations", "completed_repetitions", "repetition_levels")}

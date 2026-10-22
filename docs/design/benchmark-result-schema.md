@@ -6,7 +6,7 @@
 
 **Review date:** 2026-09-11
 
-**Revision (2026-10-19, draft for review):** a result separates coordinates, fixed for the attempt, from measurements, what it produced. `comparison_context` becomes `protocol`, `environment.metadata` becomes `environment.system`, and `observed_context` is removed: system facts such as kernel and glibc join `environment.system`, and conditions such as temperature become sibling results. Whether a coordinate splits history is decided by a projection (`schemas/projection/0.1.0`); the identity policy is the project's default projection. See §1, §4.2, §4.3, and §9.
+**Revision (2026-10-19, draft for review):** a result separates coordinates, fixed for the attempt, from measurements, what it produced. `comparison_context` becomes `protocol`, `environment.metadata` becomes `environment.system`, and `observed_context` is removed: system facts such as kernel and glibc join `environment.system`, and conditions such as temperature become sibling results. Whether a coordinate splits history is decided by a projection; the project's identity policy (`schemas/identity-policy/0.1.0`) is its default one. See §1, §4.2, §4.3, and §9.
 
 ## 1. Purpose
 
@@ -58,8 +58,8 @@ The common operations are to find a series, order its results by revision, plot 
 | **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. Part of the measurement, not a coordinate. |
 | **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. Selected by the projection as a series dimension; reported only inside estimate summaries, never as a coordinate. |
 | **Reported coordinates** | Producer-reported facts describing what was measured and under which conditions, fingerprinted before any policy is applied. |
-| **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key`. Never a coordinate. |
-| **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is the projection a project's store maintains, with the subject revision as its axis. |
+| **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key` and marked `measurement.kind: condition`; an influence quantity, in metrology terms. Never a coordinate. |
+| **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is a project's default projection, with the subject revision as its axis; other projections reuse its roles with a different axis. |
 | **Comparison identity** | The part of the reported coordinates a projection requires to match. |
 | **Series** | Derived comparison-time construct: one comparison identity × one quantity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
 | **Observation** | One measured value produced by a repetition after declared normalization. |
@@ -198,9 +198,9 @@ The **reported-coordinate fingerprint** preserves the complete tuple before any 
 reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v2\0" + JCS(reported_coordinates))
 ```
 
-A project's **identity policy** projects and normalizes reported coordinates into a comparison-identity object, for example by normalizing equivalent source URIs, mapping exact benchmark revisions to declared versions, or omitting a coordinate it allows to vary. It is one **projection** (`schemas/projection/0.1.0`): a projection names the `axis` a series follows, for the identity policy the designated subject revision, and gives every other fact a role, `match`, `normalize`, or `ignore`. An ignored fact never splits a series, but a change in it from one point to the next is recorded as a warning on the point, so detectors and views see it. The default (`examples/default.json`) matches every coordinate except a named list of `environment.system` fields that the former design never matched: hostname, OS and kernel, C library, CPU firmware and settings, GPU driver and ids, firmware, image digest, and cgroup limits. Any other fact matches wherever it sits, so a new or misplaced fact can over-split a series but never blend one. The policy carries an `identity_schema` that changes whenever projection semantics or continuity mappings change; an operational release that yields the same schema does not split history. Continuity mappings, which keep history across a benchmark rename, an added parameter, or a machine upgrade, are applied in this projection step; their shape, authoring, and audit trail are specified in a separate design document.
+A project's **identity policy** projects and normalizes reported coordinates into a comparison-identity object, for example by normalizing equivalent source URIs, mapping exact benchmark revisions to declared versions, or omitting a coordinate it allows to vary. It is the project's default **projection**: a projection names the axis a series follows and gives every other fact a role, `match`, `normalize`, or `ignore`. The identity policy's axis is always the designated subject revision, so its document (`schemas/identity-policy/0.1.0`) stores only the roles. An ignored fact never splits a series, but a change in it from one point to the next is recorded as a warning on the point, so detectors and views see it. The default (`examples/default.json`) matches every coordinate except a named list of `environment.system` fields that the former design never matched: hostname, OS and kernel, C library, CPU firmware and settings, GPU driver and ids, firmware, image digest, and cgroup limits. Any other fact matches wherever it sits, so a new or misplaced fact can over-split a series but never blend one. The policy carries an `identity_schema` that changes whenever projection semantics or continuity mappings change; an operational release that yields the same schema does not split history. Continuity mappings, which keep history across a benchmark rename, an added parameter, or a machine upgrade, are applied in this projection step; their shape, authoring, and audit trail are specified in a separate design document.
 
-Any other projection, such as a comparison profile (§5.5) or a sweep across kernel versions (`examples/kernel-sweep.json`), is materialized on request over the same results into series of the same form, and records the ingest watermark it was built from. Its axis may combine several facts, as in a two-factor study; a projection whose axis is not the code must match the subject tree unless it declares `mixed_code`, as a trend over time does.
+Any other projection, such as a comparison profile (§5.5) or a sweep across kernel versions, reuses the identity policy's roles with a different axis, is materialized on request over the same results into series of the same form, and records the ingest watermark it was built from. Its axis may combine several facts, as in a two-factor study; a projection whose axis is not the code must match the subject tree unless it deliberately mixes code, as a trend over time does. Every projection has a versioned name, which includes its policy's `identity_schema` and takes its place in `comparison_fingerprint`, so series of different projections never mix.
 
 ```text
 comparison_fingerprint = SHA-256("benchmark-comparison-v1\0" + identity_schema + "\0" + JCS(comparison_identity))
@@ -223,7 +223,7 @@ A quantity declaration carries:
 
 Percentiles are estimators, not quantities: tracked p99 latency is quantity `latency` with estimator `p99`, one series per percentile. The same physical quantity may be a measurand in one series and a condition measurement beside another; name and unit conventions are shared so a value moves between the two without translation.
 
-**Condition measurements.** A state the system passes through during an attempt, such as temperature or load, is a sibling result for its own quantity sharing the measurand's `attempt_key`, with `protocol.probe` naming the sensor and how it was read (Appendix B). A probe that cannot read yields status `skipped` with reason `probe-unavailable`. `examples/arrow-temperature.json` is the temperature sibling of `examples/arrow.json`.
+**Condition measurements.** A state the system passes through during an attempt, such as temperature or load, is a sibling result for its own quantity sharing the measurand's `attempt_key`, with `measurement.kind` `condition` and `protocol.probe` naming the sensor and how it was read (Appendix B). The kind belongs to the result, not the quantity, so consumers tell what an attempt measured from what it recorded beside it without consulting the work order. A probe that cannot read yields status `skipped` with reason `probe-unavailable`. `examples/arrow-temperature.json` is the temperature sibling of `examples/arrow.json`.
 
 ### 4.5 Estimators and compound outputs
 
@@ -270,7 +270,7 @@ The indexed contract remains scalar: `median([cpu_times, gpu_times])` emits one 
 |---|---|
 | **Identity facts** | reported source, `coordinates`, `reported_coordinates_fingerprint`, subject `revision_key`; project and benchmark identity when not thin |
 | **Attempt grouping** | `attempt_key` |
-| **Outcome** | quantity, `status`, optional reason, optional quantitative constraint |
+| **Outcome** | quantity, `kind`, `status`, optional reason, optional quantitative constraint |
 | **Producer evidence** | optional observation batch and immutable typed summaries |
 | **Method** | optional realized procedure JSON, including `round` within the run |
 | **Provenance** | producer/version, ingest/native/run/batch keys, caller labels, dirty tri-state flags and working-tree ids, references to input or anchor results, mapping version, timestamps, artifacts, payload URI/checksum |
@@ -492,7 +492,7 @@ The ingest object (§5.2) is the message; transport is a deployment choice. The 
 
 ### 5.5 Comparison profiles
 
-Results carry facts; a **profile** is a comparator-time check that a set of results sharing a `run_key` is fit for one kind of comparison. A profile is a built-in projection (§4.3) whose axis is the coordinate it varies; `schemas/projection/0.1.0/examples/revisions-profile.json` is `revisions`. Profiles are not declared by producers and add no schema fields. Each use case in `docs/use-cases/` names one; the comparator validates it before producing a comparison document and refuses to compare otherwise.
+Results carry facts; a **profile** is a comparator-time check that a set of results sharing a `run_key` is fit for one kind of comparison. A profile is a built-in projection (§4.3): the identity policy's roles with the coordinate it varies as the axis, and the invariants below. Profiles are not declared by producers and add no schema fields. Each use case in `docs/use-cases/` names one; the comparator validates it before producing a comparison document and refuses to compare otherwise.
 
 | Profile | Varies | Must agree | Invariants checked over the run |
 |---|---|---|---|
@@ -508,7 +508,7 @@ A comparison in which any side is not `clean` is **local-only** under the profil
 
 A revision may hold several attempts with identical coordinates, since every attempt is its own point, so viewers and comparators must expect more than one result per coordinates and revision. A comparison document therefore lists the `(producer, ingest_key)` of every result it consumed. That is also what lets a saved baseline be reused by reference instead of re-measured (Arrow local story).
 
-A trend over ad hoc attempts, ordered by run and `round` and then by `started_at`, is likewise a projection over the stored facts, with `mixed_code` unless it matches the subject tree (§4.3); no timestamp or counter in a result implies code identity.
+A trend over ad hoc attempts, ordered by run and `round` and then by `started_at`, is likewise a projection over the stored facts, mixing code unless it matches the subject tree (§4.3); no timestamp or counter in a result implies code identity.
 
 ## 6. Migration contract
 

@@ -43,7 +43,13 @@ MODULE = textwrap.dedent('''
 
 
 def results(directory: Path) -> list[dict]:
-    return [json.loads(p.read_text()) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+    """The measurands in `directory`, without the runner's load-average siblings."""
+    docs = [json.loads(p.read_text()) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+    return [d for d in docs if d["measurement"].get("kind") != "condition"]
+
+
+def outcome(doc) -> dict:
+    return {k: v for k, v in doc["measurement"].items() if k != "quantity"}
 
 
 @pytest.fixture
@@ -87,11 +93,11 @@ def test_end_to_end_result(tmp, tree):
     assert doc["procedure"]["warmups_performed"] == 2  # one per worker, dropped
     assert doc["procedure"]["repetition_levels"] == [{"unit": "process", "attempted": 2, "completed": 2},
                                                      {"unit": "value", "attempted": 4, "completed": 4}]
-    protocol = doc["coordinates"]["comparison_context"]["protocol"]
+    protocol = doc["coordinates"]["protocol"]
     assert protocol["repetitions"]["levels"] == PRECISION["repetitions"]["levels"]
     assert protocol["environment"] == "inherit-all"
-    context = doc["coordinates"]["comparison_context"]
-    assert context["harness"]["name"] == "pyperf" and context["runtime"]["python_version"]
+    assert protocol["harness"]["name"] == "pyperf"
+    assert doc["coordinates"]["environment"]["system"]["runtime"]["python"]
     kinds = {a["kind"] for a in doc["provenance"]["artifacts"]}
     assert {"native-output", "stdout", "stderr", "driver", "worker-environment"} <= kinds
     assert "quality" not in doc  # the workers had the environment the manager passed
@@ -109,7 +115,7 @@ def test_environment_passes_through_to_the_workers(tmp, tree):
     """The function fails if OPENBLAS_NUM_THREADS is missing; with it set the run succeeds."""
     document = pyperf_order(tree, "env-pass", case_filter="^needs_openblas$")
     missing = run_order(tmp, document, "env-missing")
-    assert missing[0]["measurement"] == {"status": "error", "reason": "harness.error"}
+    assert outcome(missing[0]) == {"status": "error", "reason": "harness.error"}
     assert "OPENBLAS_NUM_THREADS is missing" in missing[0]["provenance"]["info"]["message"]
 
     document["environment_variables"] = {"OPENBLAS_NUM_THREADS": "1"}
@@ -117,7 +123,7 @@ def test_environment_passes_through_to_the_workers(tmp, tree):
     docs = run_order(tmp, document, "env-set")
     doc = docs[0]
     assert doc["measurement"]["status"] == "success"
-    assert doc["observed_context"]["env"]["OPENBLAS_NUM_THREADS"] == "1"
+    assert doc["coordinates"]["environment"]["system"]["process"]["environment"]["OPENBLAS_NUM_THREADS"] == "1"
     artifact = next(a for a in doc["provenance"]["artifacts"] if a["kind"] == "worker-environment")
     captured = json.loads(Path(artifact["uri"].removeprefix("file://")).read_text())
     assert captured["OPENBLAS_NUM_THREADS"] == "1"
@@ -169,7 +175,7 @@ def test_scrubbed_workers_are_reported_as_env_mismatch(tmp, tree):
     assert run["native"] is not None
     facts, warnings = adapter.observed_environment(run, "f", NAMES)
     assert warnings == ["env-mismatch"]
-    assert facts["env"] is not None  # what the workers had, however little
+    assert facts["process"]["environment"] is not None  # what the workers had, however little
 
 
 def test_digest_mismatch_with_a_fake_native_file(tmp, tree):
@@ -183,7 +189,8 @@ def test_digest_mismatch_with_a_fake_native_file(tmp, tree):
     assert adapter.observed_environment(missing, "f", NAMES)[1] == ["env-mismatch"]
     uncaptured = dict(run, worker_env=None)
     facts, warnings = adapter.observed_environment(uncaptured, "f", NAMES)
-    assert warnings == ["env-capture-missing"] and facts["env"] is None  # nothing substituted
+    # nothing substituted: null, which matches nothing (schema §4.3)
+    assert warnings == ["env-capture-missing"] and facts["process"]["environment"] is None
 
 
 def test_driver_digest_matches_the_adapters(tmp, tree):
@@ -214,7 +221,7 @@ def test_import_time_is_not_measured(tmp, tree):
 
 def test_a_failing_function_is_an_error_result_with_stderr(tmp, tree):
     doc = run_order(tmp, pyperf_order(tree, "boom", case_filter="^boom$"), "boom")[0]
-    assert doc["measurement"] == {"status": "error", "reason": "harness.error"}
+    assert outcome(doc) == {"status": "error", "reason": "harness.error"}
     assert "ValueError: boom" in doc["provenance"]["info"]["message"]
     stderr = next(a for a in doc["provenance"]["artifacts"] if a["kind"] == "stderr")
     assert "ValueError: boom" in Path(stderr["uri"].removeprefix("file://")).read_text()
@@ -225,7 +232,7 @@ def test_timeout_kills_the_workers_too(tmp, tree):
     (tree / "mod.py").write_text("import time\n\ndef slow():\n    time.sleep(30)\n")
     document = pyperf_order(tree, "timeout", case_filter="slow", timeout_seconds=3)
     doc = run_order(tmp, document, "timeout")[0]
-    assert doc["measurement"] == {"status": "error", "reason": "timeout"}
+    assert outcome(doc) == {"status": "error", "reason": "timeout"}
     alive = [p for p in Path("/proc").glob("[0-9]*/cmdline") if str(tree).encode() in _read(p)]
     assert alive == []  # no orphaned workers
 
@@ -304,8 +311,8 @@ def test_translating_captured_output():
     assert [o["group"] for o in out["measurement"]["observations"]] == ["0", "0", "1", "1"]
     assert out["procedure"] == {"attempted_repetitions": 4, "completed_repetitions": 4, "inner_iterations": 50,
                                 "warmups_performed": 2}
-    observed, info = adapter.context_facts(native)
-    assert info["library_version"] == "2.10.0" and "cpu_config" in observed
+    system, info = adapter.context_facts(native)
+    assert info["library_version"] == "2.10.0" and "config" in system["cpu"] and system["runtime"]["python"]
     assert adapter.harness(info) == {"name": "pyperf", "version": "2.10.0"}
 
 
@@ -369,7 +376,7 @@ def test_pythonhashseed_is_recorded_when_set(tmp, tree):
     document["environment_variables"] = {"PYTHONHASHSEED": "7"}
     doc = run_order(tmp, document, "hashseed")[0]
     assert doc["measurement"]["status"] == "success"
-    assert doc["observed_context"]["env"]["PYTHONHASHSEED"] == "7"
+    assert doc["coordinates"]["environment"]["system"]["process"]["environment"]["PYTHONHASHSEED"] == "7"
 
 
 def test_relative_output_directory(tmp, tree, monkeypatch):

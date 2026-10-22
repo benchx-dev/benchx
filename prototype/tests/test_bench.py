@@ -72,7 +72,7 @@ def test_bench_command_runs_and_ingests(tree, capsys):
     out = capsys.readouterr()
     assert "bench_a" in out.out and "success" in out.out and "bench_b" not in out.out
     assert "2 processes x 2 values" in out.err
-    results = [d for d in Store().documents("cli")]
+    results = [d for d in Store().documents("cli") if d["measurement"]["quantity"]["name"] == "wall-time"]
     assert [d["coordinates"]["workload"]["name"] for d in results] == ["bench_a"]
     order = json.loads(next((tree / "results" / "cli").glob("workorder-*.json")).read_text())
     assert levels(order["precision"]) == {"process": 2, "value": 2}

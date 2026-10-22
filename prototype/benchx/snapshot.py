@@ -60,32 +60,47 @@ def _cpu_model():
 
 
 def environment() -> dict:
-    """Environment identity under machine/v1: host name, CPU model, cores."""
+    """Environment identity under machine/v1: host name, CPU model, cores; and
+    the architecture, the first fact of the system it runs (schema §4.2)."""
     identity = {"runner": socket.gethostname()}
     if model := _cpu_model():
         identity["cpu"] = model
     if cores := os.cpu_count():
         identity["cores"] = cores
     return {"schema": "machine/v1", "identity": identity,
-            "metadata": {"architecture": platform.machine()}}
+            "system": {"architecture": platform.machine()}}
 
 
-def observed_context(child_env: dict, env_names=None) -> dict:
-    """Conditions allowed to vary within a series (§3.4)."""
-    facts = {"os": platform.system(), "kernel": platform.release()}
+def system_facts(child_env: dict, env_names=None) -> dict:
+    """Facts about the system the measured process runs on, as placed under
+    `environment.system` (schema §4.2, Appendix B). The default identity
+    policy ignores os, libc and cpu, and matches the process environment."""
+    facts = {"os": {"family": platform.system(), "kernel": platform.release()}}
     libc, version = platform.libc_ver()
     if libc:
-        facts["libc"] = f"{libc}-{version}"
+        facts["libc"] = {"name": libc, "version": version}
     if governor := _read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"):
-        facts["governor"] = governor
-    try:
-        facts["load_avg_1m"] = round(os.getloadavg()[0], 2)
-    except (OSError, AttributeError):  # AttributeError: no os.getloadavg on Windows
-        pass
+        facts["cpu"] = {"governor": governor}
     env = {k: child_env[k] for k in (env_names or env_allowlist(child_env)) if k in child_env}
     if env:
-        facts["env"] = env
+        facts["process"] = {"environment": env}
     return facts
+
+
+def load_average() -> float | None:
+    """The 1-minute load average, or None where the OS has none (Windows)."""
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        return None
+
+
+def merge(base: dict, facts: dict) -> dict:
+    """`facts` over `base`, object by object; any other value replaces."""
+    out = dict(base)
+    for key, value in facts.items():
+        out[key] = merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
 
 
 # Bytecode caches are written by running the suite, so they must not change the tree id.

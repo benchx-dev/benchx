@@ -168,16 +168,16 @@ def test_runner_accepts_text_in_an_order_and_never_runs_it(repo, tmp):
     path = tmp / "o.json"
     path.write_text(json.dumps(o))
     summary = runner.run(path, tmp / "out")
-    assert summary["results"] == 2 and not marker.exists()  # recorded, never executed
+    assert summary["results"] == 4 and not marker.exists()  # recorded, never executed
     result = json.loads(summary["files"][1].read_text())
     assert result["provenance"]["info"]["activation"] == f"touch {marker}"
 
 
 def test_allowlist_covers_loader_variables_and_a_project_can_extend_it(monkeypatch):
     env = {"LD_LIBRARY_PATH": "/opt/lib", "MY_TOOL_PREFIX": "/x", "SECRET_TOKEN": "s3cret"}
-    assert snapshot.observed_context(env)["env"] == {"LD_LIBRARY_PATH": "/opt/lib"}
+    assert snapshot.system_facts(env)["process"]["environment"] == {"LD_LIBRARY_PATH": "/opt/lib"}
     env["BENCHX_ENV_ALLOWLIST"] = "MY_TOOL_PREFIX, ,LD_LIBRARY_PATH"
-    seen = snapshot.observed_context(env)["env"]
+    seen = snapshot.system_facts(env)["process"]["environment"]
     assert seen == {"LD_LIBRARY_PATH": "/opt/lib", "MY_TOOL_PREFIX": "/x"}  # never the whole environment
 
 

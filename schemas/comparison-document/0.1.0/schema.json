@@ -38,7 +38,7 @@
       "$ref": "#/$defs/estimator"
     },
     "identity_schema": {
-      "description": "Projection (schemas/projection/0.1.0) under which series membership and comparability were decided.",
+      "description": "Versioned name of the projection under which series membership and comparability were decided: for a profile, its own name and its identity policy's (benchmark-result-schema.md section 4.3).",
       "$ref": "#/$defs/token"
     },
     "local_only": {
@@ -440,7 +440,7 @@
       ],
       "properties": {
         "invariant": {
-          "description": "Name of the invariant, such as alternation or equal-attempts.",
+          "description": "Name of the invariant, such as alternating-slots or equal-attempts.",
           "$ref": "#/$defs/token"
         },
         "detail": {

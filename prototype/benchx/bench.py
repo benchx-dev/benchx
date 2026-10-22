@@ -41,8 +41,11 @@ def summarize(files) -> list[dict]:
     rows = []
     for path in files:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
-        if document.get("schema_version") != "benchx/work-order/0.1.0":
-            rows.append(row_of(document))
+        if document.get("schema_version") == "benchx/work-order/0.1.0":
+            continue
+        if document["measurement"].get("kind") == "condition":
+            continue  # the runner's load-average sibling: a condition, not a case (schema §4.4)
+        rows.append(row_of(document))
     return rows
 
 

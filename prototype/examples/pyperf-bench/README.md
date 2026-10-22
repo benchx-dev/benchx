@@ -105,6 +105,10 @@ Files, under `out/all/` and `out/env/`:
   `example-env_bench_env_var_%7B%22EXAMPLE_N%22%3A%22100000%22%7D_wall-time.json`):
   the observations grouped by worker process, the pyperf protocol that applied, the
   environment, the revision of the tree, and warnings.
+- `<run-key>_<case>_load-average.json`: beside each case's result, the 1-minute load
+  average the runner read before the case ran, a condition measurement with the same
+  `attempt_key` (schema §4.4). `bx series` lists its series too; `--quantity wall-time`
+  leaves them out.
 - `workorder-<hash>.json`: the work order that was run, and `orders/order.json`, the
   same order as written for you to read. Results refer to it by hash.
 - `artifacts/<hash>/NNNN.native.json`: pyperf's own output; `.driver.py`: the generated
@@ -115,7 +119,7 @@ The local store, `out/home/store.parquet`, holds the results. `run.sh` reads it 
 (your numbers and fingerprints will differ):
 
 ```
-$ bx series
+$ bx series --quantity wall-time
 d780c9564c72  local/be8372c04606  bench_dict_build  wall-time [s]  est=benchx/median/v1
 e6eaa02c8309  local/be8372c04606  bench_env_var  wall-time [s]  est=benchx/median/v1
 4be59ef6debc  local/be8372c04606  bench_join  wall-time [s]  est=benchx/median/v1

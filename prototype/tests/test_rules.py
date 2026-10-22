@@ -121,6 +121,7 @@ def test_inverted_confidence_interval(arrow):
 )
 def test_censored_interval(adhoc, lower, upper, inclusive, ok):
     adhoc["measurement"] = {
+        "quantity": adhoc["measurement"]["quantity"],
         "status": "censored",
         "reason": "timeout",
         "constraint": {

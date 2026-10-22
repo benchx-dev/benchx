@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:identity-policy:0.1.0",
+  "title": "BenchX identity policy",
+  "description": "A project's identity policy (docs/design/benchmark-result-schema.md section 4.3): for every reported fact, whether it must match, as is or normalized, for two results to share a series, or is ignored. It is the project's default projection, whose axis is always the subject revision, so only the roles are stored; other projections, such as the comparison profiles of section 5.5, reuse these roles with a different axis.",
+  "$comment": "Rules the server enforces: paths are JSON Pointers into the reported coordinates (project, source, benchmark, coordinates); the longest matching path wins, so a role on a subtree can be overridden for one member; a null fact never equals anything; an ignored fact whose value differs from the previous point of a series is recorded as a warning on that point; any change other than description needs a new identity_schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identity_schema", "default"],
+  "properties": {
+    "identity_schema": {
+      "description": "Versioned name of the policy. Enters comparison_fingerprint, so series of different policies never mix.",
+      "$ref": "#/$defs/token"
+    },
+    "description": { "type": "string" },
+    "default": {
+      "description": "Role of every reported fact not named in paths.",
+      "enum": ["match", "ignore"]
+    },
+    "paths": {
+      "description": "Roles by JSON Pointer.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/pointer" },
+      "additionalProperties": { "$ref": "#/$defs/role" }
+    },
+    "estimators": {
+      "description": "Estimators to materialize series for.",
+      "type": "array",
+      "items": { "$ref": "urn:benchx:schema:measurement-result:0.1.0#/$defs/estimator" }
+    }
+  },
+  "$defs": {
+    "token": { "type": "string", "minLength": 1, "pattern": "^\\S+$" },
+    "pointer": { "type": "string", "pattern": "^/(project|source|benchmark|coordinates)(/[^/]+)*$" },
+    "role": {
+      "oneOf": [
+        { "description": "match: equal values share a series. ignore: kept on the result and never splits a series; a change along a series is flagged on the point.", "enum": ["match", "ignore"] },
+        {
+          "description": "Match after normalizing: map replaces values by a table, keeping unlisted ones; canonical-uri normalizes a source URI.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalize"],
+          "properties": {
+            "normalize": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule"],
+              "properties": {
+                "rule": { "enum": ["map", "canonical-uri"] },
+                "map": { "type": "object" }
+              },
+              "if": { "properties": { "rule": { "const": "map" } } },
+              "then": { "required": ["map"] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

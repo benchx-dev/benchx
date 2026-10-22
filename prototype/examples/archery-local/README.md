@@ -84,7 +84,7 @@ over.
    noisy case may flag too.
 6. **The work order and a result**, printed: the order's `target` carries
    `how_built`, `activation`, `shell` and `provider`; the result's
-   `provenance.info` carries them, next to `observed_context.env` and
+   `provenance.info` carries them, next to `coordinates.environment.system.process.environment` and
    `coordinates.subject.configuration` (read by the runner from
    `CMakeCache.txt`).
 7. **Forget to activate.** The same comparison with `LD_LIBRARY_PATH` removed
@@ -113,7 +113,7 @@ $ bx compare @plain @hardened --profile environments --label build=plain,hardene
 
 $ bx compare --run mine --profile environments --label build --baseline plain   # read mode
 $ bx head -n 4                                    # the latest stored results
-$ bx head --json -n 1 | python3 -m json.tool | less   # provenance.info, observed_context
+$ bx head --json -n 1 | python3 -m json.tool | less   # provenance.info, environment.system
 ```
 
 Edit `provider.sh`'s `hardened)` case or `activate.sh` and run again to see how

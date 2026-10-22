@@ -187,7 +187,7 @@ criterion 1 holds by construction.
   "contender": "hardened",
   "method": {"name": "benchx/paired-relative", "version": "v1",
              "estimator": "median", "k": 3.0, "min_rounds": 3},
-  "identity_schema": "benchx/prototype-identity/v1",
+  "identity_schema": "benchx/profile/environments/v1+benchx/prototype-identity/v2",
   "local_only": true,
   "units": [
     {"workload": {"name": "TakeChunked…/4194304/2", "parameters": {}},
@@ -197,7 +197,7 @@ criterion 1 holds by construction.
      "reference_estimate": 0.0455, "effect": 0.024,
      "noise": 0.0021, "noise_source": "paired-rounds",
      "verdict": "regressed", "reason": null,
-     "unmatched_differences": []}
+     "unmatched_differences": ["/coordinates/subject/configuration/options/ARROW_HARDENED"]}
   ],
   "missing": [{"workload": "…", "quantity": "wall-time", "side": "contender"}],
   "failed_invariants": [],
@@ -260,11 +260,15 @@ landing where its §3.4 puts it:
   condition measurement; an allowlist of thread-control environment variables
   in `environment.system`,
   which is the allowlist of `benchmark-environments.md` §3.1.
-  The `env` key reads differently by adapter. Google Benchmark takes the
-  runner's own environment and omits `env` when no allowlisted variable is set.
-  pyperf records what the workers actually had, so `env` is `{}` when the
-  capture worked and none was set, and absent only when nothing was captured
-  (`env-capture-missing`). Both are kept as they are.
+  `process.environment` reads differently by adapter. Google Benchmark takes the
+  runner's own environment and omits it when no allowlisted variable is set.
+  pyperf records what the workers actually had, so it is `{}` when the
+  capture worked and none was set, and null only when nothing was captured
+  (`env-capture-missing`); null matches nothing, so such a result shares no
+  series (schema §4.3). The load average the runner reads before each case is
+  a sibling `load-average` result with the case's `attempt_key`, its
+  `protocol.probe` naming how it was read, and `measurement.kind` is
+  `condition`, so tools leave it out of what they compare and show.
 - **Source identity**, from `target.source_dir`, or from the
   `CMAKE_HOME_DIRECTORY` the build directory records when the order names
   none: revision, `subject_dirty`, and `subject_tree` (schema §4.1). When
@@ -355,16 +359,22 @@ counted (`ingested 42, duplicate 3, rejected 1 (unit-conflict)`). Re-running
 `bx ingest` on the same directory is a visible no-op (criterion 2).
 
 Series need an identity policy and a list of estimators (schema §4.3, §4.5).
-The prototype has one of each, fixed in code:
+The prototype has one identity policy, which lists both, in code:
 
-- **Identity policy** `benchx/prototype-identity/v1`: comparison identity is
-  the reported coordinates with source URIs normalized, a thin result's
-  implicit project, and the exact benchmark revision omitted. The prototype
-  has no declared benchmark versions, and with benchmarks in the subject's
-  checkout the benchmark revision changes on every commit, so keeping it
-  would split history at every point (schema §1).
+- **Identity policy** `benchx/prototype-identity/v2` (`benchx/identity.py`):
+  the default policy (`schemas/identity-policy/0.1.0/examples/default.json`)
+  with the benchmark's revision ignored. A test checks it against the schema
+  and pins it to its name, so an edit without a new name fails. The prototype has no declared benchmark versions, and
+  with benchmarks in the subject's checkout the benchmark revision changes on
+  every commit, so matching it would split history at every point (schema §1).
+  Being ignored, its change is flagged on each point where it happens. A thin
+  result's identity carries its implicit project.
 - **Estimators:** `median`, derived from observations, plus any producer
   estimate a result carries.
+
+The identity policy is the default projection, with the subject revision as
+its axis. The store can materialize any other projection built in code from
+its roles over the same rows; nothing in the CLI asks for one yet.
 
 A thin result gets the implicit project `local/<hostname>` (schema §4.1).
 Idempotency, unit, and attempt-integrity checks scan the store's bookkeeping
@@ -373,16 +383,19 @@ columns, which is fine at prototype scale; a real deployment would index them.
 `bx head` shows the store's size and its latest results, newest first, with
 run key, workload, quantity, status, median, revision, project, and labels;
 with `--json` it prints the stored documents instead, and with `--table` the `bx bench`
-table (median, mean ± sd, range, n, status) of each, led by revision, run key and project.
+table (median, mean ± sd, range, n, status) of each measurand, led by revision, run key and project;
+condition measurements are left out, as in `bx bench`.
 `--project` keeps one store project's results and `--workload` those whose benchmark name
 contains it; both apply before `-n`. Recency is ingest
 order, since every ingest appends to the rewritten file.
 
 `bx series` and `bx history` are queries over the derived `series` and
 `series_point`.
-`bx history` lists a series' points; without a revision graph revision order
-is unavailable (schema §4.1), so it lists them by measurement start and says
-so. It evaluates nothing, since history mode is deferred.
+`bx history` lists a series' points in axis order, each with the ignored
+facts that changed since the point before it. Without a revision graph
+revision order is unavailable (schema §4.1), so an axis on the revision lists
+them by measurement start and says so. It evaluates nothing, since history
+mode is deferred.
 
 ## 5. Comparator (`bx compare`)
 
@@ -390,17 +403,21 @@ Run mode as `comparator.md` §2.3 defines it. Inputs always come from a store
 (§2.1): the local store by default, or, with `--results DIR`, a throwaway
 store the directory of result files is ingested into first, for results that
 were never delivered to the local one. The request names the run, the profile, and the baseline value of the
-varying coordinate:
+varying coordinate. Each profile is a projection built in code from the
+identity policy (`benchx/compare.py`): its axis tells the sides apart, and
+every fact the policy matches must agree across both sides.
 
-| Profile | Varying coordinate | `--baseline` names | Sides must agree on |
+| Profile | Axis | `--baseline` names | Sides must agree on |
 |---|---|---|---|
-| `revisions` | subject tree id | a revision or tree id prefix | workload variant, subject configuration, environment, protocol |
-| `environments` | subject configuration, named by the label `--label` gives | the label value | subject revision, workload variant, environment, protocol |
+| `revisions` | subject tree id | a revision or tree id prefix | everything the identity policy matches |
+| `environments` | the label `--label` gives, then subject configuration, pinned components, and `environment.system` | the label value | everything else the identity policy matches, and subject revision and tree |
 
-Before any verdict, the eligibility guard (§3) checks the profile's
-invariants over the run: exactly two sides that differ only in the varying
-coordinate, equal attempt counts per side, and sides alternating by
-`procedure.slot`. A failed invariant is recorded and the affected units get no
+A side is one whole axis value, so one label covering two builds is three
+sides, not one. Before any verdict, the eligibility guard (§3) checks that the
+matched facts agree (`sides-agree`) and the invariants the profile names over
+the run: exactly two sides, which for `environments` differ in more than their
+label, equal attempt counts per side, and sides alternating by
+`procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
 verdict; under `revisions` a side that is not `clean` fails the `clean-tree`
 invariant the same way. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
@@ -517,7 +534,8 @@ history grow from run to run, and the demo ends with `bx head`.
   hand.
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
-- One identity policy and one derived estimator, fixed in code.
+- One identity policy, in code, and two profiles; median, mean, and min are
+  the only estimators it derives.
 - The store is one file, rewritten on every ingest that accepts something,
   with no concurrency story beyond the atomic rename; entities and series are
   computed on query, and ingest-time checks are scans, not indexes.

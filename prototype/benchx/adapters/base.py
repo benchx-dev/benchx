@@ -8,7 +8,7 @@ Identity and capabilities
     PRODUCER                  the `producer` object of every result it emits
     QUANTITIES                {quantity name: (native field, quantity declaration)}
     CONTEXT_KEY               the key under which harness-native facts are filed
-                              in `observed_context` and `provenance.info`
+                              in `provenance.info`
     WORKLOAD_PARAMETERS       whether the order's `workload_parameters` can be applied
 
 Driving half (harness-adapter.md §5)
@@ -27,19 +27,20 @@ Translating half (harness-adapter.md §6)
     attempted(applied)        -> the repetitions the protocol asked for, the denominator
                               of `partial`
     translate(case, quantities, run, attempted) -> one output per quantity
-    context_facts(native)     -> (observed context, provenance info) from native output
-    harness(info)             -> the `comparison_context.harness` object
+    context_facts(native)     -> (system facts, provenance info) from native output; the
+                              system facts are merged into `environment.system`
+    harness(info)             -> the `protocol.harness` object
 
 Optional hooks (the runner calls them when present)
-    comparison_extras(info)   -> more `comparison_context` keys, such as host runtime
     ENV_ALLOWLIST             -> names of environment variables this harness's
                               ecosystem cares about, added to the core default and
                               the project's $BENCHX_ENV_ALLOWLIST. The runner
                               composes the list once and passes it to `run_case`
                               as `env_names` and to `observed_environment`
-    observed_environment(run, case, env_names) -> (facts, warnings): facts
-                              replace the runner's own `observed_context` keys
-                              (None drops one), warnings go to `quality.warnings`.
+    observed_environment(run, case, env_names) -> (facts, warnings): facts are
+                              merged over the runner's own `environment.system`
+                              (None is null: read but undeterminable), warnings
+                              go to `quality.warnings`.
                               For an adapter that can see the environment its
                               harness actually had.
     repetition_levels(applied, run, case) -> `procedure.repetition_levels`: per level,

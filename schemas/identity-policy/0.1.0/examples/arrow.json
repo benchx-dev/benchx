@@ -1,10 +1,13 @@
 {
   "identity_schema": "arrow/identity/v4",
   "description": "Arrow's identity policy: the default, with benchmark revisions mapped to a declared suite version and a minimum estimator.",
-  "axis": [{ "path": "/revision/key", "order": "revision-graph" }],
   "default": "match",
   "paths": {
-    "/source/uri": { "normalize": { "rule": "canonical-uri" } },
+    "/source/uri": {
+      "normalize": {
+        "rule": "canonical-uri"
+      }
+    },
     "/coordinates/environment/system/hostname": "ignore",
     "/coordinates/environment/system/os": "ignore",
     "/coordinates/environment/system/libc": "ignore",
@@ -14,11 +17,24 @@
     "/coordinates/environment/system/container": "ignore",
     "/coordinates/environment/system/process/cgroup": "ignore",
     "/benchmark/revision/key": {
-      "normalize": { "rule": "map", "map": { "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e": "suite-v3" } }
+      "normalize": {
+        "rule": "map",
+        "map": {
+          "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e": "suite-v3"
+        }
+      }
     }
   },
   "estimators": [
-    { "name": "median", "method_version": "benchx/median/v1", "input_level": "observations" },
-    { "name": "min", "method_version": "benchx/min/v1", "input_level": "observations" }
+    {
+      "name": "median",
+      "method_version": "benchx/median/v1",
+      "input_level": "observations"
+    },
+    {
+      "name": "min",
+      "method_version": "benchx/min/v1",
+      "input_level": "observations"
+    }
   ]
 }

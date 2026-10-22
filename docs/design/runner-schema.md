@@ -215,7 +215,7 @@ All three schemas use the same scheme as `schemas/measurement-result/0.1.0`: sem
 | Environment policy | `schemas/environment-policy/0.1.0/` | detecting a policy edited without a version bump |
 | Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema` |
 | Observed-context record (retired) | `schemas/observed-context-record/0.1.0/` | not hashed — validates the `{value, status, when, source}` shape of one `observed_context` entry (§5.3); referenced by convention, not by a `coordinates` field |
-| Projection | `schemas/projection/0.1.0/` | `identity_schema` names the projection and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
+| Identity policy | `schemas/identity-policy/0.1.0/` | `identity_schema` names the policy and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
 
 Orders and policies are hashed the same way the result schema hashes its fingerprints:
 

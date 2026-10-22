@@ -104,10 +104,9 @@ echo "# \$WORK/bad.json: a copy of one result, its unit changed from s to ms"
 "$PYTHON" - "$WORK" <<'EOF'
 import json, pathlib, sys
 work = pathlib.Path(sys.argv[1])
-doc = json.loads(next(p for p in sorted((work / "results-env").glob("*.json"))
-                      if not p.name.startswith("workorder-")).read_text())
+doc = json.loads(next(p for p in sorted((work / "results-env").glob("*_wall-time_*.json"))).read_text())
 doc["ingest_key"] += ":in-ms"
-doc["coordinates"]["quantity"]["unit"] = "ms"
+doc["measurement"]["quantity"]["unit"] = "ms"
 (work / "bad.json").write_text(json.dumps(doc))
 EOF
 bx ingest "$WORK/bad.json" || true
@@ -122,7 +121,7 @@ into "$WORK/b.json" bx compare --run "$RUN_ENV" --profile environments --label b
 show cmp "$WORK/a.json" "$WORK/b.json" && echo "identical"
 
 step "series and history (a query; history mode is deferred)"
-into "$WORK/series.txt" bx series --workload BM_Quiet
+into "$WORK/series.txt" bx series --workload BM_Quiet --quantity wall-time
 show head -6 "$WORK/series.txt"
 SERIES=$(awk '/demo .*est=benchx\/median/ {print $1; exit}' "$WORK/series.txt")
 into "$WORK/history.txt" bx history "$SERIES"

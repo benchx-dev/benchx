@@ -177,6 +177,11 @@
             "deterministic": { "type": "boolean" }
           }
         },
+        "kind": {
+          "description": "measurand: what the attempt set out to measure. condition: a state the system passed through during the attempt, recorded beside its measurands (an influence quantity, in metrology terms; section 4.4). A property of this result, not of the quantity: load average is a condition beside a timing benchmark and a measurand in a load study.",
+          "enum": ["measurand", "condition"],
+          "default": "measurand"
+        },
         "status": { "enum": ["success", "partial", "censored", "error", "skipped"] },
         "reason": {
           "description": "Machine-readable lowercase token such as 'timeout' or 'resource-exhausted.memory'. Required for every status except success.",

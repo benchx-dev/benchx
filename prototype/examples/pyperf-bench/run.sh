@@ -33,11 +33,11 @@ ls -l "$BENCHX_HOME/store.parquet"
 bx head -n 10
 
 echo; echo "== 5. its series (bench_env_var has two: the -e setting changes the environment)"
-bx series > out/series.txt
+bx series --quantity wall-time > out/series.txt
 cat out/series.txt
 
 echo; echo "== 6. the history of bench_join: one point per run"
-bx series --workload bench_join > out/join-series.txt
+bx series --workload bench_join --quantity wall-time > out/join-series.txt
 SERIES=$(awk 'NR == 1 {print $1}' out/join-series.txt)
 [ -n "$SERIES" ] || { echo "no bench_join series in the store" >&2; exit 1; }
 bx history "$SERIES" > out/history.txt

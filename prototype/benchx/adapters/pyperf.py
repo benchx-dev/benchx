@@ -271,13 +271,6 @@ def harness(info: dict) -> dict:
     return out
 
 
-def comparison_extras(info: dict) -> dict:
-    """Host runtime facts that belong to comparison context (§6.8)."""
-    runtime = {k: info[k] for k in ("python_version", "python_implementation", "python_compiler",
-                                    "python_cflags") if k in info}
-    return {"runtime": runtime} if runtime else {}
-
-
 def _effective(native: dict, benchmark: dict, run: dict) -> dict:
     """File, benchmark and run metadata; the most specific level wins."""
     return {**native.get("metadata", {}), **benchmark.get("metadata", {}), **run.get("metadata", {})}
@@ -342,22 +335,33 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
     return outputs
 
 
+# File-level pyperf metadata as environment.system facts (schema Appendix B):
+# {metadata key: (system object, key)}. The default identity policy ignores
+# cpu and os and matches runtime.
+_SYSTEM = {
+    "cpu_config": ("cpu", "config"), "cpu_affinity": ("cpu", "affinity"),
+    "aslr": ("os", "aslr"), "platform": ("os", "platform"), "boot_time": ("os", "boot_time"),
+    "python_version": ("runtime", "python"), "python_implementation": ("runtime", "implementation"),
+    "python_compiler": ("runtime", "compiler"), "python_cflags": ("runtime", "cflags"),
+    "python_gc": ("runtime", "gc"),
+}
+
+
 def context_facts(native: dict | None) -> tuple[dict, dict]:
-    """The native metadata split by meaning: (observed context, provenance info).
+    """The native metadata split by meaning: (environment.system facts, provenance info).
 
     The file-level metadata: what held for every run. Facts that differ per
     run (load, frequency, temperature) stay in the native artifact.
     """
     md = (native or {}).get("metadata", {})
-    observed = {k: md[k] for k in ("cpu_config", "cpu_affinity", "aslr", "platform", "boot_time",
-                                   "python_gc") if k in md}
+    system = {}
+    for key, (group, name) in _SYSTEM.items():
+        if key in md:
+            system.setdefault(group, {})[name] = md[key]
     info = {k: md[k] for k in ("hostname", "cpu_model_name", "cpu_count", "python_executable") if k in md}
     if "perf_version" in md:
         info["library_version"] = md["perf_version"]
-    for k in ("python_version", "python_implementation", "python_compiler", "python_cflags"):
-        if k in md:
-            info[k] = md[k]
-    return observed, info
+    return system, info
 
 
 def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[str]]:
@@ -366,14 +370,14 @@ def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[st
     Facts come from the worker-side capture, never from what the manager
     passed. A digest in every run is compared with the digest of what the
     manager passed; a mismatch or a missing digest is `env-mismatch`. When
-    nothing was captured, the observed environment is absent (None), never
-    substituted by the manager's.
+    nothing was captured, the process environment is null (read but
+    undeterminable, so it matches nothing), never substituted by the manager's.
     """
     warnings = []
     captured = run.get("worker_env")
-    facts = {"env": None}
+    facts = {"process": {"environment": None}}
     if captured is not None:
-        facts["env"] = {n: captured[n] for n in env_names if n in captured}
+        facts["process"]["environment"] = {n: captured[n] for n in env_names if n in captured}
     native = run["native"]
     benchmark = _benchmark(native, case)
     if benchmark is not None:

@@ -16,8 +16,16 @@ def load(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def results(directory: Path) -> list[dict]:
-    return [load(p) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+def results(directory: Path, conditions=False) -> list[dict]:
+    """The result files in `directory`: the measurands, and with `conditions`
+    also the load-average sibling the runner adds to every attempt."""
+    docs = [load(p) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+    return [d for d in docs if conditions or d["measurement"].get("kind") != "condition"]
+
+
+def outcome(doc) -> dict:
+    """A measurement without its quantity and kind: the status and what came with it."""
+    return {k: v for k, v in doc["measurement"].items() if k not in ("quantity", "kind")}
 
 
 def verdicts(doc) -> dict:
@@ -46,18 +54,26 @@ def environments_run(repo, tmp):
 def test_results_are_valid_documents(revisions_run):
     docs = results(revisions_run)
     assert len(docs) == 2 * 6 * 2  # cases × rounds × sides
-    for doc in docs:
+    every = results(revisions_run, conditions=True)
+    assert len(every) == 2 * len(docs)  # each attempt's load average beside it (schema §4.4)
+    for doc in every:
         assert core.check(doc, "measurement-result") == []  # criterion 1: the file is the ingest payload
         assert doc["provenance"]["subject_dirty"] == "clean"
         assert doc["coordinates"]["environment"]["schema"] == "machine/v1"
         config = doc["coordinates"]["subject"]["configuration"]
         assert config["options"] == {"DEMO_HARDENED": "OFF"}  # DEMO_DATA_DIR is a path
         assert config["cxx_compiler"] == "AppleClang 21.0.0"
+    attempts = {d["attempt_key"] for d in docs}
+    for load_ in (d for d in every if d not in docs):
+        assert load_["measurement"]["quantity"] == {"name": "load-average", "unit": "1"}
+        assert load_["coordinates"]["protocol"] == {"probe": runner.LOAD_PROBE}
+        assert load_["measurement"]["kind"] == "condition"
+        assert load_["attempt_key"] in attempts
 
 
 def test_revisions_profile(revisions_run, repo, tmp):
     store = Store(tmp / "store.parquet")
-    assert store.ingest_paths([revisions_run])["ingested"] == 24
+    assert store.ingest_paths([revisions_run])["ingested"] == 48  # with the load averages
     doc = compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions",
                           baseline=repo["base"][:10])
     assert core.check(doc, "comparison-document") == []
@@ -91,9 +107,9 @@ def test_environments_needs_a_real_difference(repo, tmp):
 
 def test_ingest_contract(revisions_run, tmp):
     store = Store(tmp / "store.parquet")
-    assert store.ingest_paths([revisions_run]) == {"ingested": 24, "duplicate": 0, "rejected": []}
+    assert store.ingest_paths([revisions_run]) == {"ingested": 48, "duplicate": 0, "rejected": []}
     # criterion 2: re-ingest is a visible no-op
-    assert store.ingest_paths([revisions_run]) == {"ingested": 0, "duplicate": 24, "rejected": []}
+    assert store.ingest_paths([revisions_run]) == {"ingested": 0, "duplicate": 48, "rejected": []}
 
     doc = results(revisions_run)[0]
 
@@ -104,7 +120,7 @@ def test_ingest_contract(revisions_run, tmp):
         return store.ingest([("x.json", json.dumps(changed))])["rejected"][0]["code"]
 
     # criterion 3: a conflicting unit is rejected with its taxonomy code
-    assert attempt(lambda d: d["coordinates"]["quantity"].update(unit="ms"), ":ms") == "unit-conflict"
+    assert attempt(lambda d: d["measurement"]["quantity"].update(unit="ms"), ":ms") == "unit-conflict"
     assert attempt(lambda d: d["coordinates"]["workload"].update(name="other"), ":moved") == "attempt-conflict"
     assert attempt(lambda d: d["coordinates"]["subject"]["components"][0].update(
         source="https://elsewhere.org/x"), ":src") == "identity-violation"
@@ -134,8 +150,9 @@ def test_traceability(revisions_run, tmp):
     for doc in docs:
         assert store.order(doc["provenance"]["info"]["workorder_ref"])["run_key"] == "rev-1"
     comparison = compare.compare(docs, run_key="rev-1", profile="revisions", baseline=docs[0]["revision"]["key"])
+    measured = [d for d in docs if d["measurement"]["quantity"]["name"] != "load-average"]
     assert {(i["producer"], i["ingest_key"]) for i in comparison["inputs"]} == \
-        {(d["producer"]["name"], d["ingest_key"]) for d in docs}
+        {(d["producer"]["name"], d["ingest_key"]) for d in measured}
 
 
 def test_missing_and_unequal(repo, tmp):
@@ -158,7 +175,7 @@ def test_alternation_is_checked(repo, tmp):
         path.write_text(json.dumps(order(build, repo[source], "seq", round=slot % 2, slot=slot)))
         runner.run(path, tmp / "seq")
     doc = compare.compare(results(tmp / "seq"), run_key="seq", profile="revisions", baseline=repo["base"])
-    assert [f["invariant"] for f in doc["failed_invariants"]] == ["alternation"]
+    assert [f["invariant"] for f in doc["failed_invariants"]] == ["alternating-slots"]
 
 
 def _dirty_run(repo, tmp, profile_sides, run_key):
@@ -209,14 +226,30 @@ def test_environments_labels_a_dirty_side_local_only(repo, tmp):
 def test_tracked_series_and_history(revisions_run, tmp):
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
-    series = store.series(workload=QUIET)
+    series = store.series(workload=QUIET, quantity="wall-time")
     medians = [s for s in series if json.loads(s["estimator"]) == identity.MEDIAN]
-    # the benchmark revision is omitted from identity, so both revisions share a series
-    assert len(medians) == 1
+    # the benchmark revision is ignored by the identity policy, so both revisions share a series
+    assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/prototype-identity/v2"
     # Google Benchmark's own median is a different estimator, so a different series
     assert {json.loads(s["estimator"])["method_version"] for s in series} == {
         "benchx/median/v1", "google-benchmark/median", "google-benchmark/mean"}
-    assert len(store.history(medians[0]["fingerprint"][:12])) == 12
+    points = store.history(medians[0]["fingerprint"][:12])
+    assert len(points) == 12
+    # an ignored fact that changes along the series is flagged on the point (schema §4.3)
+    changes = [p["changed"] for p in points]
+    assert changes[0] == [] and ["/benchmark/revision"] in changes
+
+
+def test_another_projection_on_request(revisions_run, tmp):
+    """Schema §4.3: the same results under the revisions profile's projection, one series per tree."""
+    store = Store(tmp / "store.parquet")
+    store.ingest_paths([revisions_run])
+    profile = compare.PROFILES["revisions"]
+    medians = [s for s in store.series(workload=QUIET, quantity="wall-time", projection=profile)
+               if json.loads(s["estimator"]) == identity.MEDIAN]
+    assert len(medians) == 1 and medians[0]["identity_schema"] == profile.identity_schema
+    points = store.history(medians[0]["fingerprint"], profile)
+    assert len(points) == 12 and len({tuple(p["axis"]) for p in points}) == 2
 
 
 def test_failures_are_results(repo, tmp):
@@ -226,9 +259,9 @@ def test_failures_are_results(repo, tmp):
     path.write_text(json.dumps(order(build, repo["wt-head"], "fail", timeout_seconds=1)))
     runner.run(path, tmp / "fail")
     by_case = {d["coordinates"]["workload"]["name"]: d for d in results(tmp / "fail")}
-    assert by_case["BM_Broken"]["measurement"] == {"status": "error", "reason": "harness.error"}
-    assert by_case["BM_Skipped"]["measurement"] == {"status": "skipped", "reason": "harness.skipped"}
-    assert by_case["BM_Slow"]["measurement"] == {"status": "error", "reason": "timeout"}
+    assert outcome(by_case["BM_Broken"]) == {"status": "error", "reason": "harness.error"}
+    assert outcome(by_case["BM_Skipped"]) == {"status": "skipped", "reason": "harness.skipped"}
+    assert outcome(by_case["BM_Slow"]) == {"status": "error", "reason": "timeout"}
     assert by_case["BM_Slow"]["procedure"]["timeout_seconds"] == 1
 
 
@@ -326,13 +359,14 @@ def test_planned_case_never_reported(repo, tmp):
     """R1: a case the binary lists but never reports is an error result, not an absence."""
     docs = run_one(repo, tmp, build_config={"ghost": ["BM_Ghost"]})
     ghost = [d for d in docs if d["coordinates"]["workload"]["name"] == "BM_Ghost"]
-    assert [d["measurement"] for d in ghost] == [{"status": "error", "reason": "harness.no-output"}]
+    assert [outcome(d) for d in ghost] == [{"status": "error", "reason": "harness.no-output"}]
 
 
 def test_defaults_are_recorded(repo, tmp):
     """R3: settings the order leaves out are recorded as applied."""
     doc = run_one(repo, tmp)[0]
-    protocol = doc["coordinates"]["comparison_context"]["protocol"]
+    protocol = doc["coordinates"]["protocol"]
+    assert protocol["harness"]["name"] == "google-benchmark"
     assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.5}
     assert protocol["warmup"] == {"mode": "none"}
 
@@ -340,21 +374,23 @@ def test_defaults_are_recorded(repo, tmp):
 def test_snapshot_and_environment_variables(repo, tmp):
     """R9: the zero-configuration snapshot, and an ordered variable as a parameter."""
     doc = run_one(repo, tmp, environment_variables={"OMP_NUM_THREADS": "1"})[0]
-    assert {"os", "kernel"} <= set(doc["observed_context"])
-    assert doc["observed_context"]["env"] == {"OMP_NUM_THREADS": "1"}
+    system = doc["coordinates"]["environment"]["system"]
+    assert {"family", "kernel"} <= set(system["os"]) and "architecture" in system
+    assert system["process"]["environment"] == {"OMP_NUM_THREADS": "1"}
     assert doc["coordinates"]["workload"]["parameters"] == {"OMP_NUM_THREADS": "1"}
 
 
 def test_setup_file(repo, tmp, monkeypatch):
-    """R10: declared facts land in observed_context.setup; a broken file warns."""
+    """R10: declared facts land in environment.system.setup; a broken file warns."""
     setup = tmp / "setup.json"
     setup.write_text(json.dumps({"blas": "openblas-0.3.27"}))
     monkeypatch.setenv("BENCHX_SETUP_FILE", str(setup))
-    assert run_one(repo, tmp)[0]["observed_context"]["setup"] == {"blas": "openblas-0.3.27"}
+    assert run_one(repo, tmp)[0]["coordinates"]["environment"]["system"]["setup"] == {"blas": "openblas-0.3.27"}
     setup.write_text("{not json")
     (tmp / "broken").mkdir()
     doc = run_one(repo, tmp / "broken")[0]
-    assert doc["quality"]["warnings"] == ["collector-failed"] and "setup" not in doc["observed_context"]
+    assert doc["quality"]["warnings"] == ["collector-failed"]
+    assert "setup" not in doc["coordinates"]["environment"]["system"]
 
 
 def test_artifacts(repo, tmp):
@@ -392,11 +428,25 @@ def test_reads_files_from_an_older_schema(revisions_run, tmp):
     files = sorted(p for p in revisions_run.glob("*.json") if not p.name.startswith("workorder-"))
     store = Store(tmp / "store.parquet")
     store.ingest_paths(files[:10])
-    pq.write_table(pq.read_table(store.path).drop_columns(["observed_context"]), store.path)  # as if older
-    assert store.ingest_paths(files[10:])["ingested"] == 14
-    assert pq.read_table(store.path).column("observed_context").null_count == 10
-    assert store.ingest_paths(files)["duplicate"] == 24
-    assert len(store.documents("rev-1")) == 24
+    pq.write_table(pq.read_table(store.path).drop_columns(["quality"]), store.path)  # as if older
+    assert store.ingest_paths(files[10:])["ingested"] == 38
+    assert pq.read_table(store.path).column("quality").null_count >= 10
+    assert store.ingest_paths(files)["duplicate"] == 48
+    assert len(store.documents("rev-1")) == 48
+
+
+def test_a_store_of_an_older_result_schema_is_refused(revisions_run, tmp):
+    """No migration in the prototype: a store of v5 results is named, not misread."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from benchx.store import StoreError
+    store = Store(tmp / "store.parquet")
+    store.ingest_paths([revisions_run])
+    table = pq.read_table(store.path)
+    column = table.schema.get_field_index("schema_version")
+    pq.write_table(table.set_column(column, "schema_version", pa.array([5] * table.num_rows)), store.path)
+    with pytest.raises(StoreError, match="schema version"):
+        store.series()
 
 
 def test_store_keeps_documents_exactly(revisions_run, tmp):
@@ -404,7 +454,7 @@ def test_store_keeps_documents_exactly(revisions_run, tmp):
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     stored = {d["ingest_key"]: d for d in store.documents("rev-1")}
-    for doc in results(revisions_run):
+    for doc in results(revisions_run, conditions=True):
         assert core.canonical(stored[doc["ingest_key"]]) == core.canonical(doc)
 
 
@@ -414,8 +464,8 @@ def test_head(revisions_run, tmp):
     assert store.head() == (0, [])
     store.ingest_paths([revisions_run])
     total, rows = store.head(3)
-    assert total == 24 and [r["row"] for r in rows] == [23, 22, 21]
-    assert all(r["run_key"] == "rev-1" and r["status"] == "success" and r["median"] > 0 for r in rows)
+    assert total == 48 and [r["row"] for r in rows] == [47, 46, 45]
+    assert all(r["run_key"] == "rev-1" and r["status"] == "success" and r["median"] >= 0 for r in rows)
     ingested_last = sorted(p for p in revisions_run.glob("*.json") if not p.name.startswith("workorder-"))[-1]
     assert json.loads(rows[0]["document"]) == load(ingested_last)
 
@@ -429,11 +479,11 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
     assert default_path() == tmp / "benchx-home" / "store.parquet"
     assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
-    assert "ingested 2, duplicate 0" in capsys.readouterr().out  # this run's files only
+    assert "ingested 4, duplicate 0" in capsys.readouterr().out  # this run's files only, with load averages
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store().head()
-    assert total == 2 and {load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
+    assert total == 4 and {load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
     ref = json.loads(rows[0]["document"])["provenance"]["info"]["workorder_ref"]
     assert Store().order(ref) == load(tmp / "o1.json")  # the order travelled with its results
 
