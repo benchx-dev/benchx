@@ -71,6 +71,25 @@ def test_the_longest_path_wins_and_the_axis_wins_over_any_role():
     assert "/coordinates/environment/system/runtime" in p.apply(ARROW).identity
 
 
+def test_points_along_a_value_axis_are_in_natural_order():
+    """Sizes by value and versions as people read them, not as JSON text,
+    where 1000 sorts before 20 and kernel 6.10 before 6.8."""
+    sizes = Projection(DEFAULT, ["/coordinates/workload/parameters/size"], profile="test/size-sweep/v1",
+                       paths={"/provenance/subject_tree": "match"})
+    assert sorted([1000, 20, 100, None, 2.5], key=lambda v: sizes.order_key((v,))) == [2.5, 20, 100, 1000, None]
+    kernels = Projection(DEFAULT, ["/coordinates/environment/system/os/kernel"], profile="test/kernel-sweep/v1",
+                         paths={"/provenance/subject_tree": "match"})
+    found = ["6.10.0-1-generic", "6.8.0-31-generic", "6.8.0-4-generic", "5.15.0"]
+    assert sorted(found, key=lambda v: kernels.order_key((v,))) == \
+        ["5.15.0", "6.8.0-4-generic", "6.8.0-31-generic", "6.10.0-1-generic"]
+    # Values of different kinds, and several axis parts, still order without error.
+    two = Projection(DEFAULT, ["/coordinates/workload/parameters/role", "/coordinates/workload/parameters/size"],
+                     profile="test/two-factor/v1", paths={"/provenance/subject_tree": "match"})
+    points = [("variant", 100), ("baseline", 1000), ("baseline", 20), ("variant", "x"), ("baseline", {"n": 1})]
+    assert sorted(points, key=two.order_key) == \
+        [("baseline", 20), ("baseline", 1000), ("baseline", {"n": 1}), ("variant", 100), ("variant", "x")]
+
+
 def test_null_never_equals_anything():
     """Schema §4.3: two results with a null fact share no series."""
     nulls = []

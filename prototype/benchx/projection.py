@@ -225,8 +225,32 @@ class Projection:
     def order_key(self, point_axis: tuple) -> tuple:
         """A sort key for a point: none for a revision axis, which the
         prototype orders by time since it has no revision graph (schema §4.1);
-        otherwise the axis value's canonical form."""
-        return () if self.axis == ["/revision/key"] else (canonical(list(point_axis)).decode(),)
+        otherwise the axis values in natural order (`axis_order`)."""
+        return () if self.axis == ["/revision/key"] else tuple(axis_order(value) for value in point_axis)
+
+
+_DIGITS = re.compile(r"(\d+)")
+
+
+def axis_order(value) -> tuple:
+    """A sort key for one axis value: numbers by value, strings in natural
+    order so that versions and sizes sort as people read them (`6.8` before
+    `6.10`, `size-20` before `size-100`), then anything else by its canonical
+    form, and a missing value last. Every key starts with a rank for its kind,
+    so values of different kinds never compare directly."""
+    if value is None:
+        return (4,)
+    if isinstance(value, bool):
+        return (0, value)
+    if isinstance(value, (int, float)):
+        return (1, value)
+    if isinstance(value, str):
+        # re.split with a group alternates text and digits, so equal positions
+        # always hold the same type; the string itself breaks ties such as `07`
+        # against `7`.
+        parts = _DIGITS.split(value)
+        return (2, tuple(int(p) if i % 2 else p for i, p in enumerate(parts)), value)
+    return (3, canonical(value).decode())
 
 
 def reported_coordinates(doc: dict) -> dict:
