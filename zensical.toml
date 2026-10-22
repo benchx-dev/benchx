@@ -85,6 +85,8 @@ features = [
   "content.code.copy",
   "navigation.footer",
   "navigation.sections",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
   "navigation.top",
   "search.highlight",
   "search.suggest",
