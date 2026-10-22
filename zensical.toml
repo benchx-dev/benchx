@@ -10,9 +10,9 @@
 [project]
 site_name = "benchx"
 site_description = "A schema-first design for continuous benchmarking"
-site_url = "https://rok.github.io/benchx/"
-repo_url = "https://github.com/rok/benchx"
-repo_name = "rok/benchx"
+site_url = "https://benchx-dev.github.io/benchx/"
+repo_url = "https://github.com/benchx-dev/benchx"
+repo_name = "benchx-dev/benchx"
 edit_uri = "edit/main/docs/"
 copyright = "Copyright &copy; benchx contributors"
 

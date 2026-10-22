@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS = ROOT / "schemas"
 DOCS = ROOT / "docs"
-REPO_URL = "https://github.com/rok/benchx"  # keep in step with repo_url in zensical.toml
+REPO_URL = "https://github.com/benchx-dev/benchx"  # keep in step with repo_url in zensical.toml
 URN = re.compile(r"^urn:benchx:schema:(?P<name>[a-z0-9-]+):(?P<version>[0-9.]+)(?:#(?P<frag>.*))?$")
 
 
