@@ -1,0 +1,119 @@
+# Documentation site, built with Zensical (https://zensical.org).
+#
+#   python tools/gen_docs.py        # generate docs/index.md, docs/prototype.md, docs/schemas/
+#   zensical serve                  # preview at http://127.0.0.1:8000
+#   zensical build --strict --clean # what CI runs
+#
+# The generated pages are gitignored; run the generator again after changing
+# a schema, the README, or the prototype README.
+
+[project]
+site_name = "benchx"
+site_description = "A schema-first design for continuous benchmarking"
+site_url = "https://rok.github.io/benchx/"
+repo_url = "https://github.com/rok/benchx"
+repo_name = "rok/benchx"
+edit_uri = "edit/main/docs/"
+copyright = "Copyright &copy; benchx contributors"
+
+docs_dir = "docs"
+site_dir = "site"
+
+# Ablation studies are working notes, not part of the published design;
+# requirements.txt is build tooling.
+exclude_docs = """
+*-ablation.md
+requirements.txt
+"""
+
+nav = [
+  { "Home" = "index.md" },
+  { "Design" = [
+    { "Overview" = "design/README.md" },
+    { "Benchmark result schema" = "design/benchmark-result-schema.md" },
+    { "System decomposition" = "design/system-decomposition.md" },
+    { "Runner" = "design/runner.md" },
+    { "Runner schemas" = "design/runner-schema.md" },
+    { "Harness adapter" = "design/harness-adapter.md" },
+    { "Benchmark environments" = "design/benchmark-environments.md" },
+    { "Comparator" = "design/comparator.md" },
+    { "Prototype scope" = "design/prototype-scope.md" },
+    { "Prototype design" = "design/prototype-design.md" },
+  ] },
+  { "Schemas" = [
+    { "Overview" = "schemas/index.md" },
+    { "Measurement result" = "schemas/measurement-result.md" },
+    { "Work order" = "schemas/work-order.md" },
+    { "Target description" = "schemas/target-description.md" },
+    { "Target provider request" = "schemas/target-provider-request.md" },
+    { "Environment policy" = "schemas/environment-policy.md" },
+    { "Environment identity" = "schemas/env-identity.md" },
+    { "Observed-context record" = "schemas/observed-context-record.md" },
+    { "Comparison document" = "schemas/comparison-document.md" },
+  ] },
+  { "Use cases" = [
+    { "Overview" = "use-cases/README.md" },
+    { "Template" = "use-cases/UC_NN_TEMPLATE.md" },
+    { "UC-01 Single parametrized benchmark" = "use-cases/UC-01-short-slug.md" },
+    { "UC-02 Variants" = "use-cases/UC-02-variants.md" },
+    { "UC-03 Compare" = "use-cases/UC-03-compare.md" },
+    { "UC-04 Cross-environment" = "use-cases/UC-04-cross-env.md" },
+  ] },
+  { "User stories" = [
+    { "Overview" = "user_stories/README.md" },
+    { "Template" = "user_stories/TEMPLATE.md" },
+    { "Apache Arrow" = "user_stories/apache-arrow.md" },
+    { "Apache Arrow (local)" = "user_stories/apache-arrow-local-benchmarking.md" },
+    { "NumPy" = "user_stories/numpy.md" },
+    { "pandas" = "user_stories/pandas.md" },
+    { "Narwhals" = "user_stories/narwhals.md" },
+    { "OpenBLAS" = "user_stories/openblas_user_stories.md" },
+    { "Array API and accelerators" = "user_stories/array-api-and-accelerators.md" },
+    { "One-off benchmarking" = "user_stories/one-off.md" },
+  ] },
+  { "Prototype" = "prototype.md" },
+]
+
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.theme]
+language = "en"
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+  "search.suggest",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "blue grey"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "blue grey"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+tables = {}
+attr_list = {}
+md_in_html = {}
+admonition = {}
+footnotes = {}
+toc.permalink = true
+toc.toc_depth = 4
+pymdownx.details = {}
+pymdownx.superfences = {}
+pymdownx.highlight = {}
+pymdownx.tabbed.alternate_style = true

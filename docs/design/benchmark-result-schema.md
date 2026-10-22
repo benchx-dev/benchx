@@ -174,7 +174,7 @@ The top-level `source` is the authoritative axis. The subject component with rol
 
 A runner-level **probe** maps to a quantity plus the instrumentation used to acquire it: `GPUTimeProbe` might yield `gpu-time` via CUDA events, `OSSMemoryProbe` yield `peak-rss` via a named OS counter. Probe names are not a schema vocabulary. Comparison context and procedure are open objects; Appendix B lists recommended keys so adapters spell the same warmup, calibration, timer, thread, or cache strategy the same way and land in the same series.
 
-The use cases in [`docs/use-cases/`](../use-cases/) and their [template](../use-cases/UC_NN_TEMPLATE.md) reason in four coordinates. They map onto this schema as follows; note that the template's "environment" includes dependency versions, which are pinned subject components here, while `environment` in this document means the host.
+The use cases in [`docs/use-cases/`](../use-cases/README.md) and their [template](../use-cases/UC_NN_TEMPLATE.md) reason in four coordinates. They map onto this schema as follows; note that the template's "environment" includes dependency versions, which are pinned subject components here, while `environment` in this document means the host.
 
 | Use-case coordinate | Schema placement |
 |---|---|
@@ -490,7 +490,7 @@ Results carry facts; a **profile** is a comparator-time check that a set of resu
 |---|---|---|---|
 | `single-run` ([UC-01](../use-cases/UC-01-short-slug.md)) | workload parameters | comparison context | none beyond attempt integrity |
 | `variants` ([UC-02](../use-cases/UC-02-variants.md)) | one or more workload parameters chosen by the caller, `parameters.role` by default | subject tree id, subject configuration, environment, comparison context, every other workload parameter | equal attempt counts per side; sides alternate by `procedure.slot` |
-| `revisions` ([UC-03](../use-cases/UC_03_compare.md)) | subject tree id | workload variant, subject configuration, environment, comparison context | equal attempt counts per side; sides alternate by `procedure.slot`; each side has exactly one tree id and the two differ; every result of both sides is `clean` (`subject_dirty` and `benchmark_dirty`; `dirty` and `unknown` both fail), invariant `clean-tree` |
+| `revisions` ([UC-03](../use-cases/UC-03-compare.md)) | subject tree id | workload variant, subject configuration, environment, comparison context | equal attempt counts per side; sides alternate by `procedure.slot`; each side has exactly one tree id and the two differ; every result of both sides is `clean` (`subject_dirty` and `benchmark_dirty`; `dirty` and `unknown` both fail), invariant `clean-tree` |
 | `environments` ([UC-04](../use-cases/UC-04-cross-env.md)) | one pinned component or subject configuration, named by `labels` | subject revision, workload variant, host environment, comparison context | exactly two label values whose reported coordinates differ; equal attempt counts per label; sides alternate by `procedure.slot` |
 | `cross-machine` (template example, pending a use case) | environment identity | subject tree id, workload variant, subject configuration | each side references an anchor result from the same run via `provenance.references` |
 

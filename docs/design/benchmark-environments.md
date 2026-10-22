@@ -2,7 +2,7 @@
 
 **Status:** Draft for review
 
-**Companion to:** `benchmark-result-schema.md` §4.2 (field placement; where this document and the schema differ, the schema wins), `harness-adapter.md` §3 (the context document), `runner.md`, [`docs/user_stories/`](../user_stories/), [`docs/use-cases/`](../use-cases/)
+**Companion to:** `benchmark-result-schema.md` §4.2 (field placement; where this document and the schema differ, the schema wins), `harness-adapter.md` §3 (the context document), `runner.md`, [`docs/user_stories/`](../user_stories/README.md), [`docs/use-cases/`](../use-cases/README.md)
 
 **Author:** Rok Mihevc
 

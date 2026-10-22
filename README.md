@@ -42,6 +42,21 @@ allow all of them.
 - `prototype/` -- an in-progress implementation.
 - `prototype/examples/` -- worked examples of benchmarking setup(s).
 
+## Documentation site
+
+The design documents, use cases, user stories, and a reference page per JSON
+schema are published as a site built with [Zensical](https://zensical.org).
+To preview it locally:
+
+```
+uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
+uv run --with-requirements docs/requirements.txt zensical serve
+```
+
+`tools/gen_docs.py` generates the landing page, the prototype page, and the
+schema reference pages into `docs/` (those paths are gitignored); `zensical.toml`
+configures the site, and `.github/workflows/docs.yml` builds and deploys it.
+
 ## Status
 
 Pre-alpha. The main goal at this stage is to get the schema and the component

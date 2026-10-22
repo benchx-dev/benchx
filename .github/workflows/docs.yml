@@ -1,0 +1,64 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "schemas/**"
+      - "tools/gen_docs.py"
+      - "zensical.toml"
+      - "README.md"
+      - "prototype/README.md"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "schemas/**"
+      - "tools/gen_docs.py"
+      - "zensical.toml"
+      - "README.md"
+      - "prototype/README.md"
+      - ".github/workflows/docs.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Generate derived pages (landing page, prototype, schema reference)
+        run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py
+
+      - name: Build site
+        run: uv run --python 3.12 --with-requirements docs/requirements.txt zensical build --strict --clean
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Deploys from the same repository. Enable Pages with source "GitHub
+  # Actions" in the repository settings; no deploy token is needed.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
