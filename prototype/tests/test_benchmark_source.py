@@ -61,7 +61,7 @@ def bench(subject, suite, run_key, *extra):
 
 
 def result(run_key):
-    path = next(p for p in sorted((RESULTS / run_key).glob("*.json")) if not p.name.startswith("workorder-"))
+    path = next(p for p in sorted((RESULTS / run_key).glob("*_wall-time.json")))
     document = json.loads(path.read_text())
     assert core.check(document, "measurement-result") == []
     return document
@@ -123,7 +123,7 @@ def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_su
     bench(subject, loose_suite, "e2")
     after = result("e2")
     assert before["provenance"]["benchmark_tree"] != after["provenance"]["benchmark_tree"]
-    series = Store("store.parquet").series()
+    series = Store("store.parquet").series(quantity="wall-time")
     assert len(series) == 1
 
 
