@@ -67,7 +67,7 @@ def environment() -> dict:
         identity["cpu"] = model
     if cores := os.cpu_count():
         identity["cores"] = cores
-    return {"schema": "machine/v1", "identity": identity,
+    return {"schema_version": "machine/v1", "identity": identity,
             "system": {"architecture": platform.machine()}}
 
 

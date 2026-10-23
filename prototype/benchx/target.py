@@ -82,7 +82,7 @@ def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
     stderr is the provider's to use (progress, build output) and goes straight
     to the user's terminal. A nonzero exit is the failure report.
     """
-    request = {"schema_version": "benchx/target-provider-request/0.1.0", "operation": operation,
+    request = {"schema_version": core.catalog.TARGET_PROVIDER_REQUEST, "operation": operation,
                "source_ref": source_ref}
     if configuration:
         request["configuration"] = configuration

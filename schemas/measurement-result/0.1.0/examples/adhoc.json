@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": "benchx/measurement-result/0.1.0",
   "producer": {
     "name": "example.org/benchx-cli",
     "version": "0.1.0",
@@ -58,7 +58,7 @@
       }
     },
     "environment": {
-      "schema": "local/v1",
+      "schema_version": "local/v1",
       "identity": {
         "hostname": "rok-laptop"
       },

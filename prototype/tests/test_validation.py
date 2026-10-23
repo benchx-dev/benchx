@@ -35,13 +35,13 @@ def test_result_schema_is_present():
 
 
 def test_lookup_is_cached():
-    assert catalog.lookup("measurement-result", 5) is catalog.lookup(
-        "measurement-result", 5
+    assert catalog.lookup("measurement-result", "benchx/measurement-result/0.1.0") is catalog.lookup(
+        "measurement-result", "benchx/measurement-result/0.1.0"
     )
 
 
 def test_lookup_of_missing_schema_is_none():
-    assert catalog.lookup("measurement-result", 4) is None
+    assert catalog.lookup("measurement-result", "benchx/measurement-result/0.0.1") is None
 
 
 @pytest.mark.parametrize(
@@ -73,7 +73,7 @@ def test_finds_result_schema(adhoc):
     [
         ({"producer": {}}, "measurement-result", (), "no schema_version field"),
         (
-            {"comparison_version": 1},
+            {"x": 1},
             "measurement-result",
             (),
             "expected a measurement-result",
@@ -88,19 +88,19 @@ def test_finds_result_schema(adhoc):
             {"schema_version": True},
             "measurement-result",
             ("schema_version",),
-            "must be an integer or a string",
+            "must be a string",
         ),
         (
-            {"schema_version": 4},
+            {"schema_version": 5},
             "measurement-result",
             ("schema_version",),
-            "no schema for measurement-result version 4",
+            "must be a string",
         ),
         (
-            {"comparison_version": 2},
+            {"schema_version": "benchx/comparison-document/9.0.0"},
             "comparison-document",
-            ("comparison_version",),
-            "no schema for comparison-document version 2",
+            ("schema_version",),
+            "no schema for comparison-document version 'benchx/comparison-document/9.0.0'",
         ),
         (
             {"schema_version": "benchx/work-order/9.0.0"},

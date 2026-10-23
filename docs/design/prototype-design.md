@@ -178,7 +178,7 @@ criterion 1 holds by construction.
 
 ```json
 {
-  "comparison_version": 1,
+  "schema_version": "benchx/comparison-document/0.1.0",
   "mode": "run",
   "run_key": "urn:uuid:9b2e4f1a-…",
   "profile": "environments",

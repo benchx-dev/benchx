@@ -14,7 +14,7 @@ import math
 import statistics
 
 from . import identity
-from .core import canonical
+from .core import canonical, catalog
 from .projection import Projection, get
 from .store import store_project
 
@@ -95,7 +95,7 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         raise CompareError(f"no results for run {run_key!r}")
     naming = projection.axis[0]
     varying = _dotted(naming)
-    doc = {"comparison_version": 1, "mode": "run", "run_key": run_key, "profile": profile,
+    doc = {"schema_version": catalog.COMPARISON_DOCUMENT, "mode": "run", "run_key": run_key, "profile": profile,
            "varying": varying, "baseline": baseline, "pairing": "procedure.round",
            "method": {**METHOD, "configuration": {"k": k, "min_rounds": min_rounds}},
            "estimator": dict(identity.MEDIAN), "identity_schema": projection.identity_schema,

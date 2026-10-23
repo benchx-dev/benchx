@@ -20,7 +20,7 @@
   "properties": {
     "schema_version": {
       "description": "Message contract version this object conforms to.",
-      "const": 5
+      "const": "benchx/measurement-result/0.1.0"
     },
     "producer": {
       "description": "Stable, namespaced identity of the adapter or harness that produced this message, plus its software and mapping versions. Only the name is part of the idempotency key.",
@@ -135,9 +135,9 @@
           "description": "Host or allocation shared by every result of the attempt.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["schema", "identity"],
+          "required": ["schema_version", "identity"],
           "properties": {
-            "schema": {
+            "schema_version": {
               "description": "Identity schema that defines which identity fields exist and how they are hashed.",
               "$ref": "#/$defs/token"
             },

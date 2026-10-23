@@ -232,7 +232,7 @@ def run(order_path, out_dir) -> dict:
                 subject["configuration"] = configuration
             key = ingest_key(order["run_key"], case, parameters, output["quantity"]["name"], slot)
             document = {
-                "schema_version": 5,
+                "schema_version": core.catalog.MEASUREMENT_RESULT,
                 "producer": PROBE_PRODUCER if condition else adapter.PRODUCER,
                 "ingest_key": key,
                 "attempt_key": attempt_key,

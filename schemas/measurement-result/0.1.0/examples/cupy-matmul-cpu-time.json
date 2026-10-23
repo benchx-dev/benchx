@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": "benchx/measurement-result/0.1.0",
   "producer": {
     "name": "example.org/cupyx-adapter",
     "version": "1.3.0",
@@ -58,7 +58,7 @@
       }
     },
     "environment": {
-      "schema": "gpu-host/v1",
+      "schema_version": "gpu-host/v1",
       "identity": {
         "runner": "gpu-01",
         "cpu": "AMD EPYC 9354",

@@ -18,11 +18,10 @@ Kind = Literal[
 def find_schema(
     data: dict[str, Any], kind: Kind
 ) -> tuple[Draft202012Validator | None, list[SchemaNotFound]]:
-    if kind == "comparison-document":
-        field = "comparison_version"
-    elif (
+    if (
         kind == "measurement-result"
         or kind == "work-order"
+        or kind == "comparison-document"
         or kind == "target-description"
         or kind == "target-provider-request"
     ):
@@ -35,9 +34,8 @@ def find_schema(
         return None, [SchemaNotFound(reason=reason)]
     version = data[field]
 
-    # bool is a subclass of int.
-    if not isinstance(version, (int, str)) or isinstance(version, bool):
-        reason = "version must be an integer or a string"
+    if not isinstance(version, str):
+        reason = "version must be a string"
         return None, [SchemaNotFound(path=(field,), reason=reason)]
 
     validator = catalog.lookup(kind, version)

@@ -63,7 +63,8 @@ def check(data: dict[str, Any], kind: Kind) -> Sequence[DocumentError]:
 
 def check_precision(precision: dict[str, Any]) -> Sequence[DocumentError]:
     """A work order's precision block on its own, as a config file holds it."""
-    validator = catalog.fragment("work-order", "0.1.0", "/properties/precision")
+    release = catalog.release("work-order", catalog.WORK_ORDER)
+    validator = catalog.fragment("work-order", release, "/properties/precision")
     if validator is None:
-        return [SchemaNotFound(reason="no schema for work-order release 0.1.0")]
+        return [SchemaNotFound(reason=f"no schema for work-order release {release}")]
     return list(validation.check(precision, validator))
