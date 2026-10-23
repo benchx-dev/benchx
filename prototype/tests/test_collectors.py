@@ -85,7 +85,7 @@ def test_a_name_may_not_shadow_other_system_facts(tmp):
 
 
 def test_comparison_shows_structured_how_built_as_json_text():
-    document = {"provenance": {"info": {"how_built": {"b": 1, "a": {"c": 2}}}}}
+    document = {"coordinates": {"environment": {}}, "provenance": {"info": {"how_built": {"b": 1, "a": {"c": 2}}}}}
     assert compare._declared(document)["how_built"] == '{"a":{"c":2},"b":1}'
 
 
@@ -154,7 +154,7 @@ def configure(root, **collector):
 
 def result_of(run_key):
     from pathlib import Path
-    path = next(p for p in sorted(Path("results", run_key).glob("*.json")) if not p.name.startswith("workorder-"))
+    path = next(p for p in sorted(Path("results", run_key).glob("*_wall-time.json")))
     return json.loads(path.read_text())
 
 
