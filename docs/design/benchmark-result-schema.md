@@ -52,12 +52,14 @@ The common operations are to find a series, order its results by revision, plot 
 | **Workload** | Named benchmark operation before its parameter domain is expanded. |
 | **Parameter assignment** | One concrete value for each parameter of a workload, such as `{"size": 100}` from a domain of `size = [10, 100, 1000]`. |
 | **Workload variant** | A workload plus one parameter assignment. |
+| **Protocol** | How the subject is exercised and measured: protocol version, timer, warmup, calibration, and similar requested settings. A coordinate (§4.2); what the harness then did is `procedure`. |
 | **Subject** | Implementation or system under test. It may contain several named components; one source is the revision axis. |
 | **Quantity** | Named scalar output with a canonical unit, such as `wall-time` in `s` or `peak-rss` in `By`. An open, project-extensible vocabulary (§4.4). Canonical units use UCUM when representable. Part of the measurement, not a coordinate. |
 | **Estimator** | Rule producing a scalar estimate, such as mean, median, minimum, slope, a percentile, a function of several input quantities, or a source-defined value. A series dimension chosen by project configuration, separately from the projection; reported only inside estimate summaries, never as a coordinate. |
 | **Reported coordinates** | Producer-reported facts describing what was measured and under which conditions, fingerprinted before any policy is applied. |
 | **Condition measurement** | A result for a state the system passes through during an attempt, such as temperature or load, sharing the measurand's `attempt_key` and marked `measurement.kind: condition`; an influence quantity, in metrology terms. Never a coordinate. |
 | **Projection** | A function from reported coordinates to series: it names the axis a series follows, selects the subset that must match, and normalizes their values, for example canonical source URIs or a version mapped to a declared line (§4.3). The **identity policy** is a project's default projection, with the subject revision as its axis; other projections reuse its roles with a different axis. |
+| **Role** | What a projection does with a fact: `match`, `normalize`, or `ignore` (§4.3). Not to be confused with a subject component's `role` (`primary` or a pinned name), a compound estimator's input roles (§4.5), or the conventional `role` workload parameter (§5.5). |
 | **Comparison identity** | The part of the reported coordinates a projection requires to match. |
 | **Series** | Derived comparison-time construct: one comparison identity × one quantity × one estimator under one projection. It exists from its first point; a comparison between points is a separate document (§5.5). Materialized as an index; never declared by producers. |
 | **Observation** | One measured value produced by a repetition after declared normalization. |
