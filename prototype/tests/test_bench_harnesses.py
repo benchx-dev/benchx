@@ -181,8 +181,8 @@ def test_a_bare_command_takes_everything_from_the_file(build, tmp, capsys):
         "demo", ["wall-time", "cpu-time"], 3)
     assert order["environment_variables"] == {"DEMO_THREADS": "1"}
     assert order["suites"][0] == {"adapter": "google-benchmark", "suite": "demo-bench", "filter": "^(BM_Quiet/1024)$"}
-    names = {(d["coordinates"]["workload"]["name"], d["coordinates"]["quantity"]["name"])
-             for d in Store(tmp / "store.parquet").documents("f1")}
+    names = {(d["coordinates"]["workload"]["name"], d["measurement"]["quantity"]["name"])
+                 for d in Store(tmp / "store.parquet").documents("f1") if d["measurement"]["quantity"]["name"] != "load-average"}
     assert names == {(QUIET, "wall-time"), (QUIET, "cpu-time")}  # one run, both quantities
     assert {d["project"] for d in Store(tmp / "store.parquet").documents("f1")} == {"demo"}
 
