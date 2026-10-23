@@ -20,7 +20,7 @@
   "properties": {
     "schema_version": {
       "description": "Message contract version this object conforms to.",
-      "const": 6
+      "const": 5
     },
     "producer": {
       "description": "Stable, namespaced identity of the adapter or harness that produced this message, plus its software and mapping versions. Only the name is part of the idempotency key.",

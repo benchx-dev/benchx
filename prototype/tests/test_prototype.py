@@ -435,20 +435,6 @@ def test_reads_files_from_an_older_schema(revisions_run, tmp):
     assert len(store.documents("rev-1")) == 48
 
 
-def test_a_store_of_an_older_result_schema_is_refused(revisions_run, tmp):
-    """No migration in the prototype: a store of v5 results is named, not misread."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    from benchx.store import StoreError
-    store = Store(tmp / "store.parquet")
-    store.ingest_paths([revisions_run])
-    table = pq.read_table(store.path)
-    column = table.schema.get_field_index("schema_version")
-    pq.write_table(table.set_column(column, "schema_version", pa.array([5] * table.num_rows)), store.path)
-    with pytest.raises(StoreError, match="schema version"):
-        store.series()
-
-
 def test_store_keeps_documents_exactly(revisions_run, tmp):
     """The document column is the canonical document, so nothing outside the file is needed."""
     store = Store(tmp / "store.parquet")

@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 5,
   "producer": {
     "name": "example.org/benchmark-adapter",
     "version": "4.0",

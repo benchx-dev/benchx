@@ -17,7 +17,7 @@ from . import config as config_mod
 from . import core, harnesses, orders, runner, session
 from . import target as target_mod
 from .core.validation import Kind
-from .store import Store, StoreError
+from .store import Store
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -429,11 +429,7 @@ def main(argv=None):
         args.functions += extra
     elif extra:
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
-    try:
-        return args.fn(args)
-    except StoreError as e:
-        print(f"bx {args.cmd}: error: {e}", file=sys.stderr)
-        return EXIT_REFUSED
+    return args.fn(args)
 
 
 if __name__ == "__main__":

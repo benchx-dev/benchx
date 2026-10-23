@@ -25,12 +25,6 @@ from .core import loader
 from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, UnitConflict
 from .projection import Projection
 
-SCHEMA_VERSION = 6  # the result schema this store's rows were written under
-
-
-class StoreError(Exception):
-    """The store file cannot be read by this version of benchx."""
-
 # Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
 _ATTEMPT_FIELDS = ("project", "source", "revision", "benchmark")
 _ATTEMPT_COORDINATES = ("workload", "subject", "environment")
@@ -70,14 +64,7 @@ class Store:
     # -- reading -------------------------------------------------------------
 
     def _table(self, columns=None) -> pa.Table | None:
-        if not self.path.exists():
-            return None
-        versions = set(pq.read_table(self.path, columns=["schema_version"]).column("schema_version").to_pylist())
-        if versions - {SCHEMA_VERSION}:
-            # No migration in the prototype: v5 results put the quantity in coordinates.
-            raise StoreError(f"{self.path} holds results of schema version {sorted(versions - {SCHEMA_VERSION})}; "
-                             f"this benchx reads only version {SCHEMA_VERSION}. Move it aside and re-run.")
-        return pq.read_table(self.path, columns=columns)
+        return pq.read_table(self.path, columns=columns) if self.path.exists() else None
 
     def _index(self) -> list[dict]:
         table = self._table(["producer", "ingest_key", "attempt_key", "payload_sha256", "attempt_signature",

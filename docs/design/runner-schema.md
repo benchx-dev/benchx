@@ -214,7 +214,6 @@ All three schemas use the same scheme as `schemas/measurement-result/0.1.0`: sem
 | Work order | `schemas/work-order/0.1.0/` | citing the resolved order from results |
 | Environment policy | `schemas/environment-policy/0.1.0/` | detecting a policy edited without a version bump |
 | Env identity | `schemas/env-identity/0.1.0/` | referenced by `coordinates.environment.schema` |
-| Observed-context record (retired) | `schemas/observed-context-record/0.1.0/` | not hashed — validates the `{value, status, when, source}` shape of one `observed_context` entry (§5.3); referenced by convention, not by a `coordinates` field |
 | Identity policy | `schemas/identity-policy/0.1.0/` | `identity_schema` names the policy and enters `comparison_fingerprint` (`benchmark-result-schema.md` §4.3) |
 
 Orders and policies are hashed the same way the result schema hashes its fingerprints:
@@ -295,7 +294,6 @@ The runner also emits sibling results under the same `attempt_key`: `load-averag
 1. **Multi-node benchmarks.** 0.1.0 targets one node per order. Should a later version allow a node group (`target.nodes[]` plus a coordinator role), or should a distributed benchmark stay a harness concern behind a single coordinator runner?
 2. **Who stores resolved orders?** The order doubles as the run manifest, but the runner is store-unaware. Does the runner upload the order as an artifact alongside results, or does the requester (scheduler, workbench) keep it?
 3. **Case listing failure before the plan exists.** §3.2 lets the runner expand `plan` by listing cases from the prebuilt target for harnesses that enumerate them only that way. If listing fails, or the target is unidentifiable, there are no plan entries to attach `error` results to. Does the runner emit a single order-level `target-unavailable` result, and under which workload coordinates?
-4. ~~**Should the observation-record convention move into the result schema?**~~ Superseded: `observed_context` is removed; an unreadable fact is `null` in `environment.system`, an unreadable condition a `skipped` measurement.
-5. **Sampling overhead.** Sampling temperature and frequency during execution can itself disturb the measurement. What default interval (e.g. 1 s) and core placement keep it negligible, and should the policy be able to turn sampling off?
-6. **Delivery in the order?** This draft makes the result destination an invocation argument. Are there cases, such as CI, where the order should carry it?
-7. **Refusal as results.** §4.2 turns a policy refusal into one `error` result per plan entry, which goes beyond `runner.md` §6's "refused before execution". Keep that, or report refusals only to the requester?
+4. **Sampling overhead.** Sampling temperature and frequency during execution can itself disturb the measurement. What default interval (e.g. 1 s) and core placement keep it negligible, and should the policy be able to turn sampling off?
+5. **Delivery in the order?** This draft makes the result destination an invocation argument. Are there cases, such as CI, where the order should carry it?
+6. **Refusal as results.** §4.2 turns a policy refusal into one `error` result per plan entry, which goes beyond `runner.md` §6's "refused before execution". Keep that, or report refusals only to the requester?
