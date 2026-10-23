@@ -6,8 +6,6 @@
 
 **Review date:** 2026-09-11
 
-**Revision (2026-10-19, draft for review):** a result separates coordinates, fixed for the attempt, from measurements, what it produced. `comparison_context` becomes `protocol`, `environment.metadata` becomes `environment.system`, and `observed_context` is removed: system facts such as kernel and glibc join `environment.system`, and conditions such as temperature become sibling results. Whether a coordinate splits history is decided by a projection; the project's identity policy (`schemas/identity-policy/0.1.0`) is its default one. See §1, §4.2, §4.3, and §9.
-
 ## 1. Purpose
 
 This document defines the minimum model needed to ingest, compare, and migrate computing benchmark results without inventing statistical meaning. Detection, alerts, thresholds, scheduling, run lifecycle, and environment setup are out of scope.
