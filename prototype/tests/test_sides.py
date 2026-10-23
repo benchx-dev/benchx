@@ -15,7 +15,7 @@ def description(path, kind="working_tree", **target):
 
 def provided(monkeypatch, desc):
     """Stand in for the provider: every @spec resolves to `desc`."""
-    monkeypatch.setattr(session.target_mod, "resolve", lambda spec, operation: desc)
+    monkeypatch.setattr(session.target_mod, "resolve", lambda spec, operation, provider=None: desc)
 
 
 def executable(path):
@@ -68,7 +68,7 @@ def test_a_provided_working_tree_is_its_own_source(tree, monkeypatch):
 def test_a_working_tree_order_is_valid(tree, monkeypatch):
     provided(monkeypatch, description(tree))
     side = session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
-    order = session._order(side, harness=harnesses.GOOGLE_BENCHMARK, suite=SUITE, filter=None, quantity="wall-time",
+    order = session._order(side, harness=harnesses.GOOGLE_BENCHMARK, suite=SUITE, filter=None, quantities=["wall-time"],
                            precision={"repetitions": 3}, environment_variables=None, project=None, run_key="rk",
                            source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
     assert order["target"]["kind"] == "working_tree"

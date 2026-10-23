@@ -1,11 +1,14 @@
 """bx: a thin command line over the benchx package (prototype-design.md §1).
 
-The local store is always ~/.benchx/store.parquet ($BENCHX_HOME relocates
-benchx's home). `bx run` writes result files and ingests them there.
+Every command reads the project's `benchx.conf.json` (benchx.config), found from the
+working directory upward. The local store and the result files are in the
+project root unless that file says otherwise, or `$BENCHX_HOME` relocates the store. A command-line argument wins over
+the file, and the file over a built-in default.
 """
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -14,7 +17,7 @@ from typing import get_args
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import core, harnesses, orders, runner, session
+from . import core, harnesses, orders, runner, session, snapshot
 from . import target as target_mod
 from .core.validation import Kind
 from .store import Store
@@ -30,20 +33,35 @@ def _refused(error: runner.Refused) -> int:
     return EXIT_REFUSED
 
 
+def _load(command):
+    """The project's configuration, or None (after saying why) when it is unusable.
+    The store and the results directory are left out of every tree identity."""
+    try:
+        cfg = config_mod.load()
+    except config_mod.ConfigError as e:
+        print(f"bx {command}: error: {e}", file=sys.stderr)
+        return None
+    snapshot.ignore(cfg.store_path, cfg.results_dir)
+    return cfg
+
+
 def cmd_run(args):
     """Run one order, write its result files, and deliver them to the local
     store. The runner itself stays store-unaware (runner.md §2 principle 6);
     this command composes it with ingest, as the workbench does."""
-    out = Path(args.out) if args.out else Path("results")
+    if (cfg := _load("run")) is None:
+        return EXIT_REFUSED
+    out = Path(args.out) if args.out else cfg.results_dir
+    snapshot.ignore(cfg.store_path, cfg.results_dir, out)
     try:
-        summary = runner.run(args.order, out)
+        summary = runner.run(args.order, out, allow_collectors=args.allow_collectors)
     except runner.Refused as e:
         return _refused(e)
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
     if args.no_ingest:
         return EXIT_OK
-    store = Store()
+    store = Store(cfg.store_path)
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
 
@@ -59,46 +77,86 @@ def _environment(items) -> dict:
     return env
 
 
-def _bench_target(args) -> tuple[str, str, str | None]:
-    """The target, suite and adapter `bx bench` runs. With `--suite` they are as given.
-    Without it, the target is a Python module (the shorthand `bx bench MODULE.py
-    [FUNCTION ...]`): its checkout is the target, its path in it the suite, and the
-    harness pyperf."""
-    if args.suite:
+def _bench_target(args) -> tuple[str, str | None, str | None]:
+    """The target, the suite it forces (or None: --suite, then the file's), and the
+    adapter it forces. With `--suite` the target is as given. Without it, the target
+    is a Python module (the shorthand `bx bench MODULE.py [FUNCTION ...]`): its
+    checkout is the target, its path in it the suite, and the harness pyperf."""
+    if args.suite or not args.target.endswith(".py"):
         if args.tree:
             raise UsageError("--tree belongs to `bx bench MODULE.py`; give the tree as the TARGET with --suite")
-        return args.target, args.suite, args.adapter
-    if not args.target.endswith(".py"):
-        raise UsageError("give --suite, or a Python file to benchmark")
+        return args.target, None, None
     if args.adapter not in (None, "pyperf"):
         raise UsageError(f"a Python file is benchmarked with pyperf, not {args.adapter}")
     target, suite = bench_mod.module_target(args.target, args.tree)
     return target, suite, "pyperf"
 
 
+def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
+    """The settings `bx bench` and `bx compare` share, each from the command line,
+    else the file, else its default (config.Config.pick); ConfigError when a
+    required one has none. The file's adapter block belongs to the adapter it
+    names, so naming another is refused."""
+    block = cfg.adapter
+    given = forced_adapter or args.adapter
+    if given and block.get("name") and given != block["name"]:
+        raise config_mod.ConfigError(f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
+                                     "and its suite and precision belong to that harness")
+    quantities = config_mod.parse_quantities(args.quantity) if args.quantity else block.get("quantities", ["wall-time"])
+    if args.project and args.no_project:
+        raise UsageError("give --project or --no-project, not both")
+    timeouts = cfg.section("timeouts")
+    return {
+        "adapter": cfg.pick(given, block.get("name"), flag="--adapter", key="adapter.name"),
+        "suite": cfg.pick(forced_suite or args.suite, block.get("suite"), flag="--suite", key="adapter.suite"),
+        "flags": {name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+        "file_precision": block.get("precision"),
+        "quantities": quantities,
+        "filter": args.filter,
+        "environment_variables": {**cfg.section("environment_variables"), **_environment(args.env)},
+        "project": None if args.no_project else cfg.pick(args.project, cfg.data.get("project"), None,
+                                                          flag="--project", key="project"),
+        "run_key": args.run_key,
+        "out": args.out,
+        "source_uri": args.source_uri or cfg.section("source").get("uri"),
+        "build": not args.no_build,
+        "provider": cfg.provider,
+        "collectors": cfg.collectors,
+        "results_dir": cfg.results_dir,
+        "case_s": cfg.pick(getattr(args, "case_timeout", None), timeouts.get("case_s"), orders.CASE_TIMEOUT_S,
+                           flag="--case-timeout", key="timeouts.case_s"),
+        "order_s": timeouts.get("order_s", orders.ORDER_TIMEOUT_S),
+        "config_path": cfg.path,
+    }
+
+
+def _needs_provider(cfg, *targets):
+    for spec in targets:
+        if spec.startswith("@"):
+            cfg.require_provider(spec)
+
+
 def cmd_bench(args):
     """Run one target once, as one order of a comparison session: resolve the target,
     build the order from the harness defaults, config file, flags and environment
     variables, run it, deliver, print a table."""
+    if (cfg := _load("bench")) is None:
+        return EXIT_REFUSED
     try:
-        env = _environment(args.env)
         if args.functions and args.filter:
             raise UsageError("give case names or --filter, not both")
-        target, suite, adapter = _bench_target(args)
-    except UsageError as e:
+        target, forced_suite, forced_adapter = _bench_target(args)
+        settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
+        _needs_provider(cfg, target)
+    except (UsageError, config_mod.ConfigError, bench_mod.SessionError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    except bench_mod.SessionError as e:
-        print(f"bx bench: error: {e}", file=sys.stderr)
-        return EXIT_REFUSED
-    store = None if args.no_ingest else Store()
+    settings["filter"] = harnesses.exact_filter(args.functions) or settings["filter"]
+    snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
+    store = None if args.no_ingest else Store(cfg.store_path)
     try:
-        summary = session.bench_target(
-            target, suite=suite, store=store, adapter=adapter, flags={name: getattr(args, name) for name in harnesses.FLAG_NAMES},
-            environment_variables=env, filter=harnesses.exact_filter(args.functions) or args.filter,
-            quantity=args.quantity or "wall-time", project=args.project, run_key=args.run_key, out=args.out,
-            source_uri=args.source_uri, case_s=args.case_timeout, build=not args.no_build,
-            progress=lambda message: print(message, file=sys.stderr))
+        summary = session.bench_target(target, store=store, progress=lambda message: print(message, file=sys.stderr),
+                                       **settings)
     except (session.SessionError, config_mod.ConfigError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
@@ -113,13 +171,50 @@ def cmd_bench(args):
 
 
 def cmd_config(args):
-    try:
-        path = config_mod.write_template(args.dir)
-    except config_mod.ConfigError as e:
-        print(f"bx config: error: {e}", file=sys.stderr)
+    if args.action == "init":
+        try:
+            path = config_mod.write_template(args.dir, args.adapter)
+        except config_mod.ConfigError as e:
+            print(f"bx config: error: {e}", file=sys.stderr)
+            return EXIT_REFUSED
+        print(f"wrote {path}")
+        return EXIT_OK
+    if (cfg := _load("config")) is None:
         return EXIT_REFUSED
-    print(f"wrote {path}")
+    print(f"file  {cfg.where}\nroot  {cfg.root}")
+    for key, value, source in _resolved(cfg):
+        print(f"{key:<26} {value}  ({source})")
     return EXIT_OK
+
+
+def _resolved(cfg):
+    """What the file and the built-in defaults give, before any command-line argument:
+    (key, value, 'file' | 'default' | 'unset')."""
+    def row(key, value, default=None):
+        if value is not None:
+            return key, json.dumps(value), "file"
+        return key, json.dumps(default) if default is not None else "-", "default" if default is not None else "unset"
+
+    block, timeouts, compare = cfg.adapter, cfg.section("timeouts"), cfg.section("compare")
+    yield row("project", cfg.data.get("project"))
+    yield row("source.uri", cfg.section("source").get("uri"))
+    yield row("provider.command", cfg.section("provider").get("command"))
+    yield row("adapter.name", block.get("name"))
+    yield row("adapter.suite", block.get("suite"))
+    yield row("adapter.quantities", block.get("quantities"), ["wall-time"])
+    if block.get("name"):
+        resolved = harnesses.get(block["name"]).precision({}, block.get("precision"))
+        yield "adapter.precision", json.dumps(resolved), "file + default" if block.get("precision") else "default"
+    yield row("environment_variables", cfg.data.get("environment_variables"), {})
+    yield row("timeouts.case_s", timeouts.get("case_s"), orders.CASE_TIMEOUT_S)
+    yield row("timeouts.order_s", timeouts.get("order_s"), orders.ORDER_TIMEOUT_S)
+    store_from = "$BENCHX_HOME" if os.environ.get(config_mod.HOME_ENV) else "file" if "store" in cfg.section("paths") else "default"
+    yield "paths.store", str(cfg.store_path), store_from
+    yield "paths.results", str(cfg.results_dir), "file" if "results" in cfg.section("paths") else "default"
+    yield row("compare.profile", compare.get("profile"))
+    yield row("compare.rounds", compare.get("rounds"))
+    yield row("compare.k", compare.get("k"), 3.0)
+    yield row("compare.min_rounds", compare.get("min_rounds"), 3)
 
 
 def _report(outcome):
@@ -134,11 +229,15 @@ def _report(outcome):
 
 
 def cmd_ingest(args):
-    return _report(Store().ingest_paths(args.paths))
+    if (cfg := _load("ingest")) is None:
+        return EXIT_REFUSED
+    return _report(Store(cfg.store_path).ingest_paths(args.paths))
 
 
 def cmd_series(args):
-    for s in Store().series(args.workload, args.quantity):
+    if (cfg := _load("series")) is None:
+        return EXIT_REFUSED
+    for s in Store(cfg.store_path).series(args.workload, args.quantity):
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
@@ -146,7 +245,9 @@ def cmd_series(args):
 
 
 def cmd_history(args):
-    points = Store().history(args.series)
+    if (cfg := _load("history")) is None:
+        return EXIT_REFUSED
+    points = Store(cfg.store_path).history(args.series)
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
@@ -155,7 +256,9 @@ def cmd_history(args):
 
 
 def cmd_head(args):
-    store = Store()
+    if (cfg := _load("head")) is None:
+        return EXIT_REFUSED
+    store = Store(cfg.store_path)
     total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
     if args.json:
         for row in rows:
@@ -183,9 +286,12 @@ def cmd_head(args):
 def cmd_target(args):
     """Ask for a target's description: `describe` only reports, `prepare` may
     build (the provider's own tools do that, never benchx)."""
+    if (cfg := _load("target")) is None:
+        return EXIT_REFUSED
     try:
-        description = target_mod.resolve(args.target, operation=args.operation)
-    except target_mod.TargetError as e:
+        _needs_provider(cfg, args.target)
+        description = target_mod.resolve(args.target, operation=args.operation, provider=cfg.provider)
+    except (target_mod.TargetError, config_mod.ConfigError) as e:
         print(f"cannot {args.operation} {args.target}: {e}", file=sys.stderr)
         return EXIT_REFUSED
     if description is None:
@@ -200,7 +306,7 @@ class UsageError(Exception):
 
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
-_MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project",
+_MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project", "no_project",
                  "run_key", "out", "source_uri", "no_build")
 _READ_ONLY = ("baseline", "results")
 
@@ -219,9 +325,6 @@ def _mode(args) -> str:
             raise UsageError("measure mode takes exactly two targets: BASELINE CONTENDER")
         if wrong := _flags(args, _READ_ONLY):
             raise UsageError(f"{', '.join(wrong)} belongs to read mode (--run)")
-        for need in ("suite", "rounds"):
-            if getattr(args, need) is None:
-                raise UsageError(f"measure mode needs --{need}")
         return "measure"
     if wrong := _flags(args, _MEASURE_ONLY):
         raise UsageError(f"{', '.join(wrong)} belongs to measure mode (two targets)")
@@ -231,55 +334,69 @@ def _mode(args) -> str:
 
 
 def cmd_compare(args):
+    if (cfg := _load("compare")) is None:
+        return EXIT_REFUSED
     try:
         mode = _mode(args)
-    except UsageError as e:
+        policy = _policy(cfg, args)
+    except (UsageError, config_mod.ConfigError) as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    return _measure(args) if mode == "measure" else _read(args)
+    return _measure(cfg, args, policy) if mode == "measure" else _read(cfg, args, policy)
 
 
-def _read(args):
+def _policy(cfg, args) -> dict:
+    """The comparison's own settings: the command line, else `compare` in the file, else the default."""
+    compare = cfg.section("compare")
+    return {
+        "profile": cfg.pick(args.profile, compare.get("profile"), flag="--profile", key="compare.profile"),
+        "k": cfg.pick(args.k, compare.get("k"), 3.0, flag="--k", key="compare.k"),
+        "min_rounds": cfg.pick(args.min_rounds, compare.get("min_rounds"), 3, flag="--min-rounds",
+                               key="compare.min_rounds"),
+    }
+
+
+def _read(cfg, args, policy):
     if args.results:
         with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
             store = Store(Path(tmp) / "store.parquet")
             outcome = store.ingest_paths(args.results)
             if outcome["rejected"]:
                 return _report(outcome)
-            return _compare(store, args)
-    return _compare(Store(), args)
+            return _compare(store, args, policy)
+    return _compare(Store(cfg.store_path), args, policy)
 
 
-def _measure(args):
+def _measure(cfg, args, policy):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = Store()
+    store = Store(cfg.store_path)
     print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
     try:
+        settings = _common(cfg, args)
+        _needs_provider(cfg, *args.targets)
+        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
         label = session.parse_label(args.label) if args.label else None
         doc = session.compare_targets(
-            *args.targets, profile=args.profile, suite=args.suite, rounds=args.rounds, store=store,
-            adapter=args.adapter, flags={name: getattr(args, name) for name in harnesses.FLAG_NAMES},
-            environment_variables=_environment(args.env), filter=args.filter,
-            quantity=args.quantity or "wall-time", project=args.project, label=label, run_key=args.run_key,
-            out=args.out, source_uri=args.source_uri, k=args.k, min_rounds=args.min_rounds,
-            build=not args.no_build, progress=lambda message: print(message, file=sys.stderr))
+            *args.targets, rounds=cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds",
+                                           key="compare.rounds"),
+            store=store, label=label, progress=lambda message: print(message, file=sys.stderr), **policy, **settings)
     except runner.Refused as e:
         return _refused(e)
-    except UsageError as e:
+    except (UsageError, config_mod.ConfigError) as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    except (session.SessionError, compare_mod.CompareError, config_mod.ConfigError) as e:
+    except (session.SessionError, compare_mod.CompareError) as e:
         print(f"cannot compare: {e}", file=sys.stderr)
         return EXIT_REFUSED
     print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
     return EXIT_OK
 
 
-def _compare(store, args):
+def _compare(store, args, policy):
     try:
-        doc = compare_mod.compare(store.documents(args.run), run_key=args.run, profile=args.profile,
-                                  baseline=args.baseline, label=args.label, k=args.k,
-                                  min_rounds=args.min_rounds)
+        doc = compare_mod.compare(store.documents(args.run), run_key=args.run, profile=policy["profile"],
+                                  baseline=args.baseline, label=args.label, k=policy["k"],
+                                  min_rounds=policy["min_rounds"])
     except compare_mod.CompareError as e:
         print(f"cannot compare: {e}", file=sys.stderr)
         return EXIT_REFUSED
@@ -302,12 +419,15 @@ def _add_target_options(parser, command):
     """The options `bx bench` and `bx compare` (measure mode) share: the harness,
     its suite and cases, its precision flags, and where the results go."""
     parser.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
-                        help=f"the harness (default {session.HARNESS.name})")
+                        help="the harness (default: adapter.name; required)")
     parser.add_argument("--suite", help="pyperf: the module's path in the working tree; "
-                                        "google-benchmark: the binary in the build directory")
+                                        "google-benchmark: the binary in the build directory "
+                                        "(default: adapter.suite; required)")
     parser.add_argument("--filter", help="a case filter regex (pyperf: function names; "
                                          "google-benchmark: --benchmark_filter)")
-    parser.add_argument("--quantity", help="wall-time (default); google-benchmark also cpu-time")
+    parser.add_argument("--quantity", metavar="NAMES",
+                        help="comma-separated, collected in one run (default: adapter.quantities, else wall-time); "
+                             "google-benchmark also reports cpu-time")
     parser.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
                         help="set an environment variable for the benchmark (repeatable); "
                              "each becomes a workload parameter")
@@ -318,12 +438,15 @@ def _add_target_options(parser, command):
     parser.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per sample")
     parser.add_argument("--loops", type=int, help="pyperf: fixed calibration, inner loops per value")
     parser.add_argument("--warmups", type=int, help="pyperf: warmup values per process (0: none)")
-    parser.add_argument("--project", help="name a project, so the results join its series; omit for an ad hoc run")
+    parser.add_argument("--project", help="name a project, so the results join its series (default: project)")
+    parser.add_argument("--no-project", action="store_true",
+                        help="an ad hoc run, whatever the file's project says: filed as local/<hostname>")
     parser.add_argument("--run-key", help=f"default: {command}-<UTC timestamp>")
-    parser.add_argument("--out", help="directory for orders and result files (default ./results/RUN_KEY)")
+    parser.add_argument("--out", help="directory for orders and result files (default: RESULTS/RUN_KEY, "
+                                      "RESULTS being paths.results, else ./results in the project root)")
     parser.add_argument("--no-build", action="store_true",
                         help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
-    parser.add_argument("--source-uri", help="the source's URI (default: the checkout's origin remote)")
+    parser.add_argument("--source-uri", help="the source's URI (default: source.uri, else the checkout's origin remote)")
 
 
 def main(argv=None):
@@ -335,6 +458,8 @@ def main(argv=None):
     p.add_argument("--out", help="directory for result files (default ./results)")
     p.add_argument("--no-ingest", action="store_true",
                    help="only write the result files; do not deliver them to the local store")
+    p.add_argument("--allow-collectors", action="store_true",
+                   help="run the order's context collectors: commands the order names (otherwise refused)")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("bench", help="benchmark one target: the single-target form of bx compare",
@@ -351,14 +476,17 @@ def main(argv=None):
     p.add_argument("functions", nargs="*", metavar="FUNCTION", help="exact case names (default: all cases)")
     _add_target_options(p, "bench")
     p.add_argument("--tree", help="the shorthand's tree (default: the module's git checkout or directory)")
-    p.add_argument("--case-timeout", type=float, default=orders.CASE_TIMEOUT_S,
-                   help="seconds before one case is stopped (default %(default)s)")
+    p.add_argument("--case-timeout", type=float,
+                   help=f"seconds before one case is stopped (default: timeouts.case_s, else {orders.CASE_TIMEOUT_S:g})")
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
-    p = sub.add_parser("config", help="manage .benchx/config.json")
-    p.add_argument("action", choices=["init"], help="init: write a template stating pyperf's defaults")
-    p.add_argument("--dir", default=".", help="where to write .benchx/config.json (default .)")
+    p = sub.add_parser("config", help="write or show benchx.conf.json")
+    p.add_argument("action", choices=["init", "show"],
+                   help="init: write a benchx.conf.json stating a harness's defaults; show: what the file and the defaults give")
+    p.add_argument("--dir", default=".", help="init: where to write benchx.conf.json (default .)")
+    p.add_argument("--adapter", choices=sorted(harnesses.HARNESSES), default="pyperf",
+                   help="init: the harness (default %(default)s)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("ingest", help="sweep result files and work orders into the local store")
@@ -386,7 +514,7 @@ def main(argv=None):
 
     p = sub.add_parser("target", help="ask for a target's description (schemas/target-description/0.1.0)",
                        description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
-                                   ".benchx/provider.json, or a build directory holding .benchx-target.json. "
+                                   "benchx.conf.json, or a build directory holding .benchx-target.json. "
                                    "describe only reports a target that exists; prepare may build it.")
     p.add_argument("operation", choices=["describe", "prepare"])
     p.add_argument("target")
@@ -399,9 +527,9 @@ def main(argv=None):
                                    "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
                                    "or @CONFIG[=SOURCE_REF] (the project's target provider).")
     p.add_argument("targets", nargs="*", metavar="TARGET", help="measure mode: BASELINE CONTENDER")
-    p.add_argument("--profile", required=True, choices=["revisions", "environments"])
-    p.add_argument("--k", type=float, default=3.0)
-    p.add_argument("--min-rounds", type=int, default=3)
+    p.add_argument("--profile", choices=["revisions", "environments"], help="default: compare.profile")
+    p.add_argument("--k", type=float, help="noise multiplier (default: compare.k, else 3)")
+    p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 3)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--label", help="read mode: the label that names the sides (environments); "
                                    "measure mode: NAME=BASE,CONTENDER")
@@ -411,7 +539,8 @@ def main(argv=None):
     read.add_argument("--results", nargs="+",
                       help="compare these result directories through a throwaway store, not the local one")
     measure = p.add_argument_group("measure mode")
-    measure.add_argument("--rounds", type=int, help="alternation rounds; each runs both sides once")
+    measure.add_argument("--rounds", type=int,
+                         help="alternation rounds; each runs both sides once (default: compare.rounds)")
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 

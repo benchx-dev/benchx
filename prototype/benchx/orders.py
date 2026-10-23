@@ -25,9 +25,10 @@ def default_run_key(prefix: str) -> str:
     return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
 
-def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quantity: str = "wall-time",
+def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quantities=("wall-time",),
                case_s: float = CASE_TIMEOUT_S, order_s: float = ORDER_TIMEOUT_S, project=None, labels=None,
-               environment_variables=None, round_=None, slot=None) -> dict:
+               environment_variables=None, round_=None, slot=None, benchmark=None,
+               collectors=None) -> dict:
     """One resolved work order. Optional fields that are None or empty are left out.
 
     Raises OrderError when the result is not a valid work order.
@@ -38,14 +39,14 @@ def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quan
         "state": "resolved",
         "suites": [suite],
         "target": target,
-        "quantities": [quantity],
+        "quantities": list(quantities),
         "precision": precision,
         "timeouts": {"case_s": case_s, "order_s": order_s},
         "run_key": run_key,
         "requester": dict(REQUESTER),
         # Placeholder: the runner does not yet cross-check plan against the
         # case list it discovers (runner-schema.md §3.2).
-        "plan": [{"id": "p0", "case": "*", "quantity": quantity}],
+        "plan": [{"id": f"p{i}", "case": "*", "quantity": quantity} for i, quantity in enumerate(quantities)],
     }
     if round_ is not None:
         order["round"] = round_
@@ -57,6 +58,10 @@ def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quan
         order["labels"] = dict(labels)
     if project:
         order["project"] = project
+    if benchmark:
+        order["benchmark"] = benchmark
+    if collectors:
+        order["collectors"] = list(collectors)
     errors = core.check(order, "work-order")
     if errors:
         raise OrderError("; ".join(str(error) for error in errors))
