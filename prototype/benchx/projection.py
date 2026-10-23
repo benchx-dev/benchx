@@ -218,7 +218,7 @@ class Projection:
         return _hash("benchmark-comparison-v1", self.identity_schema.encode(), canonical(projected.identity))
 
     def series_fingerprint(self, projected: Projected, quantity: str, estimator: dict) -> str:
-        return _hash("benchmark-series-v7", self.comparison_fingerprint(projected).encode(), quantity.encode(),
+        return _hash("benchmark-series-v6", self.comparison_fingerprint(projected).encode(), quantity.encode(),
                      _hash("benchmark-estimator-v1", canonical(estimator)).encode())
 
     def order_key(self, point_axis: tuple) -> tuple:
@@ -258,4 +258,4 @@ def reported_coordinates(doc: dict) -> dict:
 
 
 def reported_coordinates_fingerprint(doc: dict) -> str:
-    return _hash("benchmark-reported-coordinates-v2", canonical(reported_coordinates(doc)))
+    return _hash("benchmark-reported-coordinates-v1", canonical(reported_coordinates(doc)))

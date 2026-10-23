@@ -187,7 +187,7 @@ criterion 1 holds by construction.
   "contender": "hardened",
   "method": {"name": "benchx/paired-relative", "version": "v1",
              "estimator": "median", "k": 3.0, "min_rounds": 3},
-  "identity_schema": "benchx/profile/environments/v1+benchx/prototype-identity/v2",
+  "identity_schema": "benchx/profile/environments/v1+benchx/prototype-identity/v1",
   "local_only": true,
   "units": [
     {"workload": {"name": "TakeChunked…/4194304/2", "parameters": {}},
@@ -362,7 +362,7 @@ Series need an identity policy and a list of estimators (schema §4.3, §4.5).
 The prototype has one of each, in code (`benchx/identity.py`), and keeps them
 apart, so adding an estimator never renames the policy:
 
-- **Identity policy** `benchx/prototype-identity/v2` (`benchx/identity.py`):
+- **Identity policy** `benchx/prototype-identity/v1` (`benchx/identity.py`):
   the default policy (`schemas/identity-policy/0.1.0/examples/default.json`)
   with the benchmark's revision ignored. A test checks it against the schema
   and pins it to its name, so an edit without a new name fails. The prototype has no declared benchmark versions, and

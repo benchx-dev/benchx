@@ -193,7 +193,7 @@ The use cases in [`docs/use-cases/`](../use-cases/README.md) and their [template
 The **reported-coordinate fingerprint** preserves the complete tuple before any policy: top-level project/source, the exact `benchmark` identity, and the `coordinates` object of §5.2. It never contains row IDs, the quantity, an estimator, the axis revision, or attempt/run keys.
 
 ```text
-reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v2\0" + JCS(reported_coordinates))
+reported_coordinates_fingerprint = SHA-256("benchmark-reported-coordinates-v1\0" + JCS(reported_coordinates))
 ```
 
 A project's **identity policy** projects and normalizes reported coordinates into a comparison-identity object, for example by normalizing equivalent source URIs, mapping exact benchmark revisions to declared versions, or omitting a coordinate it allows to vary. It is the project's default **projection**: a projection names the axis a series follows and gives every other fact a role, `match`, `normalize`, or `ignore`. The identity policy's axis is always the designated subject revision, so its document (`schemas/identity-policy/0.1.0`) stores only the roles. An ignored fact never splits a series, but a change in it from one point to the next is recorded as a warning on the point, so detectors and views see it. The default (`examples/default.json`) matches every coordinate except a named list of `environment.system` fields that the former design never matched: hostname, OS and kernel, C library, CPU firmware and settings, GPU driver and ids, firmware, image digest, and cgroup limits. Any other fact matches wherever it sits, so a new or misplaced fact can over-split a series but never blend one. The policy carries an `identity_schema` that changes whenever projection semantics or continuity mappings change; an operational release that yields the same schema does not split history. Continuity mappings, which keep history across a benchmark rename, an added parameter, or a machine upgrade, are applied in this projection step; their shape, authoring, and audit trail are specified in a separate design document.
@@ -203,7 +203,7 @@ Any other projection, such as a comparison profile (§5.5) or a sweep across ker
 ```text
 comparison_fingerprint = SHA-256("benchmark-comparison-v1\0" + identity_schema + "\0" + JCS(comparison_identity))
 estimator_fingerprint  = SHA-256("benchmark-estimator-v1\0" + JCS(estimator))
-series_fingerprint     = SHA-256("benchmark-series-v7\0" + comparison_fingerprint + "\0" + quantity_name + "\0" + estimator_fingerprint)
+series_fingerprint     = SHA-256("benchmark-series-v6\0" + comparison_fingerprint + "\0" + quantity_name + "\0" + estimator_fingerprint)
 ```
 
 `JCS` is RFC 8785 canonical JSON. The server computes all fingerprints; canonical source URIs, number/string normalization, omitted values, estimator method versions, and identity schema definitions are part of the contract.

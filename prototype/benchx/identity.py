@@ -14,7 +14,7 @@ from .projection import (Projection, normalize_remote, reported_coordinates_fing
 # Any change to POLICY_DATA other than its description needs a new
 # identity_schema; tests/test_projection.py pins the two together.
 POLICY_DATA = {
-    "identity_schema": "benchx/prototype-identity/v2",
+    "identity_schema": "benchx/prototype-identity/v1",
     "default": "match",
     "paths": {
         "/source/uri": {"normalize": {"rule": "canonical-uri"}},

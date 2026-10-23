@@ -229,7 +229,7 @@ def test_tracked_series_and_history(revisions_run, tmp):
     series = store.series(workload=QUIET, quantity="wall-time")
     medians = [s for s in series if json.loads(s["estimator"]) == identity.MEDIAN]
     # the benchmark revision is ignored by the identity policy, so both revisions share a series
-    assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/prototype-identity/v2"
+    assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/prototype-identity/v1"
     # Google Benchmark's own median is a different estimator, so a different series
     assert {json.loads(s["estimator"])["method_version"] for s in series} == {
         "benchx/median/v1", "google-benchmark/median", "google-benchmark/mean"}

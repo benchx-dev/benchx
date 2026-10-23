@@ -30,11 +30,11 @@ def test_every_example_policy_is_valid(file):
 
 def test_the_prototype_policy_is_valid_and_pinned_to_its_name():
     """Any edit to the policy needs a new identity_schema (§4.3): this hash is
-    the policy `benchx/prototype-identity/v2` names. Change both together."""
+    the policy `benchx/prototype-identity/v1` names. Change both together."""
     assert validate(identity.POLICY_DATA) == []
-    assert identity.IDENTITY_SCHEMA == "benchx/prototype-identity/v2"
+    assert identity.IDENTITY_SCHEMA == "benchx/prototype-identity/v1"
     assert core.sha256_hex(core.canonical(identity.POLICY_DATA)) == \
-        "c9fd8f65dce235423700f55361918be479bde7cbe1c7afba60da7cdaed329f96"
+        "c75cf9853f3b29b259c9f2658d337778237f21d874c96fd2adff0ea9c83259ea"
 
 
 def test_adding_an_estimator_leaves_the_policy_and_its_series_alone():
@@ -129,7 +129,7 @@ def test_projections_that_break_a_rule_are_refused(axis, paths, message):
 def test_a_profile_is_named_after_itself_and_its_policy():
     """Both names enter comparison_fingerprint: editing either gives new series."""
     revisions = compare.PROFILES["revisions"]
-    assert revisions.identity_schema == "benchx/profile/revisions/v1+benchx/prototype-identity/v2"
+    assert revisions.identity_schema == "benchx/profile/revisions/v1+benchx/prototype-identity/v1"
     a, b = history(), history({**DEFAULT, "identity_schema": "benchx/default/v2"})
     assert a.apply(ARROW).identity == b.apply(ARROW).identity
     assert a.series_fingerprint(a.apply(ARROW), "wall-time", identity.MEDIAN) != \
