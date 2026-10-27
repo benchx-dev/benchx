@@ -175,9 +175,11 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
                  environment_variables=None, filter=None, quantities=("wall-time",), project=None, run_key=None,
                  out=None, source_uri=None, case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S,
                  progress=None, build=True, provider=None, config_path=None, results_dir=None,
-                 collectors=None) -> dict:
-    """Run one target once: a comparison session of one order, with no round,
-    slot or comparison. Results are delivered to `store` unless it is None.
+                 collectors=None, round_=None, slot=None, labels=None) -> dict:
+    """Run one target once: a comparison session of one order, with no comparison.
+    It has a round, a slot and labels when the caller places it in a session that
+    other calls join through the same run key. Results are delivered to `store`
+    unless it is None.
 
     `target` is `@CONFIG[=SOURCE_REF]` or a bare path, which the harness reads
     (see `_side`); `adapter`, `flags` and the rest are as for `compare_targets`.
@@ -192,10 +194,12 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
     out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
     if progress:
         progress(f"precision: {harness.describe_precision(precision, config_path)}")
-    summary, outcome = _run_side(side, out / "orders" / "order.json", store, harness=harness, suite=suite,
+    order_file = "order.json" if slot is None else f"order-{slot:04d}.json"  # one per slot, as compare_targets
+    summary, outcome = _run_side(side, out / "orders" / order_file, store, harness=harness, suite=suite,
                                  filter=filter, quantities=quantities, precision=precision,
                                  environment_variables=environment_variables, project=project, run_key=run_key,
-                                 source_uri=source_uri, case_s=case_s, order_s=order_s, collectors=collectors)
+                                 source_uri=source_uri, case_s=case_s, order_s=order_s, collectors=collectors,
+                                 round_=round_, slot=slot, labels=labels)
     return {**summary, "outcome": outcome, "precision": precision}
 
 

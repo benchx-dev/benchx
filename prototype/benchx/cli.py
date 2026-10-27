@@ -78,6 +78,31 @@ def _environment(items) -> dict:
     return env
 
 
+def _session_position(args) -> tuple[dict, int | None, int | None]:
+    """Where `bx bench` sits in a session that other calls join through the same
+    `--run-key`: its `--label NAME=VALUE`s, `--round` and `--slot`. UsageError when
+    they could not join one."""
+    labels = {}
+    for item in args.label or []:
+        name, eq, value = item.partition("=")
+        if not (name and eq and value):
+            raise UsageError(f"--label wants NAME=VALUE, not {item!r}")
+        if name in labels:
+            raise UsageError(f"--label {name} is given twice")
+        labels[name] = value
+    for flag, number in (("--round", args.round), ("--slot", args.slot)):
+        if number is not None and number < 0:
+            raise UsageError(f"{flag} wants a number from 0, not {number}")
+    placed = labels or args.round is not None or args.slot is not None
+    if placed and not args.run_key:
+        raise UsageError("--label, --round and --slot need an explicit --run-key: the default is a timestamp "
+                         "per call, so two calls would never share a run")
+    if (labels or args.round is not None) and args.slot is None:
+        raise UsageError("--label and --round need --slot: without one, the sides of a run would share an "
+                         "ingest key and their results would conflict")
+    return labels, args.round, args.slot
+
+
 def _bench_target(args) -> tuple[str, str | None, str | None]:
     """The target, the suite it forces (or None: --suite, then the file's), and the
     adapter it forces. With `--suite` the target is as given. Without it, the target
@@ -155,6 +180,7 @@ def cmd_bench(args):
             raise UsageError("give case names or --filter, not both")
         target, forced_suite, forced_adapter = _bench_target(args)
         settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
+        settings["labels"], settings["round_"], settings["slot"] = _session_position(args)
         _needs_provider(cfg, target)
     except (UsageError, config_mod.ConfigError, bench_mod.SessionError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
@@ -493,6 +519,16 @@ def main(argv=None):
     p.add_argument("--case-timeout", type=float,
                    help=f"seconds before one case is stopped (default: timeouts.case_s, else {orders.CASE_TIMEOUT_S:g}; "
                         f"asv: {ASV_CASE_TIMEOUT_S}, all rounds, each also stopped at the benchmark's own timeout)")
+    p.add_argument("--label", action="append", metavar="NAME=VALUE",
+                   help="name this call's side of a session, such as env=numpy-2.0 (repeatable); the calls of a "
+                        "session share --run-key, and bx compare --run reads the label with --label NAME. "
+                        "Needs --run-key and --slot")
+    p.add_argument("--round", type=int,
+                   help="this call's round in a session: the sides' attempts are paired by it. "
+                        "Needs --run-key and --slot")
+    p.add_argument("--slot", type=int,
+                   help="this call's position in the session's alternation (0, 1, 2, ...), kept by the caller's loop. "
+                        "Needs --run-key")
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
