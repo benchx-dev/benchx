@@ -124,13 +124,22 @@ def _ignored_in(root: Path) -> list[str]:
     return [p.relative_to(root).as_posix() for p in _IGNORED if p != root and p.is_relative_to(root)]
 
 
+def _git_ignores(top, rel) -> bool:
+    """Whether the repository's own ignore rules already leave `rel` out of `git add -A`.
+    Naming such a path in an exclude pathspec makes `git add` fail, and the tree id
+    with it, so a results directory the project git-ignores must not be excluded twice."""
+    return subprocess.run(["git", "check-ignore", "-q", "--", rel], cwd=top,
+                          capture_output=True).returncode == 0
+
+
 def git_identity(path) -> dict | None:
     """Revision, dirty state, and working-tree id of a checkout (schema §4.1)."""
     top = _run(["git", "rev-parse", "--show-toplevel"], cwd=path)
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in _ignored_in(top))]
+    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in _ignored_in(top)
+                                    if not _git_ignores(top, rel))]
     status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
