@@ -153,7 +153,7 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert (broken["measurement"]["status"], broken["measurement"]["reason"]) == ("error", "harness.error")
     assert "boom" in broken["provenance"]["info"]["message"]
     assert not any("peakmem" in name for name, _ in found)
-    assert {d["coordinates"]["workload"]["name"] for d in Store().documents("all")} >= {"bm.time_plain"}
+    assert {d["coordinates"]["workload"]["name"] for d in Store(suite / "store.parquet").documents("all")} >= {"bm.time_plain"}
 
 
 def test_filter_and_benchmark_defaults(suite, capsys):
