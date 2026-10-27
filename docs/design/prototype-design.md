@@ -39,6 +39,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity NAMES] [-e NAME=VALUE ...]
          [precision flags, as for bx compare]
          [--project P | --no-project] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: the module's checkout, pyperf → result files → store → table
@@ -51,12 +52,31 @@ target the same way, takes the same options, and goes through the same code:
 the side is resolved by `session._side` (a provider call for `@CONFIG`, else a
 bare path the harness reads; the adapter checks the suite before anything runs)
 and the order is built by `session._order`. A bench run is one order of a
-comparison session with no round, no slot, and no comparison; it is run by the
+comparison session with no comparison, and by default no round or slot; it is run by the
 same runner, delivered as `bx run` delivers (`--no-ingest`: files only), and
 summarized as a table of its cases. It is not `bx run`: that executes a finished
 order file and never resolves a target; `bx bench` turns options into an order
 (saved as `results/RUN_KEY/orders/order.json`, which `bx run` can replay) and
 then does what `bx run` does.
+
+**A call as one side of a session (UC-04).** Environments that cannot share a process, such as two
+venvs holding different numpy versions, are measured by separate `bx bench` calls that share a
+`--run-key`; the caller's script is the loop (`benchmark-environments.md` §5.7). `--label NAME=VALUE`
+names the call's side, `--round N` pairs its attempt with the other side's, and `--slot K` is its
+position in the alternation, which the caller counts. Each call writes `orders/order-KKKK.json`. The
+flags need an explicit `--run-key` (the default is a timestamp per call, so two calls would never
+share a run), and `--label` and `--round` need `--slot` (the ingest key gets its `:slot-K` suffix only
+when a slot is set, so two sides would otherwise share a key). `bx compare --run KEY --profile
+environments --label NAME --baseline VALUE` then compares the sides, and refuses a run whose sides do
+not alternate, have unequal attempt counts, or do not differ.
+
+What differs between the environments is recorded by the user's own commands, so benchx knows no
+environment kind: a context collector (§3) prints facts about the environment it runs in, which land
+under `environment.system.<name>`, a part of the varying coordinate; a setup file does the same for
+declared facts. A collector with `verify: how_built` and `on_fail: warn` checks the facts a target's
+`how_built` object declares against what it found, and the comparison lists the warning beside the
+facts that differ. `prototype/examples/numpy-venvs` is the worked example, with the map from UC-04's
+spellings to these.
 
 A bare path is read by the harness. For Google Benchmark it is
 `BUILD_DIR[:SOURCE_DIR]`, a `build` target. For pyperf it is a working tree, a

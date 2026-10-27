@@ -1,0 +1,22 @@
+{
+  "schema_version": "benchx/config/0.1.0",
+  "project": "numpy-venvs",
+  "adapter": {
+    "name": "pyperf",
+    "suite": "bench_suite.py",
+    "precision": {
+      "repetitions": { "mode": "fixed", "levels": [{ "unit": "process", "n": 3 }, { "unit": "value", "n": 3 }] },
+      "calibration": { "mode": "adaptive", "minimum_sample_seconds": 0.02 },
+      "warmup": { "mode": "count", "n_warmup": 1 }
+    }
+  },
+  "provider": { "command": ["./provider.sh"] },
+  "collectors": {
+    "deps": {
+      "command": ["python", "{root}/describe_env.py"],
+      "verify": "how_built",
+      "on_fail": "warn"
+    }
+  },
+  "paths": { "store": "out/store.parquet", "results": "out" }
+}
