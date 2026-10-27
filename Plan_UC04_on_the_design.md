@@ -480,10 +480,8 @@ two environments that differ only in numpy, driven by a shell script.
 Files:
 - `README.md`: what it shows, what to install, how to run it, what to
   expect, and the map from UC-04's spellings to the prototype's (below).
-  numpy 1.26.4 has wheels only up to Python 3.12, so the demo asks for
-  Python 3.11 or 3.12.
-- `versions.env`: `NUMPY_A=1.26.4` and `NUMPY_B=2.0.2`, read by the
-  script and by the provider, so the two never disagree.
+  The demo assumes `uv`. numpy 1.26.4 has wheels only up to Python
+  3.12, so both venvs use Python 3.12.
 - `benchx.conf.json`: project name, the pyperf adapter with suite
   `bench_suite.py` and a small precision, `paths` into `out/`, a
   `provider` (`./provider.sh`), and the collector:
@@ -497,7 +495,8 @@ Files:
   description and builds nothing. The target is this directory as a
   working tree. `how_built` is an object that mirrors the collector's
   output, `{"summary": {"numpy": "<version>"}}`, with the version for
-  configuration `a` or `b` from `versions.env`.
+  configuration `a` or `b` from `NUMPY_A` and `NUMPY_B`, which `run.sh`
+  exports.
 - `run.sh`: the driver, below.
 - `.gitignore`: `.venv-*/` and `out/`. Untracked venvs inside the tree
   would mark it dirty, so the comparison would be `local_only`, and
@@ -507,21 +506,23 @@ Files:
 
 The `python` in the collector command is found on `PATH`, so the script
 enters each environment the way a user does, by sourcing the venv's
-`activate`, in a subshell for each call. Each call then sees exactly one
-environment, and the loop's own shell never holds one. Activation also
-resets `VIRTUAL_ENV`, which matters under `uv run` in CI, where it points
-at the outer environment. Activate scripts can trip `set -u`, so the
-script turns it off around the `source`. benchx executes nothing for any
-of this.
+`activate`. Activating a venv replaces the one activated before, so
+nothing is deactivated and no subshell is needed. This was checked with
+`uv venv` environments under `set -euo pipefail`: the second `activate`
+leaves only its own `bin` on `PATH` and resets `VIRTUAL_ENV`, which
+matters under `uv run` in CI, where it points at the outer environment.
+benchx executes nothing for any of this.
 
-`run.sh` (the file is the reference) does, in order:
-1. Creates `.venv-a` and `.venv-b`, each with its numpy, pyperf and
-   benchx (`-e ../..`), with `uv`, or with `python -m venv` and pip when
-   `uv` is absent.
-2. Runs the caller's loop: for each round and side, `in_env "$side" bx
-   bench "@$side"` with `--run-key`, `--label env=numpy-<version>`,
-   `--round`, `--slot` and `--out`. `in_env` sources the venv's
-   `activate` in a subshell, with `set -u` off around the `source`.
+`run.sh` (the file is the reference) sets its values at the top, in
+upper case: `NUMPY_A=1.26.4`, `NUMPY_B=2.0.2`, `PYTHON_VERSION=3.12` and
+`ROUNDS=3`, which is the fewest rounds that give a verdict
+(`compare.min_rounds` defaults to 3). It then does, in order:
+1. Creates `.venv-a` and `.venv-b` with `uv`, each with its numpy,
+   `pyarrow<25`, pyperf and benchx (`-e ../..`). benchx imports pyarrow,
+   and pyarrow 25 refuses to import under numpy 1.x.
+2. Runs the caller's loop: for each round and side, it sources the
+   venv's `activate` and calls `bx bench "@$SIDE"` with `--run-key`,
+   `--label env=numpy-<version>`, `--round`, `--slot` and `--out`.
 3. Compares: `bx compare --run S --profile environments --label env
    --baseline numpy-<version A>`, kept in `out/compare.txt`. The script
    exits nonzero unless the `differs:` line names `deps.numpy` and no
@@ -529,9 +530,8 @@ of this.
 4. Runs the check: it declares version `b` for a run in venv `a`, and
    exits nonzero unless that run's results carry `collector-mismatch`.
 
-What the comparison shows. This was captured from a run with numpy 2.3.4
-and 2.4.3 on Python 3.14, without `uv`; the demo's defaults (1.26.4 and
-2.0.2 on Python 3.12 through `uv`) were not run where it was built.
+What the comparison shows, from a run of the demo as it stands
+(`uv`, Python 3.12, numpy 1.26.4 against 2.0.2):
 - A `differs:` line that names the facts that differ
   (`coordinates.environment.system.deps.numpy` and `...deps.sha256`),
   and for each side its declared `how built` object, which carries the
@@ -586,7 +586,7 @@ and macOS with Python 3.11 and 3.13. The plan adds a step for this demo:
   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
   shell: bash
   run: >-
-    ROUNDS=3 uv run --extra test --python ${{ matrix.python-version }}
+    uv run --extra test --python ${{ matrix.python-version }}
     bash examples/numpy-venvs/run.sh
 ```
 
@@ -594,8 +594,7 @@ and macOS with Python 3.11 and 3.13. The plan adds a step for this demo:
   matrix Python only runs the outer script. Running it in every matrix
   cell would repeat the same work, so the step runs in one cell.
 - The step needs network access, for the numpy wheels and pyperf, which
-  the runners have. `ROUNDS=3` is the fewest rounds that give a verdict
-  (`compare.min_rounds` defaults to 3), and keeps the run short.
+  the runners have.
 - The workflow's `paths` filter already covers `prototype/**`.
 - The venvs and `out/` are git-ignored.
 
@@ -674,7 +673,7 @@ Not part of this plan. Build only if the need shows up in practice.
   - Its README is listed in that repository's README.
   - The CI step in this repository goes. That repository has no CI
     workflow today, so it would need one to keep the demo running.
-  - `versions.env` and the provider move with it, and nothing in
+  - The provider and `run.sh` move with it, and nothing in
     `prototype/` depends on them.
   It is deferred because the demo has to run against the prototype's
   own code while package A is being built, and because it needs
