@@ -100,3 +100,17 @@ def test_a_plain_directory_tree_id_skips_ignored_paths(tmp_path):
     assert snapshot.directory_identity(root)["tree"] != before
     snapshot.ignore(root / "results", root / "store.parquet")
     assert snapshot.directory_identity(root)["tree"] == before
+
+
+def test_a_results_directory_the_project_git_ignores_still_gives_a_tree_id(checkout):
+    """Excluding a path that .gitignore already ignores used to make `git add` fail, so the tree id was unknown."""
+    (checkout / ".gitignore").write_text("results/\n")
+    git(checkout, "add", "-A")
+    git(checkout, "commit", "-qm", "ignore results")
+    clean = snapshot.git_identity(checkout)
+    write_outputs(checkout)
+    snapshot.ignore(checkout / "results", checkout / "store.parquet")
+    again = snapshot.git_identity(checkout)
+    assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
+    snapshot.ignore(checkout / "results")  # the store file is untracked and not ignored: a real difference
+    assert snapshot.git_identity(checkout)["dirty"] == "dirty"
