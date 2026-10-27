@@ -106,7 +106,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
     failed = doc["failed_invariants"]
     projected = [projection.apply(d, store_project(d)) for d in documents]
     if any(p.axis[0] is None for p in projected):
-        failed.append({"invariant": "sides", "detail": f"a result has no {varying}"})
+        failed.append({"invariant": "sides", "detail": f"a result has no {varying}: give every bx bench call "
+                                                       "--label NAME=VALUE, and name that label here"})
         return doc
 
     # A side is a distinct axis value, named by its first part (a tree, a label).
@@ -136,7 +137,9 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         a, b = (json.loads(side) for side in (base, contender))
         if all(x == y for path, x, y in zip(projection.axis, a, b) if not path.startswith("/provenance/")):
             failed.append({"invariant": "sides-differ",
-                           "detail": f"the sides differ only in {varying}"})
+                           "detail": f"the sides differ only in their label ({varying}): nothing recorded about the "
+                                     "environment differs. Describe what differs with a context collector "
+                                     "(collectors in benchx.conf.json) or a setup file for each environment"})
     if "one-tree-per-side" in check:
         trees = {side: {d["provenance"].get("subject_tree") for d, x in zip(documents, sides) if x == side}
                  for side in (base, contender)}
@@ -154,13 +157,16 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         for d, s in zip(documents, sides):
             slot = d.get("procedure", {}).get("slot")
             if slot is None:
-                failed.append({"invariant": "alternating-slots", "detail": "a result has no slot"})
+                failed.append({"invariant": "alternating-slots",
+                               "detail": "a result has no slot: give every bx bench call --slot"})
                 break
             slots.setdefault(slot, set()).add(s)
         else:
             order = [slots[slot] for slot in sorted(slots)]
             if any(len(o) != 1 for o in order) or any(a == b for a, b in zip(order, order[1:])):
-                failed.append({"invariant": "alternating-slots", "detail": "sides do not alternate by procedure.slot"})
+                failed.append({"invariant": "alternating-slots",
+                               "detail": "sides do not alternate by procedure.slot: run the sides in the same "
+                                         "order every round (a, b, a, b, ...)"})
 
     # Units: one workload variant and quantity each. Everything else the
     # projection matches must agree across both sides (schema §5.5).
@@ -188,7 +194,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
             continue
         if "equal-attempts" in check and len(by_side[base]) != len(by_side[contender]):
             failed.append({"invariant": "equal-attempts", **where,
-                           "detail": f"{len(by_side[base])} against {len(by_side[contender])}"})
+                           "detail": f"{len(by_side[base])} against {len(by_side[contender])}: run the same "
+                                     "number of rounds on both sides"})
             continue
         rounds = {}
         for s in (base, contender):
@@ -203,6 +210,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
                  if base in r and contender in r]
         unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds)
         unit_doc["unmatched_differences"] = _differences(projection, by_side[base], by_side[contender])
+        if caveats := _caveats(by_side, base, contender):
+            unit_doc["caveats"] = caveats
         doc["units"].append(unit_doc)
     return doc
 
@@ -242,6 +251,16 @@ def _declared(document) -> dict:
     if env := (system.get("process") or {}).get("environment"):
         side["observed_env"] = env
     return side
+
+
+def _caveats(by_side, base, contender) -> list[str]:
+    """The warnings a side's results carry (quality.warnings), by side, for the reader."""
+    found = set()
+    for role, side in (("baseline", base), ("contender", contender)):
+        for d in by_side[side]:
+            for w in d.get("quality", {}).get("warnings", []):
+                found.add(f"{role}: {w.get('code', w) if isinstance(w, dict) else w}")
+    return sorted(found)
 
 
 def _unit(where, pairs, by_side, base, contender, k, min_rounds):
@@ -307,6 +326,13 @@ def render(doc: dict) -> str:
                 shown = side[key] if key != "observed_env" else ", ".join(f"{k}={v}" for k, v in side[key].items())
                 first, *rest = str(shown).splitlines() or [""]
                 lines.append(f"  {name}: {key.replace('_', ' ')}: {first}" + (f" (+{len(rest)} lines)" if rest else ""))
+    differs = sorted({p for u in doc["units"] for p in u.get("unmatched_differences", [])})
+    if differs:
+        shown = ", ".join(_dotted(p) for p in differs[:6])
+        lines.append(f"  differs: {shown}" + (f" (+{len(differs) - 6} more)" if len(differs) > 6 else ""))
+    caveats = sorted({c for u in doc["units"] for c in u.get("caveats", [])})
+    if caveats:
+        lines.append(f"  caveats: {', '.join(caveats)}")
     for section in ("regressed", "improved", "changed", "no-change-detected", "indeterminate"):
         rows = [u for u in doc["units"] if u["verdict"] == section]
         if not rows:
