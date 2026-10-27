@@ -10,24 +10,24 @@ You prepare the environments and enter them; benchx builds nothing and activates
 
 ## Run it
 
-You need `uv` (it fetches Python 3.12, the newest Python with numpy 1.26.4 wheels) and network
-access the first time. Then, from this directory:
+You need [`uv`](https://docs.astral.sh/uv/) (it fetches Python 3.12, the newest Python with numpy
+1.26.4 wheels) and network access the first time. Then, from this directory:
 
 ```console
 $ ./run.sh
 ```
 
-`ROUNDS=3 ./run.sh` runs fewer rounds (3 is the fewest that give a verdict). Other versions:
-`NUMPY_A=2.3.4 NUMPY_B=2.4.3 ./run.sh` (see `versions.env`). Without `uv`, `PYTHON=python3` uses
-that Python for both venvs, which then needs wheels for both versions. Everything it creates is in
-`.venv-a`, `.venv-b` and `out/`, all git-ignored.
+The versions (`NUMPY_A`, `NUMPY_B`), the Python and the number of rounds are set at the top of
+`run.sh`. Everything it creates is in `.venv-a`, `.venv-b` and `out/`, all git-ignored.
 
 ## What it does
 
-1. **Prepares two venvs**, `.venv-a` and `.venv-b`, each with its numpy, pyperf and benchx.
-2. **Runs the caller's loop.** For each round, one `bx bench` call per side, each in its venv
-   (`run.sh` sources the venv's `activate` in a subshell). The calls share a `--run-key`; each says
-   which side it is (`--label env=numpy-1.26.4`), which round, and which slot of the alternation.
+1. **Prepares two venvs**, `.venv-a` and `.venv-b`, each with its numpy, pyperf and benchx, and
+   `pyarrow<25`: benchx imports pyarrow, and pyarrow 25 refuses to import under numpy 1.x.
+2. **Runs the caller's loop.** For each of the 3 rounds, one `bx bench` call per side, each in its
+   venv (`run.sh` sources the venv's `activate`; activating the other venv replaces it, so nothing
+   needs deactivating). The calls share a `--run-key`; each says which side it is
+   (`--label env=numpy-1.26.4`), which round, and which slot of the alternation.
 3. **Compares.** `bx compare --run S --profile environments --label env --baseline numpy-1.26.4`.
    The sides differ because the collector read a different numpy in each. The comparison says
    what differed (`differs: ...deps.numpy`), shows what each side declared, and gives a verdict per
@@ -97,7 +97,6 @@ prototype does not have. This is how each corresponds:
 |---|---|
 | `run.sh` | the driver: venvs, the loop, the comparison, the check |
 | `benchx.conf.json` | the project file: the adapter and suite, the provider, the `deps` collector |
-| `provider.sh` | the target provider: declares each side's numpy in `how_built` |
+| `provider.sh` | the target provider: declares each side's numpy in `how_built` (`run.sh` exports the versions) |
 | `describe_env.py` | the collector: prints the numpy this Python imports |
 | `bench_suite.py` | three small numpy benchmarks |
-| `versions.env` | the two versions, read by `run.sh` and `provider.sh` |

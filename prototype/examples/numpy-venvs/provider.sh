@@ -8,7 +8,7 @@
 # with gets the warning collector-mismatch on every result.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-. "$HERE/versions.env"
+: "${NUMPY_A:?run.sh sets NUMPY_A and NUMPY_B}" "${NUMPY_B:?run.sh sets NUMPY_A and NUMPY_B}"
 
 configuration=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("configuration") or "")')
 case "$configuration" in

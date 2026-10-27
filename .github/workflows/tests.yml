@@ -64,10 +64,9 @@ jobs:
 
       # Makes two venvs of its own with uv (Python 3.12, the newest with numpy 1.26.4 wheels), so
       # the matrix Python only runs the outer script and one cell is enough. Needs network access.
-      # ROUNDS=3 is the fewest rounds that give a verdict.
       - name: Run the numpy-venvs example
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         shell: bash
         run: >-
-          ROUNDS=3 uv run --extra test --python ${{ matrix.python-version }}
+          uv run --extra test --python ${{ matrix.python-version }}
           bash examples/numpy-venvs/run.sh
