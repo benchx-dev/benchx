@@ -514,70 +514,32 @@ at the outer environment. Activate scripts can trip `set -u`, so the
 script turns it off around the `source`. benchx executes nothing for any
 of this.
 
-`run.sh`:
+`run.sh` (the file is the reference) does, in order:
+1. Creates `.venv-a` and `.venv-b`, each with its numpy, pyperf and
+   benchx (`-e ../..`), with `uv`, or with `python -m venv` and pip when
+   `uv` is absent.
+2. Runs the caller's loop: for each round and side, `in_env "$side" bx
+   bench "@$side"` with `--run-key`, `--label env=numpy-<version>`,
+   `--round`, `--slot` and `--out`. `in_env` sources the venv's
+   `activate` in a subshell, with `set -u` off around the `source`.
+3. Compares: `bx compare --run S --profile environments --label env
+   --baseline numpy-<version A>`, kept in `out/compare.txt`. The script
+   exits nonzero unless the `differs:` line names `deps.numpy` and no
+   invariant failed.
+4. Runs the check: it declares version `b` for a run in venv `a`, and
+   exits nonzero unless that run's results carry `collector-mismatch`.
 
-```bash
-#!/usr/bin/env bash
-# UC-04 with two venvs: the same code, numpy 1.26.4 against numpy 2.0.2.
-set -euo pipefail
-cd "$(dirname "$0")"
-. ./versions.env
-ROUNDS=${ROUNDS:-5}
-rm -rf out .venv-a .venv-b; mkdir -p out
-
-# Run a command with one venv activated, in a subshell.
-in_env() { local venv=".venv-$1"; shift
-           ( set +u; . "$venv/bin/activate"; set -u; "$@" ); }
-
-# 1. The user prepares both environments. benchx builds nothing.
-for side in a b; do
-  v=NUMPY_${side^^}
-  uv venv -q --python "${PYTHON:-3.12}" ".venv-$side"
-  uv pip install -q --python ".venv-$side/bin/python" \
-      "numpy==${!v}" pyperf -e ../..
-done
-
-# 2. The caller's loop: alternate the sides, round by round.
-S=numpy-$(date +%s); slot=0
-for round in $(seq 0 $((ROUNDS - 1))); do
-  for side in a b; do
-    v=NUMPY_${side^^}
-    in_env "$side" bx bench "@$side" \
-        --run-key "$S" --label "env=numpy-${!v}" \
-        --round "$round" --slot "$slot" --out "out/$S"
-    slot=$((slot + 1))
-  done
-done
-
-# 3. Compare. The sides differ in the collected numpy version.
-in_env a bx compare --run "$S" \
-    --profile environments --label env --baseline "numpy-$NUMPY_A" \
-    | tee out/compare.txt
-grep -q "$NUMPY_B" out/compare.txt   # the differing fact is shown
-
-# 4. The check. Declare version b, run in venv a: the collector disagrees.
-in_env a bx bench @b --run-key "$S-mismatch" \
-    --label "env=wrong" --round 0 --slot 0 --out "out/$S-mismatch"
-grep -rq collector-mismatch "out/$S-mismatch"
-```
-
-What it should show. This is the expected behaviour, not an output
-captured from a run:
-- Step 3 prints the comparison for the two sides, with the differing
-  fact (`environment.system.deps.numpy`, `1.26.4` against `2.0.2`) and
-  a verdict per benchmark.
-- Step 4 prints results that carry `collector-mismatch`. The run
-  proceeds, because the collector has `on_fail: warn`, and the recorded
-  value is the one the collector read.
-- Dropping the `--label` difference, so that both sides use the same
-  venv, makes step 3 fail `sides-differ`, with the message that says to
-  describe the environment under test.
-
-The script exits nonzero unless the comparison shows the differing fact
-and the mismatch run carries `collector-mismatch`, so it can run in CI.
-It cannot run until package A has landed, because `bx bench` has no
-`--label`, `--round` or `--slot` yet. The CI step below is added in the
-same change as the demo, after package A.
+What the comparison shows. This was captured from a run with numpy 2.3.4
+and 2.4.3 on Python 3.14, without `uv`; the demo's defaults (1.26.4 and
+2.0.2 on Python 3.12 through `uv`) were not run where it was built.
+- A `differs:` line that names the facts that differ
+  (`coordinates.environment.system.deps.numpy` and `...deps.sha256`),
+  and for each side its declared `how built` object, which carries the
+  version. The comparison names what differs and does not print the
+  collected values, because `unmatched_differences` holds JSON Pointers.
+- A verdict per benchmark.
+- With both sides in the same venv, `sides-differ` fails, with the
+  message that says to describe the environment under test.
 
 **Spelling map.** The demo's README carries the map from UC-04's
 spellings (`docs/use-cases/UC-04-cross-env.md`, which is kept as
