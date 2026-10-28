@@ -205,3 +205,133 @@ def test_environments_a_label_with_two_builds_is_three_sides():
     docs[2]["coordinates"]["subject"]["configuration"] = {"hardening": "other"}
     doc = compare.compare(docs, run_key="run", profile="environments", baseline="plain", label="build")
     assert invariants(doc) == ["two-sides"]
+
+
+# --- dirty trees and the benchmark file (UC-03 §10, schema §5.5) -------------------------------
+
+OTHER_SUITE = {"uri": "https://example.org/suites.git", "type": "git"}
+
+
+def dirty(docs, side, flag="subject_dirty"):
+    for d in docs:
+        if d["revision"]["key"] == side:
+            d["provenance"][flag] = "dirty"
+    return docs
+
+
+def benchmark_trees(docs, tree_of, source=OTHER_SUITE):
+    """Record the benchmark of every result apart from the subject, as the file `tree_of(doc)`."""
+    for d in docs:
+        d["provenance"]["benchmark_tree"] = tree_of(d)
+        d["benchmark"] = {"source": dict(source)}
+    return docs
+
+
+def test_a_dirty_side_is_compared_and_named():
+    doc = evaluate(dirty(run(), HEAD))
+    assert invariants(doc) == [] and doc["local_only"] is True
+    assert doc["units"][0]["verdict"] == "regressed"
+    assert doc["units"][0]["caveats"] == ["contender: dirty-subject-tree"]  # the clean baseline is not named
+    shown = compare.render(doc)
+    assert "[local-only]" in shown and "caveats: contender: dirty-subject-tree" in shown
+
+
+def test_both_sides_dirty_are_each_named():
+    doc = evaluate(dirty(dirty(run(), HEAD), BASE, "benchmark_dirty"))
+    assert invariants(doc) == [] and doc["local_only"] is True
+    assert doc["units"][0]["caveats"] == ["baseline: dirty-benchmark-tree", "contender: dirty-subject-tree"]
+
+
+def test_clean_sides_are_not_local_only():
+    doc = evaluate(run())
+    assert doc["local_only"] is False and "caveats" not in doc["units"][0]
+
+
+def test_a_tree_edited_during_the_run_is_a_third_side():
+    """A side is a tree id, so a tree that changes mid-run leaves three sides and no verdict."""
+    docs = run()
+    [d for d in docs if d["revision"]["key"] == HEAD][-1]["provenance"]["subject_tree"] = "e" * 40
+    doc = evaluate(docs)
+    assert invariants(doc) == ["two-sides"] and doc["units"] == []
+
+
+def test_a_side_without_a_tree_id_cannot_be_named():
+    """An unknown dirty state has no tree id (schema §4.1); the message is about the tree, not about labels."""
+    docs = run()
+    for d in docs:
+        if d["revision"]["key"] == HEAD:
+            d["provenance"]["subject_dirty"] = "unknown"
+            del d["provenance"]["subject_tree"]
+    doc = evaluate(docs)
+    assert invariants(doc) == ["sides"] and doc["units"] == []
+    detail = doc["failed_invariants"][0]["detail"]
+    assert "unknown" in detail and "--label" not in detail
+
+
+def test_a_benchmark_file_that_is_one_file_passes_whether_clean_or_dirty():
+    docs = benchmark_trees(run(), lambda d: "c" * 40)
+    assert invariants(evaluate(docs)) == []
+    doc = evaluate(dirty(dirty(docs, BASE, "benchmark_dirty"), HEAD, "benchmark_dirty"))
+    assert invariants(doc) == [] and doc["local_only"] is True
+
+
+def test_a_benchmark_file_that_differs_between_the_sides_fails():
+    docs = benchmark_trees(run(), lambda d: ("c" if d["revision"]["key"] == BASE else "d") * 40)
+    doc = evaluate(docs)
+    assert invariants(doc) == ["one-benchmark-tree"] and doc["units"] == []
+    assert "2 benchmark trees" in doc["failed_invariants"][0]["detail"]
+
+
+def test_a_benchmark_file_that_changes_between_rounds_fails():
+    docs = benchmark_trees(run(), lambda d: "c" * 40)
+    docs[-1]["provenance"]["benchmark_tree"] = "d" * 40  # the suite is edited before the last result
+    assert invariants(evaluate(docs)) == ["one-benchmark-tree"]
+
+
+def test_a_benchmark_in_the_subjects_tree_differs_between_sides_by_design():
+    docs = run()
+    for d in docs:  # as the runner records an in-tree suite: the subject's tree and the subject's source
+        d["provenance"]["benchmark_tree"] = d["provenance"]["subject_tree"]
+        d["benchmark"] = {"source": d["source"]}
+    assert invariants(evaluate(docs)) == []
+
+
+def test_an_in_tree_record_that_names_another_source_is_malformed():
+    docs = run()
+    for d in docs:
+        d["provenance"]["benchmark_tree"] = d["provenance"]["subject_tree"]
+        d["benchmark"] = {"source": dict(OTHER_SUITE)}
+    doc = evaluate(docs)
+    assert invariants(doc) == ["one-benchmark-tree"]
+    assert doc["failed_invariants"][0]["detail"].startswith("malformed record")
+
+
+def test_one_side_in_tree_and_one_apart_fails():
+    docs = run()
+    for d in docs:
+        if d["revision"]["key"] == BASE:
+            d["provenance"]["benchmark_tree"] = d["provenance"]["subject_tree"]
+            d["benchmark"] = {"source": d["source"]}
+        else:
+            d["provenance"]["benchmark_tree"] = "c" * 40
+            d["benchmark"] = {"source": dict(OTHER_SUITE)}
+    # the benchmark's source URI differs too, so the identity match (`sides-agree`) fails beside it
+    assert "one-benchmark-tree" in invariants(evaluate(docs))
+
+
+def test_a_suite_in_another_checkout_of_the_same_repository_counts_as_apart():
+    """Same canonical source URI as the subject, but its own file id: it is not in-tree."""
+    docs = run()
+    for d in docs:
+        d["provenance"]["benchmark_tree"] = ("c" if d["revision"]["key"] == BASE else "d") * 40
+        d["benchmark"] = {"source": dict(d["source"])}
+    assert invariants(evaluate(docs)) == ["one-benchmark-tree"]
+    same = benchmark_trees(run(), lambda d: "c" * 40, source={"uri": "https://example.org/demo"})
+    assert invariants(evaluate(same)) == []  # and one file on both sides passes
+
+
+def test_a_result_without_a_benchmark_tree_is_outside_the_rule():
+    """A thin result has no benchmark_tree: nothing to compare."""
+    docs = run()
+    assert all("benchmark_tree" not in d["provenance"] for d in docs)
+    assert invariants(evaluate(docs)) == []

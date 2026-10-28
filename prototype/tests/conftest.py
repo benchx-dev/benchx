@@ -136,6 +136,12 @@ def tmp(tmp_path):
     return tmp_path
 
 
+def warnings_of(document) -> list:
+    """A result's quality warnings other than the dirty-tree ones, which a test earns by running in a
+    tree with uncommitted files (schema §4.1). For tests of what the collectors and the workers warn."""
+    return [w for w in document.get("quality", {}).get("warnings", []) if not str(w).startswith("dirty-")]
+
+
 def copy_tree(src: Path, dst: Path) -> Path:
     shutil.copytree(src, dst)
     return dst

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import core, snapshot
 from .errors import SessionError
+from .store import warning_codes
 
 
 def tree_of(module: Path, tree=None) -> Path:
@@ -86,8 +87,7 @@ def row_of(document: dict) -> dict:
         "min": min(values) if values else None,
         "max": max(values) if values else None,
         "loops": document["procedure"].get("inner_iterations"),
-        "warnings": [w.get("code", str(w)) if isinstance(w, dict) else str(w)
-                     for w in document.get("quality", {}).get("warnings", [])],
+        "warnings": warning_codes(document),
     }
 
 

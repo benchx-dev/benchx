@@ -1,12 +1,13 @@
 """The success criteria of prototype-scope.md §3, on fake Google Benchmark output."""
 
 import json
+import os
 import time
 from pathlib import Path
 
 import pytest
 
-from benchx import compare, core, identity, runner
+from benchx import cli, compare, core, identity, runner
 from benchx.core.errors import StructureError
 from benchx.store import Store
 from conftest import NOISY, QUIET, SOURCE_URI, cases, git, make_build, order, run_rounds
@@ -197,16 +198,22 @@ def test_ad_hoc_is_thin_and_a_dirty_run_is_accepted(repo, tmp):
     assert {s["project"] for s in store.series()} == {f"local/{docs[0]['coordinates']['environment']['identity']['runner']}"}
 
 
-def test_revisions_refuses_a_dirty_side(repo, tmp):
-    """Criterion 7, UC-03 §10: a revisions comparison with a dirty side gets no verdicts."""
+def test_revisions_labels_a_dirty_side_local_only(repo, tmp):
+    """Criterion 7, UC-03 §10: a revisions comparison with a dirty side is compared and labeled
+    local-only, and the sides that are not clean are named."""
     out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
                                                      {"build": head, "source": repo["wt-head"]}], "dirty-rev")
     store = Store(tmp / "store.parquet")
     store.ingest_paths([out])
     doc = compare.compare(store.documents("dirty-rev"), run_key="dirty-rev", profile="revisions",
                           baseline=repo["base"])
-    assert [f["invariant"] for f in doc["failed_invariants"]] == ["clean-tree"]
-    assert doc["units"] == []
+    assert doc["failed_invariants"] == [] and doc["local_only"] is True
+    assert doc["units"] and core.check(doc, "comparison-document") == []
+    caveats = {c for u in doc["units"] for c in u.get("caveats", [])}
+    assert {"contender: dirty-subject-tree", "contender: dirty-benchmark-tree"} <= caveats
+    assert not any(c.startswith("baseline:") for c in caveats)  # the clean side is not named
+    shown = compare.render(doc)
+    assert "[local-only]" in shown and "contender: dirty-subject-tree" in shown
 
 
 def test_environments_labels_a_dirty_side_local_only(repo, tmp):
@@ -221,6 +228,61 @@ def test_environments_labels_a_dirty_side_local_only(repo, tmp):
                           label="build", baseline="a")
     assert doc["failed_invariants"] == [] and doc["local_only"] is True
     assert doc["units"]
+
+
+def test_a_dirty_result_carries_the_dirty_warnings_and_a_clean_one_does_not(repo, tmp):
+    """Schema §4.1: a quality warning for each flag that is `dirty`; none for a clean result or a condition."""
+    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
+                                                     {"build": head, "source": repo["wt-head"]}], "warned")
+    seen = {}
+    for d in results(out):
+        assert core.check(d, "measurement-result") == []
+        if d["measurement"].get("kind") == "condition":
+            assert "quality" not in d  # the load-average sibling is a condition, not a case
+            continue
+        # A Google Benchmark suite is the subject's own: its record names the subject's source and tree.
+        assert d["provenance"]["benchmark_tree"] == d["provenance"]["subject_tree"]
+        assert d["benchmark"]["source"] == d["source"]
+        seen.setdefault(d["provenance"]["subject_dirty"], set()).add(tuple(d.get("quality", {}).get("warnings", [])))
+    assert seen == {"clean": {()}, "dirty": {("dirty-subject-tree", "dirty-benchmark-tree")}}
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_a_single_run_records_an_unknown_tree_without_a_tree_id(repo, tmp):
+    """UC-01 is unchanged: a tree git cannot hash is recorded as `unknown`, with no tree id (schema §4.1)."""
+    unreadable = repo["wt-head"] / "unreadable.txt"
+    unreadable.write_text("x\n")
+    unreadable.chmod(0)
+    try:
+        build = make_build(tmp / "b1", repo["wt-head"], cases())
+        out = run_rounds(tmp, [{"build": build, "source": repo["wt-head"]}], rounds=1, run_key="unk", out=tmp / "unk")
+    finally:
+        unreadable.chmod(0o644)
+    docs = [d for d in results(out) if d["measurement"].get("kind") != "condition"]
+    assert docs
+    for d in docs:
+        assert core.check(d, "measurement-result") == []
+        assert d["provenance"]["subject_dirty"] == d["provenance"]["benchmark_dirty"] == "unknown"
+        assert "subject_tree" not in d["provenance"] and "benchmark_tree" not in d["provenance"]
+
+
+def test_head_and_history_show_the_dirty_warnings(repo, tmp, capsys):
+    """Q7: the listings mark a dirty result and leave a clean one unmarked."""
+    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
+                                                     {"build": head, "source": repo["wt-head"]}], "listed")
+    store = Store(tmp / "store.parquet")
+    store.ingest_paths([out])
+    marker = "[dirty-subject-tree, dirty-benchmark-tree]"
+    assert cli.main(["head", "--table"]) == cli.EXIT_OK
+    assert marker in capsys.readouterr().out
+    assert cli.main(["head", "-n", "50"]) == cli.EXIT_OK
+    rows = capsys.readouterr().out.splitlines()[1:]
+    assert any(marker in row for row in rows) and any(marker not in row for row in rows)
+    series = [x for x in store.series(workload=QUIET, quantity="wall-time")
+              if json.loads(x["estimator"]) == identity.MEDIAN]
+    assert cli.main(["history", series[0]["fingerprint"][:12]]) == cli.EXIT_OK
+    points = capsys.readouterr().out.splitlines()[1:]
+    assert any(marker in point for point in points) and any(marker not in point for point in points)
 
 
 def test_tracked_series_and_history(revisions_run, tmp):

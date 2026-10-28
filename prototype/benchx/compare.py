@@ -16,6 +16,7 @@ import statistics
 from . import identity
 from .core import canonical, catalog
 from .projection import Projection, get
+from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
 METHOD = {"name": "benchx/paired-relative", "version": "v1", "effect_measure": "relative"}
@@ -24,7 +25,7 @@ PROFILES = {
     "revisions": Projection(identity.POLICY_DATA, ["/provenance/subject_tree"],
                             profile="benchx/profile/revisions/v1",
                             invariants=["one-run", "two-sides", "one-tree-per-side", "equal-attempts",
-                                        "alternating-slots", "clean-tree"]),
+                                        "alternating-slots", "one-benchmark-tree"]),
     # UC-04: one revision measured two ways. A side is what its subject
     # configuration, pinned components, and system are; the caller's label,
     # put in front of the axis per comparison, only names it.
@@ -106,8 +107,14 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
     failed = doc["failed_invariants"]
     projected = [projection.apply(d, store_project(d)) for d in documents]
     if any(p.axis[0] is None for p in projected):
-        failed.append({"invariant": "sides", "detail": f"a result has no {varying}: give every bx bench call "
-                                                       "--label NAME=VALUE, and name that label here"})
+        if profile == "revisions":
+            # UC-03 §10: a side with no working-tree id (its dirty state is `unknown`) cannot be named.
+            detail = (f"a result has no {varying}: its tree's dirty state is unknown, so the side cannot be told "
+                      "apart from the other or checked for a change during the run. Make every file in the "
+                      "tree readable, or git-ignore it")
+        else:
+            detail = f"a result has no {varying}: give every bx bench call --label NAME=VALUE, and name that label here"
+        failed.append({"invariant": "sides", "detail": detail})
         return doc
 
     # A side is a distinct axis value, named by its first part (a tree, a label).
@@ -146,12 +153,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         if any(len(t) != 1 or None in t for t in trees.values()) or trees[base] == trees[contender]:
             failed.append({"invariant": "one-tree-per-side", "detail": "each side must have one tree id, and "
                                                                       "the two must differ"})
-    if "clean-tree" in check:
-        # UC-03 §10: a dirty or unknown tree cannot be validated (schema §5.5).
-        unclean = sorted({str(names[s]) for d, s in zip(documents, sides)
-                          if any(d["provenance"].get(f) != "clean" for f in ("subject_dirty", "benchmark_dirty"))})
-        if unclean:
-            failed.append({"invariant": "clean-tree", "detail": f"sides with a dirty or unknown tree: {unclean}"})
+    if "one-benchmark-tree" in check:
+        failed.extend(_benchmark_file(documents, names, sides))
     if "alternating-slots" in check:
         slots = {}
         for d, s in zip(documents, sides):
@@ -216,6 +219,42 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
     return doc
 
 
+def _benchmark_file(documents, names, sides) -> list[dict]:
+    """The `one-benchmark-tree` invariant (schema §5.5, UC-03 §10). A benchmark recorded apart from
+    the subject has its own `benchmark_tree`, which differs from `subject_tree`; it must be one file
+    on both sides and in every round. A benchmark in the subject's checkout has `benchmark_tree`
+    equal to `subject_tree` and differs between the sides as the subject does, so it is not
+    checked. A result without a `benchmark_tree` (a thin result) is outside the rule.
+
+    An in-tree record must also name the subject's source as its benchmark's: one that does not is
+    malformed. The reverse is not required, since a suite in another checkout of the same
+    repository has the subject's source URI but its own file id."""
+    found, malformed = [], []
+    for d, side in zip(documents, sides):
+        provenance = d["provenance"]
+        tree = provenance.get("benchmark_tree")
+        if tree is None:
+            continue
+        separate = tree != provenance.get("subject_tree")
+        found.append((side, tree, separate))
+        recorded = d.get("benchmark")
+        if recorded is not None and not separate and _c(recorded.get("source")) != _c(d["source"]):
+            malformed.append(str(names[side]))
+    failed = []
+    if malformed:
+        failed.append({"invariant": "one-benchmark-tree",
+                       "detail": "malformed record: the benchmark is in the subject's tree but names another "
+                                 f"source (sides {sorted(set(malformed))})"})
+    if any(separate for _, _, separate in found):
+        trees = {tree for _, tree, _ in found}
+        if len(trees) != 1 or not all(separate for _, _, separate in found):
+            failed.append({"invariant": "one-benchmark-tree",
+                           "detail": f"a benchmark recorded apart from the subject must be one file on both sides "
+                                     f"and in every round: {len(trees)} benchmark trees "
+                                     f"({', '.join(sorted(t[:12] for t in trees))})"})
+    return failed
+
+
 def _workload(by_side) -> dict:
     """The unit's workload variant, as the comparison document names it."""
     workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
@@ -260,6 +299,10 @@ def _caveats(by_side, base, contender) -> list[str]:
         for d in by_side[side]:
             for w in d.get("quality", {}).get("warnings", []):
                 found.add(f"{role}: {w.get('code', w) if isinstance(w, dict) else w}")
+            # A side that is not clean is named whether or not its producer warned (UC-03 §10).
+            for flag, code in DIRTY_WARNINGS:
+                if d["provenance"].get(flag) == "dirty":
+                    found.add(f"{role}: {code}")
     return sorted(found)
 
 

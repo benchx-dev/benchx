@@ -20,7 +20,7 @@ from . import config as config_mod
 from . import core, harnesses, orders, runner, session, snapshot
 from . import target as target_mod
 from .core.validation import Kind
-from .store import Store
+from .store import Store, warning_codes
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -285,7 +285,9 @@ def cmd_history(args):
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
-        print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}{changed}")
+        warned = f"  [{', '.join(p['warnings'])}]" if p["warnings"] else ""  # such as dirty-subject-tree
+        print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}"
+              f"{changed}{warned}")
     return EXIT_OK
 
 
@@ -309,7 +311,9 @@ def cmd_head(args):
         median = f"{r['median']:.6g} {r['unit']}" if r["median"] is not None else "-"
         started = r["started_at"].strftime("%Y-%m-%d %H:%M:%S")
         labels = f"  {r['labels']}" if r["labels"] else ""
-        cells.append((f"{r['row']:>5}", started, r["run_key"], r["workload"], r["quantity"], r["status"], median,
+        codes = warning_codes(json.loads(r["document"]))  # such as dirty-subject-tree, as `--table` shows them
+        status = r["status"] + (f"  [{', '.join(codes)}]" if codes else "")
+        cells.append((f"{r['row']:>5}", started, r["run_key"], r["workload"], r["quantity"], status, median,
                       r["revision"][:10], f"{r['project']}{labels}"))
     widths = [max([len(cell[i]) for cell in cells], default=0) for i in range(len(cells[0]))] if cells else []
     for cell in cells:

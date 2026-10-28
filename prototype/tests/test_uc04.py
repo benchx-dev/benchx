@@ -126,6 +126,7 @@ def test_a_failed_check_is_shown_in_the_comparison_and_changes_nothing_else(tree
     capsys.readouterr()
     code, out = compare(capsys)
     assert code == cli.EXIT_OK
-    assert "caveats: contender: collector-mismatch" in out
+    caveats = next(line for line in out.splitlines() if line.strip().startswith("caveats:"))
+    assert "contender: collector-mismatch" in caveats  # beside any dirty-tree caveats the fixture tree earns
     assert "baseline: collector-mismatch" not in out
     assert "failed invariants" not in out and "bench_a" in out

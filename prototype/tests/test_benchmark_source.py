@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pyperf")
 
-from benchx import cli, core, runner, snapshot
+from benchx import adapters, cli, core, runner, snapshot
 from benchx.store import Store
 from conftest import git
 
@@ -65,6 +65,13 @@ def result(run_key):
     document = json.loads(path.read_text())
     assert core.check(document, "measurement-result") == []
     return document
+
+
+@pytest.mark.parametrize("adapter, apart", [("pyperf", True), ("asv", True), ("google-benchmark", False)])
+def test_which_adapters_record_a_suite_apart_from_the_subject(adapter, apart):
+    """A suite that is Python source can live outside the subject's tree, and is then recorded as its own
+    benchmark; a built binary is the subject's (schema §5.5, `one-benchmark-tree`)."""
+    assert adapters.get(adapter).SUITE_IS_SOURCE is apart
 
 
 def test_a_suite_inside_the_subject_is_the_subjects_own(subject):

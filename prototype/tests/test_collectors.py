@@ -7,7 +7,7 @@ import textwrap
 import pytest
 
 from benchx import collectors, compare, config, core, runner
-from conftest import git
+from conftest import git, warnings_of
 
 
 def spec(name="facts", script='print(\'{"a": 1}\')', **extra):
@@ -166,7 +166,7 @@ def test_bench_runs_the_collector_and_records_its_facts(project):
     assert document["coordinates"]["environment"]["system"]["facts"]["s"] == 1 and "sha256" in document["coordinates"]["environment"]["system"]["facts"]
     assert document["provenance"]["info"]["how_built"] == {"k": 1}
     assert "collector-output" in {a["kind"] for a in document["provenance"]["artifacts"]}
-    assert "quality" not in document
+    assert warnings_of(document) == []
 
 
 def test_a_mismatch_refuses_the_order_before_any_case(project, capsys, monkeypatch):
@@ -181,7 +181,7 @@ def test_a_warn_mismatch_runs_and_marks_every_result(project, monkeypatch):
     configure(project, on_fail="warn")
     monkeypatch.setenv("K", "2")
     assert cli.main(["bench", "@x", *FAST, "--run-key", "c3"]) == cli.EXIT_OK
-    assert result_of("c3")["quality"]["warnings"] == ["collector-mismatch"]
+    assert warnings_of(result_of("c3")) == ["collector-mismatch"]
 
 
 def test_bx_run_refuses_an_order_with_collectors_unless_allowed(project, tmp, capsys):

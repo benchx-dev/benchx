@@ -299,7 +299,10 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
                 "procedure": procedure,
                 "provenance": provenance,
             }
-            warnings = [] if condition else ([setup_warning] if setup_warning else []) + collected.warnings + case_warnings
+            # A result says so when its subject or benchmark tree is dirty (schema §4.1).
+            dirty = [code for flag, code in snapshot.DIRTY_WARNINGS if provenance[flag] == "dirty"]
+            warnings = [] if condition else (dirty + ([setup_warning] if setup_warning else [])
+                                             + collected.warnings + case_warnings)
             if warnings:
                 document["quality"] = {"warnings": warnings}
             errors = core.check(document, "measurement-result")

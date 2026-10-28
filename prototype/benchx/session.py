@@ -95,18 +95,24 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         identity = snapshot.git_identity(source) or snapshot.directory_identity(source)
         if not identity:
             raise SessionError(f"cannot identify the working tree {source}")
+    found = _found_benchmark(harness, path, suite, identity["path"])
     return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
-            "benchmark": _benchmark(harness, path, suite, identity["path"]),
+            "benchmark": _benchmark(found),
+            # As the runner records it: a benchmark in the subject's tree is dirty as the subject is.
+            "benchmark_dirty": found["dirty"] if found else identity["dirty"],
             "text": target_mod.text(description), "labels": dict((description or {}).get("labels", {}))}
 
 
-def _benchmark(harness, path: Path, suite: str, subject_source: str) -> dict | None:
-    """The order's `benchmark` entry when the suite's code is not in the subject's
-    checkout (see snapshot.benchmark_identity), else None. A suite that is a built
-    binary is the subject's own."""
+def _found_benchmark(harness, path: Path, suite: str, subject_source: str) -> dict | None:
+    """The identity of the suite's code when it is not in the subject's checkout (see
+    snapshot.benchmark_identity), else None. A suite that is a built binary is the subject's own."""
     if not adapters.get(harness.name).SUITE_IS_SOURCE:
         return None
-    found = snapshot.benchmark_identity(path / suite, subject_source)
+    return snapshot.benchmark_identity(path / suite, subject_source)
+
+
+def _benchmark(found: dict | None) -> dict | None:
+    """The order's `benchmark` entry for a suite found outside the subject's checkout."""
     if found is None:
         return None
     return {"source": {"uri": found["uri"], "type": found["type"]},
@@ -237,11 +243,22 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     operation = "prepare" if build else "describe"
     sides = [_side(spec, suite, operation, harness, environment_variables, provider) for spec in (baseline, contender)]
     if profile == "revisions":
-        # UC-03 §10: refuse before any measurement, not after R rounds.
+        # UC-03 §10: a dirty side is compared and labeled local-only. A side with no working-tree id
+        # (its dirty state is `unknown`) cannot be named, so it is refused before any measurement,
+        # not after R rounds.
         for name, side in zip(("baseline", "contender"), sides):
-            if side["identity"]["dirty"] != "clean":
-                raise SessionError(f"{name} tree {side['source']} is {side['identity']['dirty']}; "
-                                   "a revisions comparison needs clean trees (UC-03 §10)")
+            if side["identity"]["dirty"] == "unknown":  # schema §4.1: no tree id exactly when unknown
+                raise SessionError(f"{name} tree {side['source']} has no working-tree id (its dirty state is "
+                                   f"{side['identity']['dirty']}): the sides cannot be told apart, or checked for "
+                                   "a change during the run. Make every file in the tree readable, or git-ignore "
+                                   "it (UC-03 §10)")
+    if progress:  # TODO: log these at logging.WARNING once benchx has logging (plan, Q13)
+        for name, side in zip(("baseline", "contender"), sides):
+            for what, state in (("tree", side["identity"]["dirty"]),
+                                ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):
+                if state != "clean":
+                    where = f" {side['source']}" if what == "tree" else ""
+                    progress(f"{name} {what}{where} is {state}: the comparison will be local-only")
     source_uri = _source_uri(sides, source_uri)
     if len({json.dumps((side.get("benchmark") or {}).get("source")) for side in sides}) != 1:
         raise SessionError("the sides' suites come from different sources; give --suite as one absolute path")

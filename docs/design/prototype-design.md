@@ -250,10 +250,11 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). In
-the `environments` profile, a comparison in which either side is not `clean`
-has `local_only: true` (schema §5.5); the `revisions` profile refuses it
-instead (§5).
+the missing, failed-invariant, and excluded listings with counts). In any
+profile, a comparison in which either side is not `clean` has `local_only:
+true` (schema §5.5), is headed `[local-only]`, and names the sides that are not
+clean on the `caveats:` line; the `revisions` profile fails a side with no
+working-tree id instead (§5).
 
 ## 3. Runner and adapter (`bx run`)
 
@@ -321,7 +322,10 @@ landing where its §3.4 puts it:
   unless the harness's suite is a source file (pyperf) outside that checkout: then
   the order carries `benchmark`, and the result records the suite file's own
   source, revision (when under git) and blob id as `benchmark_tree`
-  (`runner-schema.md` §3.3).
+  (`runner-schema.md` §3.3). A result whose subject tree is `dirty` carries
+  the quality warning `dirty-subject-tree`, and one whose benchmark is `dirty`
+  `dirty-benchmark-tree` (schema §4.1); an `unknown` state has no tree id and
+  no warning of its own.
 - **Build configuration**, from a built-in plugin that reads
   `CMakeCache.txt` in the build directory: build type, compiler and version,
   flags, and the project's own options (cache entries prefixed with the
@@ -446,6 +450,8 @@ columns, which is fine at prototype scale; a real deployment would index them.
 
 `bx head` shows the store's size and its latest results, newest first, with
 run key, workload, quantity, status, median, revision, project, and labels;
+the status is followed by the result's quality warnings in brackets, such as
+`[dirty-subject-tree]`, in both forms;
 with `--json` it prints the stored documents instead, and with `--table` the `bx bench`
 table (median, mean ± sd, range, n, status) of each measurand, led by revision, run key and project;
 condition measurements are left out, as in `bx bench`.
@@ -456,7 +462,8 @@ order, since every ingest appends to the rewritten file.
 `bx series` and `bx history` are queries over the derived `series` and
 `series_point`.
 `bx history` lists a series' points in axis order, each with the ignored
-facts that changed since the point before it. Without a revision graph
+facts that changed since the point before it and the quality warnings of its
+result, in brackets. Without a revision graph
 revision order is unavailable (schema §4.1), so an axis on the revision lists
 them by measurement start and says so. It evaluates nothing, since history
 mode is deferred.
@@ -482,8 +489,11 @@ matched facts agree (`sides-agree`) and the invariants the profile names over
 the run: exactly two sides, which for `environments` differ in more than their
 label, equal attempt counts per side, and sides alternating by
 `procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
-verdict; under `revisions` a side that is not `clean` fails the `clean-tree`
-invariant the same way. A variant present on one side only is listed as missing
+verdict; under `revisions` the same happens to a side with no tree id (the
+`sides` invariant), to a tree edited during the run (a third side: `two-sides`),
+and to a benchmark recorded apart from the subject that is not one file on
+both sides and in every round (`one-benchmark-tree`, schema §5.5). A side that
+is not clean does not fail the run: it makes the comparison local-only. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
 listed.
 
@@ -519,8 +529,10 @@ compares them; it is the workbench's session loop (`system-decomposition.md`
 1. checks that both build directories and the suite binary exist, and locates
    each side's source checkout, from `SOURCE_DIR` or the
    `CMAKE_HOME_DIRECTORY` the build records. Under `revisions` it also checks
-   that both trees are clean, and refuses before running anything, so a dirty
-   tree fails at once and not after R rounds;
+   that both trees have a working-tree id, and refuses before running
+   anything, so a tree whose state is unknown fails at once and not after R
+   rounds. A dirty side is not refused: the session says which sides are not
+   clean, before measuring, since the comparison will be local-only;
 2. fixes a run key, from `--run-key` or a timestamped default;
 3. for each of R rounds, for each side in order (baseline, then contender),
    writes one work order with the shared run key, `round`, and a running
@@ -542,8 +554,8 @@ it has one. The description's declared text (`how_built`, `activation`,
 checked. If it stops partway, the results already
 delivered stay in the store, and a read-mode comparison of the run key reports
 missing results or a failed alternation invariant, as UC-03 §10 requires.
-Allowing a local-only `revisions` comparison of a dirty tree is open
-(`system-decomposition.md` §6 question 4).
+A `revisions` comparison of a dirty tree is allowed and local-only
+(`system-decomposition.md` §6 question 4, resolved).
 
 ## 6. Demonstration
 

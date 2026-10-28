@@ -279,6 +279,12 @@ _ENTITY_KEYS = {
 }
 
 
+def warning_codes(document: dict) -> list[str]:
+    """A result's quality warnings by code: a warning is a token, or an object that has a `code`."""
+    return [w.get("code", str(w)) if isinstance(w, dict) else str(w)
+            for w in document.get("quality", {}).get("warnings", [])]
+
+
 def _add_entities(entities: dict, doc: dict, project: str, projection: Projection) -> None:
     def put(name, row):
         entities.setdefault(name, {}).setdefault(_ENTITY_KEYS[name](row), row)
@@ -309,4 +315,5 @@ def _add_entities(entities: dict, doc: dict, project: str, projection: Projectio
                              "producer": doc["producer"]["name"], "ingest_key": doc["ingest_key"],
                              "attempt_key": doc["attempt_key"], "revision": doc["revision"]["key"],
                              "axis": list(point["axis"]), "value": point["value"], "source": point["source"],
-                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"]})
+                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"],
+                             "warnings": warning_codes(doc)})

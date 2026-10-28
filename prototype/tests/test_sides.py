@@ -83,7 +83,7 @@ def test_a_working_tree_outside_git_is_identified_by_content(tmp_path, monkeypat
     provided(monkeypatch, description(root))
     side = session._side("@plain", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
     assert side["identity"]["revision"].startswith("directory-")
-    assert side["identity"]["dirty"] == "dirty"  # so a revisions comparison refuses it
+    assert side["identity"]["dirty"] == "dirty"  # with a tree id, so a revisions comparison labels it local-only
 
 
 def test_a_missing_working_tree_says_so(tmp_path, monkeypatch):

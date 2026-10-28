@@ -28,6 +28,10 @@ ENV_ALLOWLIST = (
 )
 
 
+# The quality warning a result carries for each dirty flag that is `dirty` (schema §4.1).
+DIRTY_WARNINGS = (("subject_dirty", "dirty-subject-tree"), ("benchmark_dirty", "dirty-benchmark-tree"))
+
+
 def env_allowlist(env: dict, adapter_names=()) -> tuple:
     """Core default, then the project's names from `env`, then the adapter's."""
     extra = [n.strip() for n in env.get("BENCHX_ENV_ALLOWLIST", "").split(",") if n.strip()]
