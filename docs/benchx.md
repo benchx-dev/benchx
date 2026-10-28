@@ -224,8 +224,17 @@ $ pip install benchx
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
-$ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
 ```
+
+`tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
+`spin` and compares two tags in one `bx compare`. It is skipped unless
+`BENCHX_E2E_NUMPY` (a numpy git checkout) and `BENCHX_E2E_EXAMPLE` (the
+`numpy-revisions` example directory) are set and `spin` is on the PATH; it also
+needs the project-file entries of PR #65 and PR #71. `BENCHX_E2E_WORKTREES`
+keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
+`BENCHX_E2E_SPIN_EXAMPLE` (the `numpy-spin` example directory) adds a single-run
+scenario, and the test's docstring has the rest.
 
 A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
 `pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.
