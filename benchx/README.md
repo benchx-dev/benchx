@@ -9,8 +9,8 @@ bx run <order.json> [--out DIR] [--no-ingest]
                                          # runner + Google Benchmark adapter → result files → local store
 bx ingest <dir|file>                     # result files and work orders → the local store
 bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
+bx history <series>                      # one series' points (a query); dirty ones are marked
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
                                          # read mode: compare results already measured
@@ -159,7 +159,8 @@ every result is pyperf. Results also record the installed project's version
   Every accepting ingest rewrites the file atomically.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
-  trees are clean, before running anything), writes one order per side and
+  trees have a working-tree id, before running anything; it says which sides
+  are not clean), writes one order per side and
   round, alternates them over the rounds, delivers every result to the local
   store, and hands the run to the comparator. It builds nothing: both build
   directories must already exist.
@@ -167,8 +168,9 @@ every result is pyperf. Results also record the installed project's version
   `environments` profiles, each a projection built in code from the identity
   policy (`benchx/compare.py`): the axis tells the sides apart, everything the
   policy matches must agree, and it checks the profile's invariants (`revisions` also
-  requires clean trees, UC-03 §10; `environments` labels a dirty side
-  local-only), pairs the
+  requires one tree id per side and, for a benchmark recorded apart from the
+  subject, one benchmark file throughout, UC-03 §10; a dirty side makes any
+  profile's comparison local-only), pairs the
   sides by round, and applies `benchx/paired-relative/v1` (effect = mean
   relative paired difference, noise = its standard error, change when
   |effect| > *k* × noise). `environments` names its sides by the label
@@ -180,9 +182,18 @@ every result is pyperf. Results also record the installed project's version
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
+
+`tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
+`spin` and compares two tags in one `bx compare`. It is skipped unless
+`BENCHX_E2E_NUMPY` (a numpy git checkout) and `BENCHX_E2E_EXAMPLE` (the
+`numpy-revisions` example directory) are set and `spin` is on the PATH; it also
+needs the project-file entries of PR #65 and PR #71. `BENCHX_E2E_WORKTREES`
+keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
+`BENCHX_E2E_SPIN_EXAMPLE` (the `numpy-spin` example directory) adds a single-run
+scenario, and the test's docstring has the rest.
 
 `demo.sh` prints every command before running it, as you would type it
 (`bx` for `.venv/bin/python -m benchx.cli`, `$WORK` for its scratch
