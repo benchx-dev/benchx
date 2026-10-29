@@ -46,7 +46,8 @@ def parse_label(text: str) -> tuple[str, str, str]:
 KINDS = ("build", "working_tree")
 
 
-def _side(spec: str, suite: str, operation: str, harness=None, environment_variables=None) -> dict:
+def _side(spec: str, suite: str, operation: str, harness=None, environment_variables=None,
+          timeout=None) -> dict:
     """Locate and identify one side before anything runs.
 
     `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or a
@@ -83,7 +84,8 @@ def _side(spec: str, suite: str, operation: str, harness=None, environment_varia
         raise SessionError(f"{'build directory' if kind == 'build' else 'working tree'} not found: {path}")
     try:
         # The environment the runner will give the harness: inherited, plus the order's variables.
-        adapters.get(harness.name).locate(path, suite, {**os.environ, **(environment_variables or {})})
+        adapters.get(harness.name).locate(path, suite, {**os.environ, **(environment_variables or {})},
+                                          timeout=timeout)
     except Unsupported as e:
         raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
     if kind == "build" and ":" in spec and not spec.startswith("@"):
@@ -161,7 +163,8 @@ def bench_target(target: str, *, suite: str, store=None, adapter=None, flags=Non
     run cannot start, and runner.Refused when the runner refuses the order.
     """
     harness, precision, config_path = _harness(adapter, flags, cwd)
-    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables)
+    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables,
+                 timeout=order_s)
     source_uri = _source_uri([side], source_uri)
     run_key = run_key or orders.default_run_key("bench")
     out = Path(out) if out else Path("results") / run_key.replace("/", "_")
@@ -203,7 +206,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError("--label names the sides of an environments comparison; revisions are named by their trees")
     harness, precision, _ = _harness(adapter, flags, cwd)
     operation = "prepare" if build else "describe"
-    sides = [_side(spec, suite, operation, harness, environment_variables) for spec in (baseline, contender)]
+    sides = [_side(spec, suite, operation, harness, environment_variables, timeout=orders.ORDER_TIMEOUT_S)
+             for spec in (baseline, contender)]
     if profile == "revisions":
         # UC-03 §10: refuse before any measurement, not after R rounds.
         for name, side in zip(("baseline", "contender"), sides):

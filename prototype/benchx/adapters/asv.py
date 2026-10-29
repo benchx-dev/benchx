@@ -58,7 +58,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import pyperf
-from .base import Unsupported
+from .base import Unsupported, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -156,7 +156,7 @@ def _project(benchmark_dir: Path, root: Path) -> str | None:
     return None
 
 
-def locate(target_path, suite, env) -> dict:
+def locate(target_path, suite, env, timeout=None) -> dict:
     """The benchmark directory, the interpreter that will run it, and the project it measures."""
     root = Path(target_path).resolve()
     benchmark_dir = (root / suite).resolve()
@@ -165,14 +165,15 @@ def locate(target_path, suite, env) -> dict:
     python = _which_python(env)
     if python is None:
         raise Unsupported("no `python` on the PATH the benchmark would run with")
-    probe = subprocess.run([python, "-c", "import pyperf"], env=env, capture_output=True, text=True)
+    probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
+                        env=env)
     if probe.returncode != 0:
         raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
     return {"python": python, "benchmark_dir": benchmark_dir, "root": root,
             "project": _project(benchmark_dir, root), "benchmarks": {}}
 
 
-def list_cases(runnable, case_filter, env) -> list[str]:
+def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     """The `time_*` benchmarks the filter (a regex, as asv's --bench) selects,
     one case per parameter combination. As in asv, a parametrized benchmark is
     searched once per combination, as `name(p0, p1)`, and only the matching
@@ -181,8 +182,9 @@ def list_cases(runnable, case_filter, env) -> list[str]:
     with tempfile.TemporaryDirectory() as scratch:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
-        out = subprocess.run([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
-                             env=env, cwd=scratch, capture_output=True, text=True)
+        out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
+                          timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
+                          env=env, cwd=scratch)
     if out.returncode != 0:
         raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")

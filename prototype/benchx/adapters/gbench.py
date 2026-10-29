@@ -12,7 +12,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from .base import Unsupported
+from .base import Unsupported, run_bounded
 
 NAME = "google-benchmark"
 CONTEXT_KEY = "google_benchmark"
@@ -74,8 +74,9 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     return applied, flags
 
 
-def locate(target_path, suite, env) -> Path:
-    """The benchmark binary: the suite's name inside the target's build directory."""
+def locate(target_path, suite, env, timeout=None) -> Path:
+    """The benchmark binary: the suite's name inside the target's build directory.
+    Nothing is run, so `timeout` has nothing to bound."""
     binary = Path(target_path) / suite
     if not (binary.is_file() and os.access(binary, os.X_OK)):
         raise Unsupported(f"suite binary not found: {binary}")
@@ -95,12 +96,14 @@ def harness(info: dict) -> dict:
     return out
 
 
-def list_cases(binary, case_filter, env) -> list[str]:
-    """The planned set, fixed before running (harness-adapter.md §5 step 5)."""
+def list_cases(binary, case_filter, env, timeout=None) -> list[str]:
+    """The planned set, fixed before running (harness-adapter.md §5 step 5). Asking the
+    binary is limited to `timeout` seconds."""
     args = [str(binary), "--benchmark_list_tests=true"]
     if case_filter:
         args.append(f"--benchmark_filter={case_filter}")
-    out = subprocess.run(args, env=env, capture_output=True, text=True, check=True)
+    out = run_bounded(args, timeout=timeout, what=f"listing the benchmarks of {Path(binary).name}", env=env)
+    out.check_returncode()
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 

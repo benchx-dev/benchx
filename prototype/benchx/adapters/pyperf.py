@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 from .. import snapshot
-from .base import Unsupported
+from .base import Unsupported, run_bounded
 
 NAME = "pyperf"
 CONTEXT_KEY = "pyperf"
@@ -110,7 +110,7 @@ def _which_python(env: dict) -> str | None:
     return shutil.which("python", path=path) or shutil.which("python3", path=path)
 
 
-def locate(target_path, suite, env) -> dict:
+def locate(target_path, suite, env, timeout=None) -> dict:
     """The module to benchmark and the interpreter that will run it.
 
     `python` comes from the child's PATH, never from `sys.executable`. pyperf
@@ -123,7 +123,8 @@ def locate(target_path, suite, env) -> dict:
     python = _which_python(env)
     if python is None:
         raise Unsupported("no `python` on the PATH the benchmark would run with")
-    probe = subprocess.run([python, "-c", "import pyperf"], env=env, capture_output=True, text=True)
+    probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
+                        env=env)
     if probe.returncode != 0:
         raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
     return {"python": python, "module": module.resolve(), "root": root.resolve()}
@@ -145,12 +146,13 @@ print(json.dumps(sorted(names)))
 """
 
 
-def list_cases(runnable, case_filter, env) -> list[str]:
+def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     """The module's functions: those matching the filter (a regex searched in the
     name), or with no filter those named `bench_*` or `benchmark_*`."""
-    out = subprocess.run([runnable["python"], "-c", LISTER, str(runnable["module"]), case_filter or "",
-                          json.dumps(DEFAULT_CASE_PREFIXES)],
-                         env=env, cwd=runnable["root"], capture_output=True, text=True)
+    out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), case_filter or "",
+                       json.dumps(DEFAULT_CASE_PREFIXES)],
+                      timeout=timeout, what=f"importing {runnable['module'].name} to list its benchmarks",
+                      env=env, cwd=runnable["root"])
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
