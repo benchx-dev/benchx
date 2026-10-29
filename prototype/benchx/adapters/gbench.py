@@ -15,6 +15,8 @@ from pathlib import Path
 from .base import Unsupported
 
 NAME = "google-benchmark"
+# The suite is a binary built from the subject's source, so its benchmarks are the subject's own.
+SUITE_IS_SOURCE = False
 CONTEXT_KEY = "google_benchmark"
 WORKLOAD_PARAMETERS = False
 PRODUCER = {"name": "benchx/gbench-adapter", "version": "0.1.0", "mapping_version": "gbench-to-benchx/v1"}
@@ -29,10 +31,17 @@ _TO_SECONDS = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1.0}
 # Google Benchmark's own defaults, recorded when the order leaves them out, so
 # no applied setting goes unrecorded (work-order §3 "every applied setting is
 # recorded"). precision.repetitions has no default: it is required.
+DEFAULT_REPETITIONS = 5  # the order always states a repetition count
 DEFAULTS = {
     "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.5},
     "warmup": {"mode": "none"},
 }
+
+
+def default_precision() -> dict:
+    """The precision a Google Benchmark order gets with nothing configured."""
+    return {"repetitions": DEFAULT_REPETITIONS, "calibration": dict(DEFAULTS["calibration"]),
+            "warmup": dict(DEFAULTS["warmup"])}
 
 
 def protocol(precision: dict) -> tuple[dict, list[str]]:

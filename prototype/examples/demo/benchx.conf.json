@@ -1,0 +1,10 @@
+{
+  "schema_version": "benchx/config/0.1.0",
+  "adapter": {
+    "name": "google-benchmark",
+    "suite": "demo-bench",
+    "precision": { "repetitions": 5 }
+  },
+  "paths": { "store": "store.parquet", "results": "results" },
+  "compare": { "profile": "revisions" }
+}
