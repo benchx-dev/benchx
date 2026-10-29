@@ -36,7 +36,7 @@ def test_unknown_kind_is_a_programming_error(write, adhoc):
 
 
 def test_read_errors(write):
-    assert types(write('{"schema_version": 5, "x": NaN, "y": 1e400}')) == [
+    assert types(write('{"schema_version": "benchx/measurement-result/0.1.0", "x": NaN, "y": 1e400}')) == [
         BadNumber,
         BadNumber,
     ]
@@ -47,7 +47,7 @@ def test_unparseable_file(write):
 
 
 def test_missing_schema(write):
-    assert types(write({"schema_version": 99, "anything": "goes"})) == [SchemaNotFound]
+    assert types(write({"schema_version": "benchx/measurement-result/99.0.0", "anything": "goes"})) == [SchemaNotFound]
 
 
 def test_structure_checked_before_rules(write, adhoc):

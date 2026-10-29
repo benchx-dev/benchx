@@ -12,7 +12,7 @@ import json
 import statistics
 from pathlib import Path
 
-from . import snapshot
+from . import core, snapshot
 from .errors import SessionError
 
 
@@ -61,7 +61,7 @@ def summarize(files) -> list[dict]:
     rows = []
     for path in files:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
-        if document.get("schema_version") == "benchx/work-order/0.1.0":
+        if document.get("schema_version") == core.catalog.WORK_ORDER:
             continue
         if document["measurement"].get("kind") == "condition":
             continue  # the runner's load-average sibling: a condition, not a case (schema §4.4)

@@ -13,21 +13,20 @@ SCHEMAS = Path(
     os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[3] / "schemas"
 )
 
-# Results and comparisons declare an integer major version; this is the
-# release shipped for each.
-RELEASES = {
-    "measurement-result": {5: "0.1.0"},
-    "comparison-document": {1: "0.1.0"},
-}
+# The version string each document kind declares in its schema_version. Bump a
+# schema here and nowhere else in the code.
+MEASUREMENT_RESULT = "benchx/measurement-result/0.1.0"
+COMPARISON_DOCUMENT = "benchx/comparison-document/0.1.0"
+WORK_ORDER = "benchx/work-order/0.1.0"
+TARGET_DESCRIPTION = "benchx/target-description/0.1.0"
+TARGET_PROVIDER_REQUEST = "benchx/target-provider-request/0.1.0"
+
 RELEASE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
-def release(kind: str, version: int | str) -> str | None:
-    """The release a declared version names: an integer major version, or a
-    string that names its own release, such as "benchx/work-order/0.1.0"."""
-    if isinstance(version, int):
-        return RELEASES.get(kind, {}).get(version)
-
+def release(kind: str, version: str) -> str | None:
+    """The release a declared version names, such as "0.1.0" for
+    "benchx/work-order/0.1.0"."""
     prefix = f"benchx/{kind}/"
     named = version.removeprefix(prefix)
     # The release becomes part of a file path, so it must be exactly this shape.
@@ -37,7 +36,7 @@ def release(kind: str, version: int | str) -> str | None:
 
 
 @cache
-def lookup(kind: str, version: int | str) -> Draft202012Validator | None:
+def lookup(kind: str, version: str) -> Draft202012Validator | None:
     named = release(kind, version)
     schema = _read(kind, named) if named else None
     if schema is None:

@@ -7,7 +7,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "comparison_version",
+    "schema_version",
     "mode",
     "method",
     "estimator",
@@ -19,9 +19,9 @@
     "inputs"
   ],
   "properties": {
-    "comparison_version": {
-      "description": "Major version of this document contract.",
-      "const": 1
+    "schema_version": {
+      "description": "Message contract version this object conforms to.",
+      "const": "benchx/comparison-document/0.1.0"
     },
     "mode": {
       "description": "History mode compares a target series point against preceding points of its series; run mode compares two sides measured in one run, as a profile defines them.",

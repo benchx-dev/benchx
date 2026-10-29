@@ -34,7 +34,7 @@ _ATTEMPT_PROVENANCE = ("run_key", "subject_dirty", "subject_tree", "benchmark_di
 def _attempt_signature(doc: dict) -> str:
     facts = {k: doc.get(k) for k in _ATTEMPT_FIELDS}
     facts.update({k: doc["coordinates"][k] for k in _ATTEMPT_COORDINATES})
-    facts["environment"] = {k: facts["environment"][k] for k in ("schema", "identity")}
+    facts["environment"] = {k: facts["environment"][k] for k in ("schema_version", "identity")}
     facts.update({k: doc["provenance"].get(k) for k in _ATTEMPT_PROVENANCE})
     return core.sha256_hex(core.canonical(facts))
 
@@ -300,8 +300,8 @@ def _add_entities(entities: dict, doc: dict, project: str, projection: Projectio
     quantity = doc["measurement"]["quantity"]
     put("quantity", {"project": project, "name": quantity["name"], "unit": quantity["unit"],
                      "direction": quantity.get("direction"), "deterministic": quantity.get("deterministic")})
-    env_identity = {"schema": env["schema"], "identity": env["identity"]}
-    put("environment", {"identity_schema": env["schema"],
+    env_identity = {"schema_version": env["schema_version"], "identity": env["identity"]}
+    put("environment", {"identity_schema": env["schema_version"],
                         "fingerprint": core.sha256_hex(core.canonical(env_identity)),
                         "identity": core.canonical(env["identity"]).decode()})
     put("revision", {"source": doc["source"]["uri"], "key": doc["revision"]["key"]})

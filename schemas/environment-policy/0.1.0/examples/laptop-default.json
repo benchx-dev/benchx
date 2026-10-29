@@ -1,4 +1,5 @@
 {
+  "schema_version": "benchx/environment-policy/0.1.0",
   "name": "laptop-default",
   "version": "1.0.0",
   "rules": [
