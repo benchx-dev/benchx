@@ -71,7 +71,7 @@ def test_session_refusals(tmp, builds, kwargs, message):
 
 
 def test_a_refused_order_stops_the_session(tmp, builds, monkeypatch):
-    def refuse(*_):
+    def refuse(*_, **__):
         raise runner.Refused("deferred")
     monkeypatch.setattr(runner, "run", refuse)
     with pytest.raises(runner.Refused):
@@ -100,8 +100,8 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     (["--profile", "revisions"], "give two targets"),
     (["A", "B", "--run", "k", "--profile", "revisions"], "not both"),
     (["A", "--profile", "revisions"], "exactly two targets"),
-    (["A", "B", "--profile", "revisions", "--rounds", "3"], "needs --suite"),
-    (["A", "B", "--profile", "revisions", "--suite", "s"], "needs --rounds"),
+    (["A", "B", "--profile", "revisions", "--rounds", "3", "--adapter", "pyperf"], "--suite is required"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf"], "--rounds is required"),
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3", "--baseline", "x"], "read mode"),
     (["--run", "k", "--profile", "revisions"], "needs --baseline"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--rounds", "3"], "measure mode"),
