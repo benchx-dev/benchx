@@ -130,6 +130,28 @@ def test_min_rounds():
     assert evaluate(run(rounds=2), min_rounds=2)["units"][0]["verdict"] == "regressed"
 
 
+@pytest.mark.parametrize("min_rounds", [1, 0, -1])
+def test_one_pair_has_no_noise_whatever_min_rounds_says(min_rounds):
+    """The noise is the standard error of the per-round differences, which needs two
+    of them: with one pair the unit is indeterminate, not a StatisticsError."""
+    unit = evaluate(run(rounds=1), min_rounds=min_rounds)["units"][0]
+    assert (unit["verdict"], unit["reason"]) == ("indeterminate", "insufficient-rounds")
+    assert unit["rounds"] == 1 and "noise" not in unit
+
+
+def test_no_pair_at_all_is_indeterminate_too():
+    """Every head attempt failed, so no round pairs; `min_rounds=0` must not reach the mean of nothing."""
+    docs = run()
+    for d in docs[1::2]:
+        d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+    unit = evaluate(docs, min_rounds=0)["units"][0]
+    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "insufficient-rounds", 0)
+
+
+def test_two_pairs_are_enough_when_min_rounds_allows():
+    assert evaluate(run(rounds=2), min_rounds=1)["units"][0]["verdict"] == "regressed"
+
+
 def test_unmatched_differences():
     """C10: a fact the profile ignores that differs between the sides is carried as a caveat."""
     docs = run()
