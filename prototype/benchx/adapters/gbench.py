@@ -98,12 +98,20 @@ def harness(info: dict) -> dict:
 
 def list_cases(binary, case_filter, env, timeout=None) -> list[str]:
     """The planned set, fixed before running (harness-adapter.md §5 step 5). Asking the
-    binary is limited to `timeout` seconds."""
+    binary is limited to `timeout` seconds. Raises Unsupported when the binary cannot be
+    asked, so the runner refuses the order."""
     args = [str(binary), "--benchmark_list_tests=true"]
     if case_filter:
         args.append(f"--benchmark_filter={case_filter}")
-    out = run_bounded(args, timeout=timeout, what=f"listing the benchmarks of {Path(binary).name}", env=env)
-    out.check_returncode()
+    name = Path(binary).name
+    try:
+        out = run_bounded(args, timeout=timeout, what=f"listing the benchmarks of {name}", env=env)
+    except OSError as e:
+        raise Unsupported(f"cannot run {name} to list its benchmarks: {e}") from None
+    if out.returncode != 0:
+        # Nothing can be planned from a binary that will not say what it has: refuse, with its own words.
+        last = (out.stderr.strip().splitlines() or ["no message"])[-1]
+        raise Unsupported(f"{name} failed to list its benchmarks: exit status {out.returncode}: {last}")
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 

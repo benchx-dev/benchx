@@ -1,6 +1,7 @@
 """The success criteria of prototype-scope.md §3, on fake Google Benchmark output."""
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -312,6 +313,27 @@ def test_every_refusal_is_reported(repo, tmp):
         "schedule is deferred in the prototype: side scheduling (the session loop alternates the sides)",
         "google-benchmark warmup is time-based only, not count-based",
     ]
+
+
+@pytest.mark.parametrize("script, message", [
+    ("#!/bin/sh\necho 'cannot open the dataset' >&2\nexit 3\n",
+     "demo-bench failed to list its benchmarks: exit status 3: cannot open the dataset"),
+    ("#!/bin/sh\nexit 1\n", "demo-bench failed to list its benchmarks: exit status 1: no message"),
+    ("\x00\x01 not a program", "cannot run demo-bench to list its benchmarks: "),
+], ids=["exits-3-with-a-message", "exits-1-silently", "cannot-start"])
+def test_a_binary_that_cannot_list_its_benchmarks_is_a_refusal(repo, tmp, capsys, script, message):
+    """The planned cases come from asking the binary, so one that fails or cannot start cannot be
+    planned: the order is refused with what it said, before any case runs, not with a traceback."""
+    from benchx import cli
+    build = make_build(tmp / "b", repo["wt-head"], cases())
+    (build / "demo-bench").write_bytes(script.encode())
+    path = tmp / "o.json"
+    path.write_text(json.dumps(order(build, repo["wt-head"], "nolist")))
+    with pytest.raises(runner.Refused, match=re.escape(message)):
+        runner.run(path, tmp / "out")
+    assert [p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-")] == []
+    assert cli.main(["run", str(path), "--out", str(tmp / "out")]) == cli.EXIT_REFUSED
+    assert f"refused: {message}" in capsys.readouterr().err
 
 
 def test_missing_build_is_refused_for_every_reason(tmp):
