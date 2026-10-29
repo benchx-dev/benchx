@@ -28,10 +28,11 @@ def test_suite_entry_leaves_out_an_empty_filter(harness):
 
 def test_google_benchmark_precision():
     gb = harnesses.GOOGLE_BENCHMARK
-    assert gb.precision({})[0] == {"repetitions": 5}
-    flags = gb.flags_to_precision(repetitions=3, min_time=0.5)
-    assert gb.precision(flags) == ({"repetitions": 3, "calibration": {
-        "mode": "adaptive", "minimum_sample_seconds": 0.5}}, None)
+    assert gb.precision({}) == adapters.get("google-benchmark").default_precision()
+    flags = gb.flags_to_precision(repetitions=3, min_time=0.25)
+    precision = gb.precision(flags)
+    assert (precision["repetitions"], precision["calibration"]) == (
+        3, {"mode": "adaptive", "minimum_sample_seconds": 0.25})
 
 
 @pytest.mark.parametrize("harness, flag", [(harnesses.GOOGLE_BENCHMARK, "processes"),
@@ -50,7 +51,5 @@ def test_pyperf_calibration_is_one_or_the_other():
         harnesses.PYPERF.flags_to_precision(min_time=0.1, loops=5)
 
 
-def test_pyperf_precision_falls_back_to_its_defaults(tmp_path):
-    precision, path = harnesses.PYPERF.precision({}, start=tmp_path)
-    assert path is None
-    assert precision == adapters.get("pyperf").default_precision()
+def test_pyperf_precision_falls_back_to_its_defaults():
+    assert harnesses.PYPERF.precision({}) == adapters.get("pyperf").default_precision()
