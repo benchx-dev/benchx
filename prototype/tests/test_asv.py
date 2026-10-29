@@ -168,7 +168,7 @@ def test_filter_and_benchmark_defaults(suite, capsys):
     assert protocol["warmup"] == {"mode": "count", "n_warmup": 1}
     assert protocol["repetitions"]["levels"] == [{"unit": "process", "n": 1}, {"unit": "value", "n": 5}]
     assert {k: v for k, v in protocol["asv"].items() if k != "benchmark_version"} == {
-        "values_from": "default", "timeout": 60.0, "setup_per_call": False}
+        "values_from": "default", "timeout": 60.0}
     assert len(document["measurement"]["observations"]) == 5
     assert "1 rounds x per-benchmark repeat" in capsys.readouterr().err
 
@@ -197,14 +197,16 @@ def test_env_var_named_like_a_parameter_is_refused(suite, capsys):
 
 
 def test_setup_means_one_call_per_loop(suite):
-    # As asv_runner >= 0.3.1 (asv#966, asv_runner#53): a benchmark with a setup and no number is timed one call per value.
+    # As asv_runner >= 0.3.0 (asv#966, asv_runner#53): a benchmark with a setup and no number is timed one call per value.
     assert cli.main([*ASV, "--filter", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
                      "--processes", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "c").values()
     protocol = document["coordinates"]["protocol"]
     assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 1}
-    assert protocol["asv"]["setup_per_call"] is True
+    assert protocol["asv"]["setup_scope"] == "call"
     assert document["procedure"]["inner_iterations"] == 1
+    # A sum of 100 ints is far below a value's 10 ms: pyperf would have batched it.
+    assert document["quality"]["warnings"] == [asv.UNBATCHED]
 
 
 def test_setup_and_teardown_run_between_calls(suite, tmp):
@@ -217,6 +219,97 @@ def test_setup_and_teardown_run_between_calls(suite, tmp):
                    if d["measurement"].get("kind") != "condition")
     assert document["measurement"]["status"] == "success"
     assert document["procedure"]["inner_iterations"] == 3
+
+
+SCOPED = textwrap.dedent('''
+    class Sample:
+        setup_scope = "sample"
+
+        def setup(self):
+            self.data = list(range(100))
+
+        def time_sum(self):
+            sum(self.data)
+
+    class Counted:
+        setup_scope = "sample"
+
+        def setup(self):
+            self.calls = 0
+
+        def time_count(self):
+            self.calls += 1
+
+        def teardown(self):
+            import os
+            with open(os.environ["CALLS_FILE"], "a") as f:
+                f.write(f"{self.calls}\\n")
+
+    class Bogus:
+        setup_scope = "value"
+
+        def setup(self):
+            pass
+
+        def time_nothing(self):
+            pass
+''')
+
+
+def test_sample_scope_batches_calls(suite):
+    # asv#1613: setup once per value, so pyperf calibrates loops and nothing is flagged.
+    (suite / "benchmarks" / "scoped.py").write_text(SCOPED)
+    assert cli.main([*ASV, "--filter", r"Sample\.time_sum$", "--run-key", "s", "--no-ingest",
+                     "--processes", "1"]) == cli.EXIT_OK
+    (document,) = results(suite, "s").values()
+    protocol = document["coordinates"]["protocol"]
+    assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.01}
+    assert protocol["asv"]["setup_scope"] == "sample"
+    assert document["procedure"]["inner_iterations"] > 1
+    assert "quality" not in document
+
+
+def test_sample_scope_shares_setup_within_a_value(suite, monkeypatch):
+    # Every value sees one setup and `loops` calls on it; teardown records how many.
+    (suite / "benchmarks" / "scoped.py").write_text(SCOPED)
+    calls = suite / "calls"
+    monkeypatch.setenv("CALLS_FILE", str(calls))
+    out = suite / "counted"
+    assert cli.main([*ASV, "--filter", r"Counted", "--run-key", "n", "--no-ingest", "--out", str(out),
+                     "--processes", "1", "--values", "3", "--warmups", "1", "--loops", "4"]) == cli.EXIT_OK
+    (document,) = (d for d in (json.loads(p.read_text()) for p in out.glob("*.json") if "workorder" not in p.name)
+                   if d["measurement"].get("kind") != "condition")
+    assert document["measurement"]["status"] == "success"
+    assert len(document["measurement"]["observations"]) == 3
+    # One warmup and three values, four calls each; under "call" every line would be 1.
+    assert calls.read_text().split() == ["4"] * 4
+
+
+def test_setup_scope_from_the_module(suite):
+    # A module-level setup hook with a module-level scope, as a pandas-style suite would declare it.
+    (suite / "benchmarks" / "modscope.py").write_text(textwrap.dedent('''
+        def setup(*args):
+            pass
+
+        setup_scope = "sample"
+
+        class NoOwnSetup:
+            def time_sum(self):
+                sum(range(100))
+    '''))
+    assert cli.main([*ASV, "--filter", r"NoOwnSetup", "--run-key", "m2", "--no-ingest",
+                     "--processes", "1"]) == cli.EXIT_OK
+    (document,) = results(suite, "m2").values()
+    assert document["coordinates"]["protocol"]["asv"]["setup_scope"] == "sample"
+    assert document["procedure"]["inner_iterations"] > 1
+
+
+def test_unknown_setup_scope_is_skipped(suite, capsys):
+    (suite / "benchmarks" / "scoped.py").write_text(SCOPED)
+    cli.main([*ASV, "--filter", r"Bogus", "--run-key", "b", "--no-ingest", *FAST])
+    assert "asv: skipped scoped.Bogus.time_nothing: setup_scope must be one of 'call', 'sample', not 'value'" \
+        in capsys.readouterr().err
+    assert results(suite, "b") == {}
 
 
 def test_timeout_is_the_benchmarks_own(suite):

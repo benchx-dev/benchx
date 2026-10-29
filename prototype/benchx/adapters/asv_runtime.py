@@ -38,7 +38,8 @@ TYPES = (
     ("track", re.compile("^(Track[A-Z_].+)|(track_.+)$")),
 )
 # Declared attributes that bear on how a case is timed.
-DECLARED = ("number", "repeat", "rounds", "processes", "sample_time", "warmup_time", "min_run_count", "timeout")
+DECLARED = ("number", "repeat", "rounds", "processes", "sample_time", "warmup_time", "min_run_count", "timeout",
+            "setup_scope")
 
 
 class Skipped(Exception):
@@ -174,7 +175,7 @@ class Benchmark:
     def describe(self) -> dict:
         """What the adapter needs to plan and record a case, as JSON."""
         declared = {k: (list(v) if isinstance(v, tuple) else v) for k, v in self.declared.items()
-                    if isinstance(v, (int, float, tuple, list))}
+                    if isinstance(v, (int, float, str, tuple, list))}
         return {"name": self.name, "type": self.type, "module": self.module, "attr": self.attr,
                 "params": self.params, "param_names": self.param_names, "version": self.version,
                 "setup_cache_key": self.setup_cache_key, "has_setup": bool(self.setups),
@@ -217,11 +218,18 @@ class Benchmark:
 
     def time_func(self):
         """pyperf's time_func(loops): seconds for `loops` calls, the collector off as
-        under asv. With setup hooks, every call sees freshly set-up state (asv#966, asv_runner#53):
-        teardown and setup run between calls, outside the timed region."""
+        under asv. With setup hooks, `setup_scope` says how often they run, outside
+        the timed region: "call" (the default, as asv_runner >= 0.3.0: asv#966,
+        asv_runner#53) before every call, so every call sees freshly set-up state;
+        "sample" (proposed in asv#1613) once per value, the calls of a value sharing it."""
         func, args, timer = self.func, self._args(), self.timer
-        if not self.setups:
+        fresh = [True]  # the first value (or call) uses the setup the driver ran
+        if not self.setups or self.declared.get("setup_scope", "call") == "sample":
             def run(loops):
+                if self.setups and not fresh[0]:
+                    self.teardown()
+                    self.setup()
+                fresh[0] = False
                 enabled = gc.isenabled()
                 gc.disable()
                 try:
@@ -233,8 +241,6 @@ class Benchmark:
                     if enabled:
                         gc.enable()
             return run
-
-        fresh = [True]  # the first call uses the setup the driver ran
 
         def run_isolated(loops):
             enabled = gc.isenabled()

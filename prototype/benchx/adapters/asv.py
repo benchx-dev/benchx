@@ -23,11 +23,20 @@ read (the order always gives processes); `repeat` gives values (a `(min, max,
 seconds)` repeat gives its minimum: pyperf takes a fixed number); `number`
 gives fixed loops; `sample_time` gives pyperf's `--min-time`; `warmup_time = 0`
 means no warmup, any other a single warmup value; `timeout` is pyperf's
-per-worker `--timeout`, rounded up to whole seconds (asv's default 60 s). A benchmark with setup hooks and
-no `number` is timed one call per loop, and with a `number`, setup runs again
-between calls outside the timed region: every call sees freshly set-up state,
-as in asv_runner >= 0.3.1 (asv#966, fixed by asv_runner#53). Each result
-reports its own case's protocol (`case_protocol`).
+per-worker `--timeout`, rounded up to whole seconds (asv's default 60 s). Each
+result reports its own case's protocol (`case_protocol`).
+
+Setup scope: a benchmark with setup hooks (its own `setup`, or a module-level
+one) declares how often they run with `setup_scope`, looked up like the other
+attributes (function, class, module). "call", the default, is asv_runner's
+since 0.3.0 (asv#966, asv_runner#53): setup runs before every timed call, so
+every call sees freshly set-up state; with no `number` that is one call per
+loop, and with one, setup runs again between calls outside the timed region.
+"sample", as proposed in asv#1613, runs setup once per value and lets the
+calls of a value share its state, so pyperf calibrates loops as usual. It is
+for benchmarks whose calls leave the set-up state as they found it; for a
+fast one under "call", the timing is mostly timer overhead and cold caches,
+and the result carries the `setup-per-call-unbatched` warning.
 
 Translating: pyperf's JSON as the pyperf adapter reads it; parameter values
 are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
@@ -41,6 +50,7 @@ import os
 import re
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -53,7 +63,7 @@ from .base import Unsupported
 NAME = "asv"
 CONTEXT_KEY = "asv"
 WORKLOAD_PARAMETERS = False
-PRODUCER = {"name": "benchx/asv-adapter", "version": "0.2.0", "mapping_version": "asv-on-pyperf/v1"}
+PRODUCER = {"name": "benchx/asv-adapter", "version": "0.2.0", "mapping_version": "asv-on-pyperf/v2"}
 QUANTITIES = pyperf.QUANTITIES
 ENV_ALLOWLIST = pyperf.ENV_ALLOWLIST
 
@@ -64,6 +74,8 @@ DEFAULT_ROUNDS = 2
 DEFAULT_VALUES = 5  # asv's adaptive repeat takes at most 5 samples per round when rounds > 1
 DEFAULT_SAMPLE_TIME = 0.01
 DEFAULT_TIMEOUT = 60.0
+SETUP_SCOPES = ("call", "sample")
+UNBATCHED = "setup-per-call-unbatched"
 # pyperf exits with this when a worker overruns --timeout.
 PYPERF_TIMEOUT_EXIT = 124
 
@@ -189,6 +201,11 @@ def list_cases(runnable, case_filter, env) -> list[str]:
         if info["type"] != "time":
             other[info["type"]] = other.get(info["type"], 0) + 1
             continue
+        scope = info["declared"].get("setup_scope", "call")
+        if scope not in SETUP_SCOPES:
+            print(f"asv: skipped {info['name']}: setup_scope must be one of {', '.join(map(repr, SETUP_SCOPES))}, "
+                  f"not {scope!r}", file=sys.stderr)
+            continue
         runnable["benchmarks"][info["name"]] = info
         cases += selected
     if other:
@@ -224,11 +241,14 @@ def _plan(info: dict, invocation: dict) -> dict:
             values, source = int(repeat[0]), "repeat-min"
         else:
             values, source = DEFAULT_VALUES, "default"
-    loops = invocation["loops"]
+    loops, loops_from = invocation["loops"], "order"
     if loops is None and int(declared.get("number", 0)) > 0:
-        loops = int(declared["number"])
-    if loops is None and info["has_setup"]:
-        loops = 1  # as asv_runner >= 0.3.1 (asv#966, fixed by asv_runner#53): fresh state for each timed call
+        loops, loops_from = int(declared["number"]), "number"
+    scope = declared.get("setup_scope", "call") if info["has_setup"] else None
+    if loops is None and scope == "call":
+        loops, loops_from = 1, "setup_scope"  # every timed call sees fresh state
+    elif loops is None:
+        loops_from = None
     min_time = invocation["min_time"] if invocation["min_time"] is not None else declared.get(
         "sample_time", DEFAULT_SAMPLE_TIME)
     warmups = invocation["warmups"]
@@ -236,7 +256,7 @@ def _plan(info: dict, invocation: dict) -> dict:
         warmups = 0 if declared.get("warmup_time") == 0 else 1
     return {"processes": invocation["processes"], "values": values, "values_from": source, "loops": loops,
             "min_time": min_time, "warmups": warmups, "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT)),
-            "setup_per_call": info["has_setup"]}
+            "loops_from": loops_from, "setup_scope": scope}
 
 
 def _flags(plan: dict) -> list[str]:
@@ -376,7 +396,9 @@ def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict
     else:
         calibration = {"mode": "adaptive", "minimum_sample_seconds": plan["min_time"]}
     warmup = {"mode": "count", "n_warmup": plan["warmups"]} if plan["warmups"] else {"mode": "none"}
-    asv = {k: plan[k] for k in ("values_from", "timeout", "setup_per_call")}
+    asv = {k: plan[k] for k in ("values_from", "timeout")}
+    if plan["setup_scope"]:
+        asv["setup_scope"] = plan["setup_scope"]
     if version:
         asv["benchmark_version"] = version
     return {**applied, "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": plan["processes"]},
@@ -437,5 +459,20 @@ def context_facts(native: dict | None) -> tuple[dict, dict]:
     return system, info
 
 
+def _unbatched(run: dict, case: str) -> bool:
+    """Setup before every call kept pyperf from batching calls it would have:
+    the order left loops to the benchmark, and a call is shorter than a value
+    is meant to take."""
+    plan = run["native"]["benchx_asv"]["plan"]
+    if plan["setup_scope"] != "call" or plan["loops_from"] == "order":
+        return False
+    benchmark = pyperf._benchmark(run["native"], case)
+    values = [v for r, _ in (pyperf._runs(run["native"], benchmark) if benchmark else []) for v in r.get("values", [])]
+    return bool(values) and statistics.median(values) < plan["min_time"]
+
+
 def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[str]]:
-    return pyperf.observed_environment(run, case, env_names)
+    facts, warnings = pyperf.observed_environment(run, case, env_names)
+    if _unbatched(run, case):
+        warnings.append(UNBATCHED)
+    return facts, warnings
