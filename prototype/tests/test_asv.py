@@ -1,6 +1,7 @@
 """`bx bench --adapter asv` and the asv adapter: a small suite in asv's language, timed by pyperf."""
 
 import json
+import os
 import textwrap
 from pathlib import Path
 
@@ -186,6 +187,30 @@ def test_cases_are_exact_names(suite):
                      *FAST]) == cli.EXIT_OK
     assert sorted(results(suite, "exact")) == [
         ("bm.Sort.time_sorted", json.dumps({"key": "'a'", "n": "10"})), ("bm.time_plain", "{}")]
+
+
+def test_a_benchmark_name_may_end_in_a_dash_and_digits(suite):
+    """A parametrized case is `name-INDEX`, so a plain benchmark that asv names `time_dashed-1`
+    (through `benchmark_name`) must not be read as combination 1 of `time_dashed`."""
+    (suite / "benchmarks" / "dashed.py").write_text(
+        "def time_dashed():\n    pass\n\n\ntime_dashed.benchmark_name = 'time_dashed-1'\n")
+    assert cli.main([*ASV, "--filter", "time_dashed", "--run-key", "dashed", "--no-ingest", *FAST]) == cli.EXIT_OK
+    found = results(suite, "dashed")
+    assert list(found) == [("time_dashed-1", "{}")]
+    assert found[("time_dashed-1", "{}")]["measurement"]["status"] == "success"
+    assert "parameters" not in found[("time_dashed-1", "{}")]["coordinates"]["workload"]
+
+
+def test_two_benchmarks_with_one_case_id_are_refused(suite):
+    """`time_x` with two combinations is `time_x-0` and `time_x-1`; so is a plain `time_x-1`.
+    The case id is how the runner finds the benchmark again, so the order is refused."""
+    (suite / "benchmarks" / "clash.py").write_text(
+        "class Params:\n    params = [1, 2]\n    param_names = ['n']\n\n    def time_x(self, n):\n        pass\n\n"
+        "    time_x.benchmark_name = 'time_x'\n\n\n"
+        "def time_plain():\n    pass\n\n\ntime_plain.benchmark_name = 'time_x-1'\n")
+    runnable = asv.locate(suite, "benchmarks", dict(os.environ))
+    with pytest.raises(asv.Unsupported, match="share the case id 'time_x-1'"):
+        asv.list_cases(runnable, "time_x", dict(os.environ))
 
 
 def test_env_var_named_like_a_parameter_is_refused(suite, capsys):

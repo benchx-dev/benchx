@@ -192,12 +192,15 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     for failure in listing["failed"]:
         print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
     cases, other = [], {}
+    runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
         if info["params"]:
-            selected = [f"{info['name']}-{i}" for i, combo in enumerate(itertools.product(*info["params"]))
+            selected = [(f"{info['name']}-{i}", (info["name"], i))
+                        for i, combo in enumerate(itertools.product(*info["params"]))
                         if not case_filter or re.search(case_filter, f"{info['name']}({', '.join(combo)})")]
         else:
-            selected = [info["name"]] if not case_filter or re.search(case_filter, info["name"]) else []
+            matches = not case_filter or re.search(case_filter, info["name"])
+            selected = [(info["name"], (info["name"], None))] if matches else []
         if not selected:
             continue
         if info["type"] != "time":
@@ -209,21 +212,28 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                   f"not {scope!r}", file=sys.stderr)
             continue
         runnable["benchmarks"][info["name"]] = info
-        cases += selected
+        for case, target in selected:
+            if runnable["cases"].setdefault(case, target) != target:
+                raise Unsupported(f"asv benchmarks {_describe(runnable['cases'][case])} and {_describe(target)} "
+                                  f"share the case id {case!r}; give one of them another benchmark_name")
+            cases.append(case)
     if other:
         print("asv: not run (only time benchmarks map to wall-time): "
               + ", ".join(f"{n} {t}" for t, n in sorted(other.items())), file=sys.stderr)
     return cases
 
 
-def _split(case: str) -> tuple[str, int | None]:
-    name, _, index = case.rpartition("-")
-    return (name, int(index)) if name and index.isdigit() else (case, None)
+def _describe(target: tuple[str, int | None]) -> str:
+    name, index = target
+    return repr(name) if index is None else f"{name!r} (combination {index})"
 
 
 def workload(case: str, runnable: dict) -> tuple[str, dict]:
-    """The benchmark name, and its parameters as asv's repr() strings, by name."""
-    name, index = _split(case)
+    """The benchmark name, and its parameters as asv's repr() strings, by name. A case
+    id is `name-INDEX` for a parametrized benchmark, which a plain benchmark's own name
+    can look like, so the benchmark is found by the table `list_cases` made, not by
+    taking the id apart."""
+    name, index = runnable["cases"][case]
     info = runnable["benchmarks"][name]
     if index is None:
         return name, {}
@@ -343,7 +353,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     """One pyperf run for the case; never raises for harness failures, which become results."""
     if env_names is None:
         env_names = snapshot.env_allowlist(env, ENV_ALLOWLIST)
-    name, index = _split(case)
+    name, index = runnable["cases"][case]
     info = runnable["benchmarks"][name]
     plan = _plan(info, invocation)
     stem = native_path.name.removesuffix(".native.json")
