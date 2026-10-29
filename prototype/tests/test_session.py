@@ -1,6 +1,7 @@
 """The session loop and the two modes of `bx compare` (prototype-design.md §1, §5)."""
 
 import json
+import os
 
 import pytest
 
@@ -48,13 +49,53 @@ def test_session_environments(repo, tmp):
     assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
 
-def test_dirty_tree_refused_before_anything_runs(repo, tmp, builds):
-    (repo["wt-head"] / "bench.cpp").write_text("// uncommitted\n")
+def compare_dirty(builds, tmp, **extra):
+    said = []
     store = Store(tmp / "store.parquet")
-    with pytest.raises(session.SessionError, match="clean trees"):
-        session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
-                                adapter="google-benchmark", suite="demo-bench", rounds=4, store=store, run_key="d1", out=tmp / "out")
-    assert not (tmp / "out").exists() and not store.path.exists()
+    doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
+                                  adapter="google-benchmark", suite="demo-bench", rounds=4, store=store,
+                                  run_key="d1", out=tmp / "out", progress=said.append, **extra)
+    return doc, said
+
+
+def test_a_dirty_side_is_compared_and_labeled_local_only(repo, tmp, builds):
+    """UC-03 §10: the comparison runs, says before measuring which side is not clean, and is local-only."""
+    (repo["wt-head"] / "bench.cpp").write_text("// uncommitted\n")
+    doc, said = compare_dirty(builds, tmp)
+    assert doc["failed_invariants"] == [] and doc["local_only"] is True
+    assert verdicts(doc)
+    notes = [m for m in said if "local-only" in m]
+    assert len(notes) == 1 and notes[0].startswith(f"contender tree {repo['wt-head']} is dirty")
+    assert said.index(notes[0]) < said.index(next(m for m in said if m.startswith("round 1/4")))  # before measuring
+    caveats = {c for u in doc["units"] for c in u["caveats"]}
+    assert {"contender: dirty-subject-tree", "contender: dirty-benchmark-tree"} <= caveats
+
+
+def test_both_dirty_sides_are_named(repo, tmp, builds):
+    (repo["wt-base"] / "bench.cpp").write_text("// uncommitted, base\n")
+    (repo["wt-head"] / "bench.cpp").write_text("// uncommitted, head\n")
+    doc, said = compare_dirty(builds, tmp)
+    assert doc["failed_invariants"] == [] and doc["local_only"] is True
+    assert [m.split()[0] for m in said if "local-only" in m] == ["baseline", "contender"]
+
+
+def test_clean_sides_say_nothing_and_are_not_local_only(repo, tmp, builds):
+    doc, said = compare_dirty(builds, tmp)
+    assert doc["local_only"] is False and not [m for m in said if "local-only" in m]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_a_side_with_no_tree_id_is_refused_before_anything_runs(repo, tmp, builds):
+    """An unreadable untracked file leaves git without a working-tree id: the dirty state is `unknown`."""
+    unreadable = repo["wt-head"] / "unreadable.txt"
+    unreadable.write_text("x\n")
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(session.SessionError, match=r"contender tree .* has no working-tree id.*unknown"):
+            compare_dirty(builds, tmp)
+    finally:
+        unreadable.chmod(0o644)
+    assert not (tmp / "out").exists() and not (tmp / "store.parquet").exists()
 
 
 @pytest.mark.parametrize("kwargs, message", [
@@ -71,7 +112,7 @@ def test_session_refusals(tmp, builds, kwargs, message):
 
 
 def test_a_refused_order_stops_the_session(tmp, builds, monkeypatch):
-    def refuse(*_):
+    def refuse(*_, **__):
         raise runner.Refused("deferred")
     monkeypatch.setattr(runner, "run", refuse)
     with pytest.raises(runner.Refused):
@@ -100,8 +141,8 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     (["--profile", "revisions"], "give two targets"),
     (["A", "B", "--run", "k", "--profile", "revisions"], "not both"),
     (["A", "--profile", "revisions"], "exactly two targets"),
-    (["A", "B", "--profile", "revisions", "--rounds", "3"], "needs --suite"),
-    (["A", "B", "--profile", "revisions", "--suite", "s"], "needs --rounds"),
+    (["A", "B", "--profile", "revisions", "--rounds", "3", "--adapter", "pyperf"], "--suite is required"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf"], "--rounds is required"),
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3", "--baseline", "x"], "read mode"),
     (["--run", "k", "--profile", "revisions"], "needs --baseline"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--rounds", "3"], "measure mode"),

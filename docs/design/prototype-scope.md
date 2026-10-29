@@ -40,11 +40,11 @@ one run:
 
 | Component | In prototype | Deferred | Out of scope |
 |---|---|---|---|
-| Runner | execute a `build` or `working_tree` target per a work order; apply the order's `environment_variables` to the launched process; capture the zero-configuration snapshot, the build configuration, and source identity; account for planned cases; refuse an order it cannot apply exactly, including one that names a deferred field | `python_env` targets, context collectors beyond the built-in ones, environment policy (enforcing launch settings, verifying requested hardware, refusing an unsatisfiable run) | building revisions, tuning the machine (`benchmark-environments.md` §2.3) |
+| Runner | execute a `build` or `working_tree` target per a work order; apply the order's `environment_variables` to the launched process; capture the zero-configuration snapshot, the build configuration, and source identity; account for planned cases; refuse an order it cannot apply exactly, including one that names a deferred field | `python_env` targets, context collectors that run after the harness or per case (the prototype runs them once per order, before the cases), environment policy (enforcing launch settings, verifying requested hardware, refusing an unsatisfiable run) | building revisions, tuning the machine (`benchmark-environments.md` §2.3) |
 | Adapter | Google Benchmark, both halves: drive filter and repetitions, translate output; pyperf, both halves, for Python functions in a working tree, through `bx bench` and `bx compare` (the default adapter of both) | all other harnesses; pyperf's `tags`, `date`, per-run load and frequency, and `pyperf check` | — |
 | Store | one Parquet file; ingest per schema §5.4 (validated and durable, auto-create, unit-conflict rejection, idempotency, attempt integrity); one default identity policy; queries: list series, series history, get result | continuity events, quarantine, artifact storage, identity-policy authoring | — |
 | Comparator | run mode with the `revisions` and `environments` profiles; eligibility guard; comparison document | history mode; `single-run`, `variants`, and `cross-machine` profiles; batch requests; provisional noise rules | — |
-| Workbench session loop | `bx compare` in measure mode: writes one work order per side and round, alternates them, delivers the results, then compares; takes each side as a build directory or as `@CONFIG`, a call to the project's target provider (`describe` or `prepare`), whose description may be a build or a working tree; either harness, with the same `-e` variables on both sides; a bare path is a build directory for Google Benchmark and a working tree for pyperf; `bx bench` is the same path for one order; `bx target` asks for a description directly; copies the description's declared text (`how_built`, `activation`, `shell`, `provider`) into the order | provider-built revisions (a source ref other than `WORKSPACE` is the provider's business), an `artifact` target, a declared `build` | workbench packaging, front ends such as `spin bench` |
+| Workbench session loop | the project file `benchx.conf.json` (one file, in the project root: provider, project, harness and suite, quantities, precision, environment variables, timeouts, paths, comparator policy; flags over file over defaults); `bx bench` (one order) and `bx compare` in measure mode: writes one work order per side and round, alternates them, delivers the results, then compares; takes each side as a build directory or as `@CONFIG`, a call to the project's target provider (`describe` or `prepare`), whose description may be a build or a working tree; either harness, with the same `-e` variables on both sides; a bare path is a build directory for Google Benchmark and a working tree for pyperf; `bx bench` is the same path for one order; `bx target` asks for a description directly; copies the description's declared text (`how_built`, `activation`, `shell`, `provider`) into the order | provider-built revisions (a source ref other than `WORKSPACE` is the provider's business), an `artifact` target, a declared `build` | workbench packaging, front ends such as `spin bench` |
 | Documents | work order (`schemas/work-order/0.1.0`), result (schema §5.2), comparison document | — | — |
 
 **Out entirely:** scheduler, change detector, alerting, views beyond query
@@ -68,8 +68,9 @@ proto-workbench).
    `(producer, ingest_key)` of the results it consumed.
 7. The ad hoc shape works end to end with no project, configuration file, or
    store path. A single run on a dirty tree is accepted and recorded as dirty.
-   A `revisions` comparison with a dirty side is refused (UC-03 §10), and an
-   `environments` comparison with one is labeled local-only (schema §5.5).
+   A comparison with a dirty side, under `revisions` or `environments`, is
+   labeled local-only and names the dirty side (UC-03 §10, schema §5.5); a
+   `revisions` side with no working-tree id is refused.
 8. The same comparison computed from a throwaway store and from a persistent
    store yields the same document.
 
@@ -84,7 +85,7 @@ proto-workbench).
 - One command, `bx compare`, has a read mode and a measure mode
   (`prototype-design.md` §1).
 - The local store is a single Parquet file in one place,
-  `~/.benchx/store.parquet`, and `bx run` delivers to it. JSON is for
+  the project's `store.parquet` (`paths.store` in `benchx.conf.json`), and `bx run` delivers to it. JSON is for
   documents in transit (work orders, result files, comparison documents),
   never for the store.
 - Ingest acknowledgment = validated and durable (schema §5.4).

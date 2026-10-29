@@ -5,8 +5,8 @@ and schemas/target-provider-request are its documents. A description arrives
 three ways, and `resolve` handles each:
 
 - `@CONFIG[=SOURCE_REF]`: the project's provider command, named in
-  `.benchx/provider.json`, asked to `prepare` (it may build) or `describe`
-  (it only reports).
+  `benchx.conf.json`, asked to `prepare` (it may build) or `describe` (it only
+  reports).
 - `BUILD_DIR[:SOURCE_DIR]` with a sidecar `.benchx-target.json` in the build
   directory, written by whatever built it.
 - `BUILD_DIR[:SOURCE_DIR]` alone: no description; the workbench identifies the
@@ -24,8 +24,8 @@ from . import core
 from .core import loader
 
 SIDECAR = ".benchx-target.json"
-PROVIDER_FILE = Path(".benchx") / "provider.json"
 TEXT_FIELDS = ("how_built", "activation", "shell", "provider")
+MAX_FACTS_CHARS = 65536  # how_built as an object, serialized; as text it is limited to 8192
 
 
 class TargetError(Exception):
@@ -46,34 +46,6 @@ def text(description: dict | None) -> dict:
         if value:
             out[field] = value
     return out
-
-
-def find_upward(relative, start="."):
-    """The nearest file `relative` (e.g. `.benchx/config.json`) walking up from
-    `start`, or None."""
-    start = Path(start).resolve()
-    for directory in (start, *start.parents):
-        path = directory / relative
-        if path.is_file():
-            return path
-    return None
-
-
-def find_provider(start="."):
-    """The provider command from the nearest `.benchx/provider.json`, walking
-    up from `start`. Returns (command, directory it is run in), or None."""
-    start = Path(start).resolve()
-    for directory in (start, *start.parents):
-        path = directory / PROVIDER_FILE
-        if path.is_file():
-            config, errors = loader.read(path)
-            if config is None:
-                raise TargetError(f"{path}: " + "; ".join(str(error) for error in errors))
-            command = config.get("command")
-            if not (isinstance(command, list) and command and all(isinstance(c, str) for c in command)):
-                raise TargetError(f'{path} must be {{"command": ["program", "arg", ...]}}')
-            return command, directory
-    return None
 
 
 def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
@@ -107,6 +79,9 @@ def _validated(raw: str, where: str) -> dict:
     if errors:
         problems = "; ".join(str(error) for error in errors)
         raise TargetError(f"{where} is not a target description: {problems}")
+    facts = description.get("how_built")
+    if isinstance(facts, dict) and len(json.dumps(facts)) > MAX_FACTS_CHARS:
+        raise TargetError(f"{where}: how_built facts are over {MAX_FACTS_CHARS} characters as JSON")
     return description
 
 
@@ -123,20 +98,20 @@ def sidecar(build_dir) -> dict | None:
     return description
 
 
-def resolve(spec: str, *, operation="prepare", cwd=".") -> dict | None:
+def resolve(spec: str, *, operation="prepare", provider=None) -> dict | None:
     """The description for one target spec, or None when there is none.
 
-    `@CONFIG[=SOURCE_REF]` asks the provider (`prepare` by default); a build
-    directory yields its sidecar. SOURCE_REF defaults to WORKSPACE.
+    `@CONFIG[=SOURCE_REF]` asks the provider, a (command, directory) pair
+    (`Config.provider`), to `prepare` by default; a build directory yields its
+    sidecar. SOURCE_REF defaults to WORKSPACE.
     """
     if spec.startswith("@"):
         configuration, _, source_ref = spec[1:].partition("=")
         if not configuration:
             raise TargetError(f"empty configuration name in target {spec!r}")
-        found = find_provider(cwd)
-        if found is None:
-            raise TargetError(f"{spec} needs a provider: no {PROVIDER_FILE} in {Path(cwd).resolve()} or above")
-        command, directory = found
+        if provider is None:
+            raise TargetError(f"{spec} needs a provider")
+        command, directory = provider
         return call_provider(command, directory, operation, source_ref or "WORKSPACE", configuration)
     build = spec.partition(":")[0]
     return sidecar(build) if build else None

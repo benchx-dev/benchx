@@ -9,8 +9,8 @@ bx run <order.json> [--out DIR] [--no-ingest]
                                          # runner + Google Benchmark adapter → result files → local store
 bx ingest <dir|file>                     # result files and work orders → the local store
 bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
+bx history <series>                      # one series' points (a query); dirty ones are marked
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
                                          # read mode: compare results already measured
@@ -27,20 +27,35 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
          [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
 bx bench PATH --adapter asv [CASE …] [--filter REGEX] [--tree DIR] [...]
-                                         # shorthand: an asv benchmark suite, timed by pyperf
-bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
+                                          # shorthand: an asv benchmark suite, timed by pyperf
+bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
+bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
+
+**One project file.** `benchx.conf.json` in the project root (found by walking up from the
+working directory; its directory is the root) says how the project is measured: the
+`provider`, the `project` name and `source`, an `adapter` block (`name`, `suite`,
+`quantities`, `precision`), `environment_variables`, `timeouts`, `paths` for the store
+and the results (by default `store.parquet` and `results/` in the root), and the
+comparator's `compare` policy. Every value is the command line's, else the file's, else a
+built-in default; a required one (`adapter.name`, `adapter.suite`, the target, and for
+`bx compare` the profile and `--rounds`) that has none is a hard failure that names the
+flag and the key. `--no-project` makes one run ad hoc whatever the file's `project` says.
+The schema is `schemas/config/0.1.0`, whose `examples/` hold recommended settings for
+pyperf and for Google Benchmark. The store and the results directory are left out of a
+measured tree's identity when they sit inside it. `.benchx/setup.json` (declared
+environment facts) is a separate file, written by whoever prepares an environment.
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
 select measure mode and `--run` selects read mode; mixing them is an error.
 
-`@CONFIG` asks the project's **target provider**, the command named in
-`.benchx/provider.json` (`{"command": [...]}`, found by walking up from the
-current directory). The provider speaks the contract of
+`@CONFIG` asks the project's **target provider**, the command named by `provider.command`
+in `benchx.conf.json` (it runs with the project root as its working directory). The provider speaks the contract of
 `system-decomposition.md` §3.4: a JSON request on stdin, a target description
 (`schemas/target-description/0.1.0`) on stdout, build output on stderr, and a
 nonzero exit for failure. `prepare`, the default, may build; `describe`
@@ -62,10 +77,10 @@ working tree for [pyperf](https://pyperf.readthedocs.io), the default
 as dirty). Cases are the harness's defaults (pyperf: each `bench_*` or `benchmark_*`
 function), the exact names given, or a `--filter` regex. A flag the chosen harness does
 not take is refused. `-e` sets environment variables for the workers and lands in the
-workload's parameters. For pyperf, precision resolves as flags, then
-`.benchx/config.json` (found by walking up from the current directory;
-`bx config init` writes a template), then pyperf's defaults, and the resolved values are
-written into the order. The workers run the `python` first on `PATH`, which must have
+workload's parameters. Precision resolves as flags, then `adapter.precision` in
+`benchx.conf.json` (`bx config init` writes a template), then the harness's defaults, and the
+resolved values are written into the order. `--quantity` takes a comma-separated list,
+and one run collects them all. The workers run the `python` first on `PATH`, which must have
 pyperf.
 
 `bx bench MODULE.py [FUNCTION …]` is the shorthand for the quickest case, timing a few
@@ -73,6 +88,12 @@ functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
 `examples/pyperf-bench` is a runnable walk-through.
+
+Environments that cannot share a process, such as two venvs with different numpy versions, are
+measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
+and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
+--label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
+`examples/numpy-venvs` is the worked example, with a shell script that drives it.
 
 `bx bench PATH --adapter asv` runs an [asv](https://asv.readthedocs.io) benchmark suite
 unchanged, reading asv's benchmark format as a language and timing it with pyperf;
@@ -126,8 +147,8 @@ every result is pyperf. Results also record the installed project's version
   `.benchx/setup.json`. It changes nothing on the machine and builds nothing,
   and it refuses an order that names a deferred field (`environment_policy`,
   a declared `build`, `components`, `schedule`) instead of ignoring it.
-- **The store** is one Parquet file, always `~/.benchx/store.parquet`
-  (`BENCHX_HOME=...` relocates benchx's home, as the tests do). It reads documents strictly, validates them, and applies the
+- **The store** is one Parquet file, by default `store.parquet` in the project root
+  (`paths.store` in `benchx.conf.json` moves it). It reads documents strictly, validates them, and applies the
   schema §5.4 contract: idempotency and the rejection codes `malformed`,
   `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
   `attempt-conflict`. Each result is one row: the columns #30 derives from the
@@ -138,7 +159,8 @@ every result is pyperf. Results also record the installed project's version
   Every accepting ingest rewrites the file atomically.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
-  trees are clean, before running anything), writes one order per side and
+  trees have a working-tree id, before running anything; it says which sides
+  are not clean), writes one order per side and
   round, alternates them over the rounds, delivers every result to the local
   store, and hands the run to the comparator. It builds nothing: both build
   directories must already exist.
@@ -146,8 +168,9 @@ every result is pyperf. Results also record the installed project's version
   `environments` profiles, each a projection built in code from the identity
   policy (`benchx/compare.py`): the axis tells the sides apart, everything the
   policy matches must agree, and it checks the profile's invariants (`revisions` also
-  requires clean trees, UC-03 §10; `environments` labels a dirty side
-  local-only), pairs the
+  requires one tree id per side and, for a benchmark recorded apart from the
+  subject, one benchmark file throughout, UC-03 §10; a dirty side makes any
+  profile's comparison local-only), pairs the
   sides by round, and applies `benchx/paired-relative/v1` (effect = mean
   relative paired difference, noise = its standard error, change when
   |effect| > *k* × noise). `environments` names its sides by the label
@@ -159,9 +182,18 @@ every result is pyperf. Results also record the installed project's version
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
+
+`tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
+`spin` and compares two tags in one `bx compare`. It is skipped unless
+`BENCHX_E2E_NUMPY` (a numpy git checkout) and `BENCHX_E2E_EXAMPLE` (the
+`numpy-revisions` example directory) are set and `spin` is on the PATH; it also
+needs the project-file entries of PR #65 and PR #71. `BENCHX_E2E_WORKTREES`
+keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
+`BENCHX_E2E_SPIN_EXAMPLE` (the `numpy-spin` example directory) adds a single-run
+scenario, and the test's docstring has the rest.
 
 `demo.sh` prints every command before running it, as you would type it
 (`bx` for `.venv/bin/python -m benchx.cli`, `$WORK` for its scratch
@@ -180,14 +212,14 @@ part, then:
    persistent one, lists series and history, and ends with `bx head`.
 
 Every `bx run` and every measure-mode `bx compare` delivers to the local store, so each demo run adds its
-results, ad hoc and tracked, to `~/.benchx/store.parquet`. Run keys carry a
+results, ad hoc and tracked, to `examples/demo/store.parquet` (the demo's project root, set
+in its `benchx.conf.json`). Run keys carry a
 timestamp, so runs accumulate and each series' history grows. Look at it any
 time:
 
 ```console
-$ .venv/bin/python -m benchx.cli head -n 20
-$ rm ~/.benchx/store.parquet    # start over
-$ BENCHX_HOME=/tmp/benchx ./demo.sh    # or keep the demo out of your real store
+$ (cd examples/demo && ../../.venv/bin/python -m benchx.cli head -n 20)
+$ rm examples/demo/store.parquet    # start over
 ```
 
 Both changes add two to three percent of work. The quiet benchmark flags them
@@ -211,7 +243,7 @@ benchx/
   adapters/asv.py    asv's benchmark format, timed by pyperf (bx bench --adapter asv)
   adapters/asv_runtime.py  asv's discovery and setup semantics, standalone, copied beside each driver
   bench.py           bx bench: the MODULE.py and asv shorthands, and the results table
-  config.py          .benchx/config.json: the pyperf precision defaults and their template
+  config.py          benchx.conf.json: finding it, validating it, picking a value, the template
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare
   target.py          target descriptions: the provider call, the sidecar, the declared text
@@ -223,8 +255,10 @@ benchx/
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
 examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
+examples/demo        the demo's project root: its benchx.conf.json, and its persistent store
 examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
+examples/numpy-venvs  UC-04 with two venvs and two numpy versions, driven by run.sh (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
                      comparator's invariants and method on hand-built results;

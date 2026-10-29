@@ -11,8 +11,9 @@ pytest.importorskip("pyperf")
 from benchx import bench, cli, core, harnesses
 from benchx.adapters import asv, asv_runtime
 from benchx.store import Store
+from conftest import warnings_of
 
-SUITE = textwrap.dedent('''
+SUITE =textwrap.dedent('''
     class Sort:
         params = [[10, 100], ["a", "b"]]
         param_names = ["n", "key"]
@@ -153,7 +154,7 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert (broken["measurement"]["status"], broken["measurement"]["reason"]) == ("error", "harness.error")
     assert "boom" in broken["provenance"]["info"]["message"]
     assert not any("peakmem" in name for name, _ in found)
-    assert {d["coordinates"]["workload"]["name"] for d in Store().documents("all")} >= {"bm.time_plain"}
+    assert {d["coordinates"]["workload"]["name"] for d in Store(suite / "store.parquet").documents("all")} >= {"bm.time_plain"}
 
 
 def test_filter_and_benchmark_defaults(suite, capsys):
@@ -206,7 +207,7 @@ def test_setup_means_one_call_per_loop(suite):
     assert protocol["asv"]["setup_scope"] == "call"
     assert document["procedure"]["inner_iterations"] == 1
     # A sum of 100 ints is far below a value's 10 ms: pyperf would have batched it.
-    assert document["quality"]["warnings"] == [asv.UNBATCHED]
+    assert warnings_of(document) == [asv.UNBATCHED]
 
 
 def test_setup_and_teardown_run_between_calls(suite, tmp):
@@ -266,7 +267,7 @@ def test_sample_scope_batches_calls(suite):
     assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.01}
     assert protocol["asv"]["setup_scope"] == "sample"
     assert document["procedure"]["inner_iterations"] > 1
-    assert "quality" not in document
+    assert warnings_of(document) == []
 
 
 def test_sample_scope_shares_setup_within_a_value(suite, monkeypatch):

@@ -42,8 +42,8 @@ script runs `bx` and `python` from the active environment. More rounds:
 `ROUNDS=10 ./run.sh`.
 
 Everything it creates is under `_work/` in this directory, including the local
-store (`_work/benchx-home`), so `~/.benchx` is untouched. `rm -rf _work` starts
-over.
+store (`_work/store.parquet`, set by `paths.store` in `benchx.conf.json`), so nothing
+outside this directory changes. `rm -rf _work` starts over.
 
 ## What you will see
 
@@ -100,18 +100,16 @@ this directory, with the environment still active:
 
 ```console
 $ source activate.sh
-$ export BENCHX_HOME=$PWD/_work/benchx-home
 
 $ bx target describe @hardened                    # what exists, nothing built
 $ bx target prepare  @hardened                    # incremental build, then the description
 $ bx target describe _work/build-hardened         # a bare directory: its own sidecar
 
 # the story's own knobs: scope by filter, precision by repetitions
-$ bx compare @plain @hardened --profile environments --label build=plain,hardened \
-      --adapter google-benchmark --suite demo-bench --filter BM_Quiet --rounds 10 --repetitions 5 \
-      --project archery-local --run-key mine
+$ bx compare @plain @hardened --label build=plain,hardened --filter BM_Quiet --rounds 10 \
+      --repetitions 5 --run-key mine        # the adapter, suite, project and profile come from benchx.conf.json
 
-$ bx compare --run mine --profile environments --label build --baseline plain   # read mode
+$ bx compare --run mine --label build --baseline plain   # read mode
 $ bx head -n 4                                    # the latest stored results
 $ bx head --json -n 1 | python3 -m json.tool | less   # provenance.info, environment.system
 ```
@@ -127,7 +125,7 @@ runner simply omits it from the results.
 |---|---|
 | `run.sh` | the end-to-end script |
 | `provider.sh` | the target provider: your build script, speaking the `describe`/`prepare` contract |
-| `.benchx/provider.json` | tells the workbench which command is the provider |
+| `benchx.conf.json` | the project file: the provider command, the harness and its suite, the project name, the comparison profile, and where the store and results go |
 | `activate.sh` | the environment you activate before calling `bx` |
 | `_work/` | everything generated: source copy, build directories, results, store (git-ignored) |
 

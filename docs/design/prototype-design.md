@@ -25,24 +25,26 @@ bx compare --run KEY --profile revisions|environments --baseline VALUE
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
-           [--adapter pyperf|google-benchmark]                  # default pyperf
-           --suite NAME [--filter REGEX] [--quantity wall-time]
+           [--adapter pyperf|google-benchmark]                  # default: adapter.name
+           --suite NAME [--filter REGEX] [--quantity NAMES]     # default: adapter.suite, adapter.quantities
            --rounds R [-e NAME=VALUE ...]
            [--repetitions N]                                    # google-benchmark
            [--processes N] [--values N] [--loops N] [--warmups N] # pyperf
            [--min-time S]
-           [--project P] [--label NAME=BASE,CONTENDER]
+           [--project P | --no-project] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
            [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
 bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compare: one order, a table
-         [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
+         [--adapter …] [--filter REGEX] [--quantity NAMES] [-e NAME=VALUE ...]
          [precision flags, as for bx compare]
-         [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--project P | --no-project] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: the module's checkout, pyperf → result files → store → table
-bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
+bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
+bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
 
 `bx bench` is the single-target form of `bx compare` (measure mode). It names a
@@ -50,12 +52,31 @@ target the same way, takes the same options, and goes through the same code:
 the side is resolved by `session._side` (a provider call for `@CONFIG`, else a
 bare path the harness reads; the adapter checks the suite before anything runs)
 and the order is built by `session._order`. A bench run is one order of a
-comparison session with no round, no slot, and no comparison; it is run by the
+comparison session with no comparison, and by default no round or slot; it is run by the
 same runner, delivered as `bx run` delivers (`--no-ingest`: files only), and
 summarized as a table of its cases. It is not `bx run`: that executes a finished
 order file and never resolves a target; `bx bench` turns options into an order
 (saved as `results/RUN_KEY/orders/order.json`, which `bx run` can replay) and
 then does what `bx run` does.
+
+**A call as one side of a session (UC-04).** Environments that cannot share a process, such as two
+venvs holding different numpy versions, are measured by separate `bx bench` calls that share a
+`--run-key`; the caller's script is the loop (`benchmark-environments.md` §5.7). `--label NAME=VALUE`
+names the call's side, `--round N` pairs its attempt with the other side's, and `--slot K` is its
+position in the alternation, which the caller counts. Each call writes `orders/order-KKKK.json`. The
+flags need an explicit `--run-key` (the default is a timestamp per call, so two calls would never
+share a run), and `--label` and `--round` need `--slot` (the ingest key gets its `:slot-K` suffix only
+when a slot is set, so two sides would otherwise share a key). `bx compare --run KEY --profile
+environments --label NAME --baseline VALUE` then compares the sides, and refuses a run whose sides do
+not alternate, have unequal attempt counts, or do not differ.
+
+What differs between the environments is recorded by the user's own commands, so benchx knows no
+environment kind: a context collector (§3) prints facts about the environment it runs in, which land
+under `environment.system.<name>`, a part of the varying coordinate; a setup file does the same for
+declared facts. A collector with `verify: how_built` and `on_fail: warn` checks the facts a target's
+`how_built` object declares against what it found, and the comparison lists the warning beside the
+facts that differ. `prototype/examples/numpy-venvs` is the worked example, with the map from UC-04's
+spellings to these.
 
 A bare path is read by the harness. For Google Benchmark it is
 `BUILD_DIR[:SOURCE_DIR]`, a `build` target. For pyperf it is a working tree, a
@@ -64,9 +85,8 @@ state and tree id recorded; `--suite` is the module's path in it, and a case is
 a function in it (`bench_*` and `benchmark_*` by default). A case named on the
 command line is an exact name; `--filter` is a regex; not both. `-e` fills
 `environment_variables`. Precision is resolved before the order is written,
-flags over the harness's defaults and, for pyperf, over `.benchx/config.json`
-(found by walking up from the current directory), so the order always states
-what applied; a flag the chosen harness does not take is refused, as in
+flags over `adapter.precision` in `benchx.conf.json` over the harness's defaults, so the
+order always states what applied; a flag the chosen harness does not take is refused, as in
 `bx compare`. The pyperf adapter takes `python` from the `PATH` the workers
 start with and refuses the order if pyperf is not importable there. Both
 commands default to pyperf.
@@ -75,6 +95,26 @@ commands default to pyperf.
 is the git checkout containing the module (or `--tree`), the suite is the
 module's path in it, and the functions are exact case names. Without `--suite`,
 a TARGET ending in `.py` selects it.
+
+**The project file.** Both commands read `benchx.conf.json` in the project root, found by
+walking up from the working directory; its directory is the root, and with no file the
+root is the working directory (`schemas/config/0.1.0`). It holds `project`, `source.uri`,
+`provider.command`, an `adapter` block (`name`, `suite`, `quantities`, `precision`),
+`environment_variables`, `collectors`, `timeouts`, `paths.store` and `paths.results` (default
+`store.parquet` and `results/` in the root, and relative to the root), and `compare`
+(`profile`, `rounds`, `k`, `min_rounds`). A command-line argument wins; if it is missing the
+value is read from the file; if that is missing too, a built-in default applies, where one
+exists. A required value with none of the three (`adapter.name`, `adapter.suite`, the
+target, and for `bx compare` the profile and the rounds) is a hard failure that names the
+flag and the key. `--adapter` naming a harness other than the file's is refused, since the
+file's suite and precision belong to its own. `--quantity` takes a comma-separated list
+and one run collects all of them. `--no-project` makes the run ad hoc, filed in the store
+as `local/<hostname>`, whatever the file's `project` says. The provider is needed only by an
+`@CONFIG` target. The store and the results directory are left out of the identity of a
+measured tree they sit in, so a run's own output does not mark it dirty. The earlier
+`.benchx/provider.json`, `.benchx/config.json` and the `~/.benchx` home directory are gone and not read (only `$BENCHX_HOME` survives, as a store override);
+`.benchx/setup.json` (declared environment facts, §3) is a separate file.
+`schemas/config/0.1.0/examples` has recommended settings for each harness.
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
 (a path read by the harness, or `@CONFIG[=SOURCE_REF]`, a call to the project's
@@ -99,9 +139,11 @@ so the workbench, a CI script, or a notebook can do the same without a
 subprocess. Measure mode is a call into the session function, which calls the
 runner for each order and then the comparator.
 
-The local store has one place, `~/.benchx/store.parquet`, and no command
-takes another; `$BENCHX_HOME` relocates benchx's home as a whole, for tests
-and CI. `bx run` delivers what it measures there: it writes the result files,
+The local store has one place per project, `store.parquet` in the project root
+unless `paths.store` in `benchx.conf.json` says otherwise; no command takes another.
+`$BENCHX_HOME`, when set, relocates the store to `$BENCHX_HOME/store.parquet` and wins over
+`paths.store` (for tests, CI and keeping a demo out of your real store).
+`bx run` delivers what it measures there: it writes the result files,
 then ingests exactly those files. The `runner` module itself stays
 store-unaware (`runner.md` §2 principle 6); the command composes it with
 ingest, which is the delivery step of `runner.md` §4 and what the workbench
@@ -208,10 +250,11 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). In
-the `environments` profile, a comparison in which either side is not `clean`
-has `local_only: true` (schema §5.5); the `revisions` profile refuses it
-instead (§5).
+the missing, failed-invariant, and excluded listings with counts). In any
+profile, a comparison in which either side is not `clean` has `local_only:
+true` (schema §5.5), is headed `[local-only]`, and names the sides that are not
+clean on the `caveats:` line; the `revisions` profile fails a side with no
+working-tree id instead (§5).
 
 ## 3. Runner and adapter (`bx run`)
 
@@ -275,8 +318,14 @@ landing where its §3.4 puts it:
   neither locates a checkout the runner refuses the order, because a result
   must state its revision (`runner.md` §2), and `runner-schema.md` §5.1 refuses
   an order with no revision to record. The benchmark code is the subject's own
-  checkout, so the benchmark revision, dirty flag, and tree are the subject's
-  (`runner-schema.md` §3.3).
+  checkout, so the benchmark revision, dirty flag, and tree are the subject's,
+  unless the harness's suite is a source file (pyperf) outside that checkout: then
+  the order carries `benchmark`, and the result records the suite file's own
+  source, revision (when under git) and blob id as `benchmark_tree`
+  (`runner-schema.md` §3.3). A result whose subject tree is `dirty` carries
+  the quality warning `dirty-subject-tree`, and one whose benchmark is `dirty`
+  `dirty-benchmark-tree` (schema §4.1); an `unknown` state has no tree id and
+  no warning of its own.
 - **Build configuration**, from a built-in plugin that reads
   `CMakeCache.txt` in the build directory: build type, compiler and version,
   flags, and the project's own options (cache entries prefixed with the
@@ -294,6 +343,24 @@ the same way report the same configuration. Nobody declared these, so the detect
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
   land in `environment.system.setup`, which the default identity policy matches.
+- **Context collectors** (`harness-adapter.md` §5.1), named under `collectors` in
+  `benchx.conf.json` and copied into the work order. The runner runs each command once,
+  before the cases, in the harness's working directory and environment (`{root}` in an
+  argument is the project root), under `timeout_s` (default 60). It prints one JSON object.
+  The runner saves it whole as an artifact, and puts its `summary` object and its
+  sha256 into every result's `environment.system.<name>`. A collector that fails adds no
+  facts and gives the results `collector-failed`. Only `before`, once per order, is
+  implemented. The commands are executed, so `bx run` refuses an order that has
+  collectors unless given `--allow-collectors`; `bx bench` and `bx compare` build the
+  order from the user's own configuration and allow them.
+- **Verification** of a collector's facts: `verify: "how_built"` requires every key of the
+  target's `how_built`, when that is an object (a provider may declare facts there; as a
+  string it is text and never checked), to be among the collected facts with exactly the
+  same value, at any depth; extra collected keys are fine. `expect` requires facts by
+  value. A failed check, or a collector that cannot run, refuses the order before any case
+  (`on_fail: refuse`, the default), or with `on_fail: warn` gives every result the
+  warning `collector-mismatch`. `prototype/examples/numpy-bench` uses this to check that
+  the numpy a provider described is the numpy the workers import.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
 (`detected`, `declared`, or a plugin name). The prototype does not record it
@@ -307,7 +374,7 @@ prototype records the tree as it is at run time and does not detect staleness
 
 ## 4. Store (`bx ingest` + queries)
 
-The local store is one Parquet file, always `~/.benchx/store.parquet` (§1);
+The local store is one Parquet file, the project's `paths.store` (§1);
 the one other store is the temporary file `bx compare --results` compares
 through. There are no side files:
 no JSON, no separate entity tables. Each row is one result, the
@@ -383,6 +450,8 @@ columns, which is fine at prototype scale; a real deployment would index them.
 
 `bx head` shows the store's size and its latest results, newest first, with
 run key, workload, quantity, status, median, revision, project, and labels;
+the status is followed by the result's quality warnings in brackets, such as
+`[dirty-subject-tree]`, in both forms;
 with `--json` it prints the stored documents instead, and with `--table` the `bx bench`
 table (median, mean ± sd, range, n, status) of each measurand, led by revision, run key and project;
 condition measurements are left out, as in `bx bench`.
@@ -393,7 +462,8 @@ order, since every ingest appends to the rewritten file.
 `bx series` and `bx history` are queries over the derived `series` and
 `series_point`.
 `bx history` lists a series' points in axis order, each with the ignored
-facts that changed since the point before it. Without a revision graph
+facts that changed since the point before it and the quality warnings of its
+result, in brackets. Without a revision graph
 revision order is unavailable (schema §4.1), so an axis on the revision lists
 them by measurement start and says so. It evaluates nothing, since history
 mode is deferred.
@@ -419,8 +489,11 @@ matched facts agree (`sides-agree`) and the invariants the profile names over
 the run: exactly two sides, which for `environments` differ in more than their
 label, equal attempt counts per side, and sides alternating by
 `procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
-verdict; under `revisions` a side that is not `clean` fails the `clean-tree`
-invariant the same way. A variant present on one side only is listed as missing
+verdict; under `revisions` the same happens to a side with no tree id (the
+`sides` invariant), to a tree edited during the run (a third side: `two-sides`),
+and to a benchmark recorded apart from the subject that is not one file on
+both sides and in every round (`one-benchmark-tree`, schema §5.5). A side that
+is not clean does not fail the run: it makes the comparison local-only. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
 listed.
 
@@ -456,8 +529,10 @@ compares them; it is the workbench's session loop (`system-decomposition.md`
 1. checks that both build directories and the suite binary exist, and locates
    each side's source checkout, from `SOURCE_DIR` or the
    `CMAKE_HOME_DIRECTORY` the build records. Under `revisions` it also checks
-   that both trees are clean, and refuses before running anything, so a dirty
-   tree fails at once and not after R rounds;
+   that both trees have a working-tree id, and refuses before running
+   anything, so a tree whose state is unknown fails at once and not after R
+   rounds. A dirty side is not refused: the session says which sides are not
+   clean, before measuring, since the comparison will be local-only;
 2. fixes a run key, from `--run-key` or a timestamped default;
 3. for each of R rounds, for each side in order (baseline, then contender),
    writes one work order with the shared run key, `round`, and a running
@@ -479,8 +554,8 @@ it has one. The description's declared text (`how_built`, `activation`,
 checked. If it stops partway, the results already
 delivered stay in the store, and a read-mode comparison of the run key reports
 missing results or a failed alternation invariant, as UC-03 §10 requires.
-Allowing a local-only `revisions` comparison of a dirty tree is open
-(`system-decomposition.md` §6 question 4).
+A `revisions` comparison of a dirty tree is allowed and local-only
+(`system-decomposition.md` §6 question 4, resolved).
 
 ## 6. Demonstration
 
@@ -490,7 +565,7 @@ assigns `round` and `slot`. The demo script plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
 and CMake, since benchx builds nothing. `prototype/examples/archery-local`
 shows the other route, where a provider script named in
-`.benchx/provider.json` builds and describes the targets and the sides are
+`benchx.conf.json` builds and describes the targets and the sides are
 given as `@plain` and `@hardened`.
 
 - **Revisions:** two git worktrees of one source at the base and head
@@ -515,7 +590,7 @@ re-ingested to show idempotency, and compared again with `--results`; that
 document must equal the one from the local store (criterion 8).
 
 Every `bx run` delivers to the local store, so both shapes' results land in
-`~/.benchx/store.parquet`, the ad hoc ones as thin results of project
+the demo project's store (`prototype/examples/demo/store.parquet`), the ad hoc ones as thin results of project
 `local/<hostname>`. Run keys carry a timestamp, so successive demo runs add
 rows rather than colliding on `ingest_key`. The store and each series'
 history grow from run to run, and the demo ends with `bx head`.
@@ -528,7 +603,7 @@ history grow from run to run, and the demo ends with `bx head`.
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
 - The target-provider hook is minimal: one provider command per project
-  (`.benchx/provider.json`), `describe` and `prepare` only, `build` targets
+  (`provider.command` in `benchx.conf.json`), `describe` and `prepare` only, `build` targets
   only, and a source ref other than `WORKSPACE` is the provider's business.
   How cached builds are named and expired stays open
   (`system-decomposition.md` §6 question 5). The demo prepares its builds by

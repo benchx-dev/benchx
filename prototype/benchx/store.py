@@ -47,19 +47,12 @@ def store_project(doc: dict) -> str:
     return f"local/{ident.get('runner') or ident.get('hostname') or 'unknown'}"
 
 
-def home() -> Path:
-    """benchx's home: ~/.benchx, or $BENCHX_HOME to relocate it (tests, CI)."""
-    return Path(os.environ.get("BENCHX_HOME") or Path.home() / ".benchx")
-
-
-def default_path() -> Path:
-    """The local store's one place (prototype-design.md §4)."""
-    return home() / "store.parquet"
-
-
 class Store:
-    def __init__(self, path=None):
-        self.path = Path(path) if path is not None else default_path()
+    """The local store, one Parquet file (prototype-design.md §4). Its place is the
+    project's: `Config.store_path`, by default `store.parquet` in the project root."""
+
+    def __init__(self, path):
+        self.path = Path(path)
 
     # -- reading -------------------------------------------------------------
 
@@ -286,6 +279,12 @@ _ENTITY_KEYS = {
 }
 
 
+def warning_codes(document: dict) -> list[str]:
+    """A result's quality warnings by code: a warning is a token, or an object that has a `code`."""
+    return [w.get("code", str(w)) if isinstance(w, dict) else str(w)
+            for w in document.get("quality", {}).get("warnings", [])]
+
+
 def _add_entities(entities: dict, doc: dict, project: str, projection: Projection) -> None:
     def put(name, row):
         entities.setdefault(name, {}).setdefault(_ENTITY_KEYS[name](row), row)
@@ -316,4 +315,5 @@ def _add_entities(entities: dict, doc: dict, project: str, projection: Projectio
                              "producer": doc["producer"]["name"], "ingest_key": doc["ingest_key"],
                              "attempt_key": doc["attempt_key"], "revision": doc["revision"]["key"],
                              "axis": list(point["axis"]), "value": point["value"], "source": point["source"],
-                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"]})
+                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"],
+                             "warnings": warning_codes(doc)})
