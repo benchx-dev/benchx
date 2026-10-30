@@ -100,9 +100,11 @@ def cmd_bench(args):
     case_s = (args.case_timeout if args.case_timeout is not None
               else ASV_CASE_TIMEOUT_S if adapter == "asv" else orders.CASE_TIMEOUT_S)
     try:
+        harness = harnesses.get(adapter) if adapter else session.HARNESS
+        names = harnesses.exact_filter(args.functions, harness.NAMES_TAKE_ARGUMENTS)
         summary = session.bench_target(
             target, suite=suite, store=store, adapter=adapter, flags={name: getattr(args, name) for name in harnesses.FLAG_NAMES},
-            environment_variables=env, filter=harnesses.exact_filter(args.functions) or args.filter,
+            environment_variables=env, filter=names or args.filter,
             quantity=args.quantity or "wall-time", project=args.project, run_key=args.run_key, out=args.out,
             source_uri=args.source_uri, case_s=case_s, build=not args.no_build,
             progress=lambda message: print(message, file=sys.stderr))
@@ -361,7 +363,9 @@ def main(argv=None):
                                    "writes one) and the flags: flags win.")
     p.add_argument("target", metavar="TARGET",
                    help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file or an asv suite")
-    p.add_argument("functions", nargs="*", metavar="FUNCTION", help="exact case names (default: all cases)")
+    p.add_argument("functions", nargs="*", metavar="FUNCTION",
+                   help="exact case names (default: all cases); asv: the name of a parametrized "
+                        "benchmark selects all its combinations")
     _add_target_options(p, "bench")
     p.add_argument("--tree", help="the shorthand's tree (default: the module's or suite's git checkout or directory)")
     p.add_argument("--case-timeout", type=float,

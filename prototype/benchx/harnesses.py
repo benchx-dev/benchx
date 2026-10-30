@@ -16,6 +16,9 @@ Each harness has
     suite_entry(suite, filter) -> one `suites[]` entry
     BARE_PATH_KIND          what a bare path names for this harness: a `build`
                             directory or a `working_tree`
+    NAMES_TAKE_ARGUMENTS    whether a case name may be followed by `(arguments)`, one
+                            combination of a parametrized benchmark; a bare name then
+                            selects all of them (see `exact_filter`)
 """
 
 import re
@@ -24,15 +27,25 @@ from . import config
 from .errors import SessionError
 
 
-def exact_filter(names) -> str | None:
-    """Exact case names as one regex; None leaves the adapter's default case set."""
-    return "^(" + "|".join(re.escape(n) for n in names) + ")$" if names else None
+def exact_filter(names, arguments=False) -> str | None:
+    """Exact case names as one regex; None leaves the adapter's default case set.
+
+    With `arguments`, a name may be followed by `(…)`: the filter is searched in
+    `name(p0, p1)` for a parametrized benchmark, so the name alone then selects every
+    combination and `name(10, 'a')` one, as `asv run --bench` does. The name stays
+    exact: `time_sum` does not select `time_sum_fast`.
+    """
+    if not names:
+        return None
+    tail = r"(\(.*\))?" if arguments else ""
+    return "^(" + "|".join(re.escape(n) for n in names) + ")" + tail + "$"
 
 
 class Harness:
     name: str
     FLAGS: tuple[str, ...] = ()
     BARE_PATH_KIND: str
+    NAMES_TAKE_ARGUMENTS = False
 
     def suite_entry(self, suite: str, filter: str | None = None) -> dict:
         entry = {"adapter": self.name, "suite": suite}
@@ -121,6 +134,7 @@ class Asv(Pyperf):
 
     name = "asv"
     BARE_PATH_KIND = "working_tree"  # the suite is run as found, against the installed project
+    NAMES_TAKE_ARGUMENTS = True  # a parametrized benchmark is one case per combination
 
     def describe_precision(self, precision, config_path=None):
         reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
