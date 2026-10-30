@@ -228,6 +228,8 @@ pyperf's JSON (`-o`) holds `benchmarks[]`, each with `metadata` and `runs[]`; me
 | `date` of the first run, the benchmark, or the file, most specific first | `started_at` fallback |
 | `tags` | `provenance.labels` |
 
+pyperf has no parameters of its own, so the prototype's adapter reads asv's convention from the benchmark function: the attributes `params` (one list of values per parameter, or a flat list) and `param_names`. A combination is a case named `function-INDEX`, the driving half calls the function with it as positional arguments, and the values go to `workload.parameters` as `repr()` strings with default addresses removed, as for ASV (§4.3, §6.7). A filter is searched in `function(p0, p1)` for such a function, once per combination, so the bare name selects all of them. `setup`, `teardown` and `skip_params` are ASV's and are not read.
+
 Attempt key: one per benchmark per invocation. The workers are pyperf's own replication and become observation groups, never attempts (§4.6); fewer runs with values than requested processes is `partial`. The file stores no summaries: pyperf's mean and standard deviation, and the median of `pyperf stats`, are computed when displayed, so the result carries observations only and the server derives estimates. If the driving half runs `pyperf check`, its output is an artifact and a reported instability is the warning `producer-unstable`, never a status. A failing benchmark can end the invocation without an output file, so the account step of §5 is what turns it into `error` results, with stderr as the artifact. With `--append`, the driving half translates only the benchmarks and runs its own invocation added, so older runs in the file are not claimed by this attempt.
 
 ### 6.9 timeit and ad hoc scripts

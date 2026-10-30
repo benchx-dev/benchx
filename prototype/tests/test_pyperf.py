@@ -127,6 +127,101 @@ def test_a_plan_with_no_case_is_refused(tmp, tree, case_filter, message):
     assert results(tmp / "out") == []
 
 
+PARAM_MODULE = textwrap.dedent('''
+    from pathlib import Path
+
+    def bench_sort(n, key):
+        Path({seen!r}, f"{{n}}-{{key}}").touch()  # which combinations ran, and with which arguments
+        sorted(range(n))
+
+    bench_sort.params = ([10, 100], ["a", "b"])
+    bench_sort.param_names = ["n", "key"]
+
+    def bench_plain():
+        sum(range(10))
+
+    def helper():
+        pass
+
+    helper.params = 5  # not a benchmark, and not a params list: nobody asks
+''')
+COMBINATIONS = [("bench_sort", {"n": n, "key": key}) for n in ("10", "100") for key in ("'a'", "'b'")]
+
+
+@pytest.fixture
+def param_tree(tmp, tree):
+    (tmp / "seen").mkdir()
+    (tree / "mod.py").write_text(PARAM_MODULE.format(seen=str(tmp / "seen")))
+    return tree
+
+
+def planned(tree, case_filter):
+    """list_cases and the workload of each case, for a filter."""
+    env = dict(os.environ)
+    runnable = adapter.locate(tree, "mod.py", env)
+    cases = adapter.list_cases(runnable, case_filter, env)
+    return [(case, *adapter.workload(case, runnable)) for case in cases]
+
+
+def test_a_function_with_params_is_one_case_per_combination(param_tree):
+    assert planned(param_tree, "bench_sort") == [
+        (f"bench_sort-{i}", name, parameters) for i, (name, parameters) in enumerate(COMBINATIONS)]
+    # With no filter the cases are the bench_* functions, helper (no prefix) and its odd `params` excluded.
+    assert [case for case, _, _ in planned(param_tree, None)] == [
+        "bench_plain", "bench_sort-0", "bench_sort-1", "bench_sort-2", "bench_sort-3"]
+    assert planned(param_tree, "bench_plain") == [("bench_plain", "bench_plain", {})]
+
+
+def test_a_filter_is_searched_in_the_function_and_its_arguments(param_tree):
+    assert [case for case, _, _ in planned(param_tree, r"bench_sort\(100, 'a'\)")] == ["bench_sort-2"]
+    assert [case for case, _, _ in planned(param_tree, r"\(10, ")] == ["bench_sort-0", "bench_sort-1"]
+    assert [case for case, _, _ in planned(param_tree, r"^(bench_sort)(\(.*\))?$")] == [
+        f"bench_sort-{i}" for i in range(4)]  # what `bx bench mod.py bench_sort` asks for
+
+
+def test_a_filter_that_matches_a_name_but_no_arguments_is_refused_with_a_hint(param_tree):
+    with pytest.raises(adapter.Unsupported) as refused:
+        planned(param_tree, "bench_sort$")
+    message = str(refused.value.problems[0])
+    assert "filter 'bench_sort$' selects no case in mod.py; available: bench_plain, bench_sort;" in message
+    assert "the filter matches the name of a parametrized benchmark (bench_sort) but not its arguments" in message
+
+
+def test_params_that_cannot_be_read_matter_only_to_the_function_that_has_them(param_tree):
+    with pytest.raises(adapter.Unsupported, match="cannot read the params of helper in mod.py: TypeError"):
+        planned(param_tree, "helper")
+
+
+def test_a_refusal_names_a_suite_that_lives_outside_the_target(tmp, tree):
+    (tmp / "elsewhere").mkdir()
+    (tmp / "elsewhere" / "m.py").write_text("def bench_a():\n    pass\n")
+    env = dict(os.environ)
+    runnable = adapter.locate(tree, str(tmp / "elsewhere" / "m.py"), env)
+    with pytest.raises(adapter.Unsupported, match=re.escape(f"selects no case in {tmp / 'elsewhere' / 'm.py'}")):
+        adapter.list_cases(runnable, "nosuch", env)
+
+
+def test_each_combination_runs_with_its_own_arguments(tmp, param_tree):
+    docs = run_order(tmp, pyperf_order(param_tree, "params", case_filter="bench_sort"), "params")
+    assert sorted((d["coordinates"]["workload"]["name"], json.dumps(d["coordinates"]["workload"]["parameters"],
+                                                                    sort_keys=True)) for d in docs) == sorted(
+        (name, json.dumps(parameters, sort_keys=True)) for name, parameters in COMBINATIONS)
+    assert {d["measurement"]["status"] for d in docs} == {"success"}
+    # The function gets the values themselves (the string `a`, the int 10); the result records their repr().
+    assert sorted(p.name for p in (tmp / "seen").iterdir()) == ["10-a", "10-b", "100-a", "100-b"]
+    assert {"driver", "params-helper"} <= {a["kind"] for a in docs[0]["provenance"]["artifacts"]}
+
+
+def test_an_environment_variable_named_like_a_parameter_is_refused(tmp, param_tree):
+    document = pyperf_order(param_tree, "clash", case_filter="bench_sort")
+    document["environment_variables"] = {"n": "1"}
+    path = tmp / "o.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(runner.Refused, match="environment variables named like workload parameters: n;"):
+        runner.run(path, tmp / "out")
+    assert results(tmp / "out") == []
+
+
 def test_environment_passes_through_to_the_workers(tmp, tree):
     """The function fails if OPENBLAS_NUM_THREADS is missing; with it set the run succeeds."""
     document = pyperf_order(tree, "env-pass", case_filter="^needs_openblas$")
