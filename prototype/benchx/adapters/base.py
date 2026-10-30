@@ -54,7 +54,10 @@ Optional hooks (the runner calls them when present)
                               when the harness has structured parameters (ASV's
                               params). Without it the case is the name. The
                               parameters join the order's environment variables
-                              in `workload.parameters`.
+                              in `workload.parameters`. An adapter whose
+                              benchmarks take asv-style `params` uses
+                              `parametrized_workload` (see there for what its
+                              `runnable` holds).
     case_protocol(applied, run, case) -> the protocol this case ran under, for a
                               harness whose benchmarks declare their own precision
                               (ASV's number, repeat, warmup_time). Without it every
@@ -69,6 +72,7 @@ import signal
 import subprocess
 
 from ..core import Refusal, Rejected
+from .benchx_params import combination
 
 
 class Unsupported(Rejected):
@@ -76,6 +80,28 @@ class Unsupported(Rejected):
 
     def __init__(self, *reasons: str) -> None:
         super().__init__([Refusal(reason) for reason in reasons])
+
+
+def parametrized_workload(case, runnable) -> tuple[str, dict]:
+    """The benchmark name of a case and its parameters as value strings, by parameter name.
+
+    `runnable["cases"]` maps a case id to (benchmark name, combination index or None) and
+    `runnable["benchmarks"]` a name to what `list_cases` found: `params` (value strings,
+    one list per parameter) and `param_names`. A case id is `name-INDEX` for a parametrized
+    benchmark, which another benchmark's own name can look like, so the benchmark is found
+    by that table and never by taking the id apart."""
+    name, index = runnable["cases"][case]
+    if index is None:
+        return name, {}
+    info = runnable["benchmarks"][name]
+    return name, dict(zip(info["param_names"], combination(info["params"], index)))
+
+
+def name_only_note(names) -> str:
+    """For a refusal: the filter matched parametrized benchmarks by name, but not their
+    arguments (see `benchx_params.matches_name_only`)."""
+    return (f"the filter matches the name of a parametrized benchmark ({', '.join(names[:3])}) but "
+            "not its arguments, and those are matched as name(p0, p1)")
 
 
 def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupported:

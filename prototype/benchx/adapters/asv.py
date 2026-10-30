@@ -43,11 +43,9 @@ are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
 is part of the protocol, so editing a benchmark starts a new series.
 """
 
-import itertools
 import json
 import math
 import os
-import re
 import shutil
 import signal
 import statistics
@@ -57,8 +55,8 @@ import tempfile
 from pathlib import Path
 
 from .. import snapshot
-from . import pyperf
-from .base import Unsupported, no_cases, run_bounded
+from . import benchx_params, pyperf
+from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -196,16 +194,11 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
-        if info["params"]:
-            selected = [(f"{info['name']}-{i}", (info["name"], i))
-                        for i, combo in enumerate(itertools.product(*info["params"]))
-                        if not case_filter or re.search(case_filter, f"{info['name']}({', '.join(combo)})")]
-            if not selected and case_filter and re.search(case_filter, info["name"]):
-                unmatched.append(info["name"])
-        else:
-            matches = not case_filter or re.search(case_filter, info["name"])
-            selected = [(info["name"], (info["name"], None))] if matches else []
+        selected = [(case, (info["name"], index))
+                    for case, index in benchx_params.expand(info["name"], info["params"], case_filter)]
         if not selected:
+            if benchx_params.matches_name_only(info["name"], info["params"], case_filter):
+                unmatched.append(info["name"])
             continue
         if info["type"] != "time":
             other[info["type"]] = other.get(info["type"], 0) + 1
@@ -225,8 +218,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if not cases:
         notes = []
         if unmatched:
-            notes.append(f"the filter matches the name of a parametrized benchmark ({', '.join(unmatched[:3])}) but "
-                         "not its arguments, and those are matched as name(p0, p1)")
+            notes.append(name_only_note(unmatched))
         if other:
             notes.append(f"only benchmarks that are not run were selected (only time benchmarks map to wall-time): "
                          f"{not_run}")
@@ -244,17 +236,7 @@ def _describe(target: tuple[str, int | None]) -> str:
     return repr(name) if index is None else f"{name!r} (combination {index})"
 
 
-def workload(case: str, runnable: dict) -> tuple[str, dict]:
-    """The benchmark name, and its parameters as asv's repr() strings, by name. A case
-    id is `name-INDEX` for a parametrized benchmark, which a plain benchmark's own name
-    can look like, so the benchmark is found by the table `list_cases` made, not by
-    taking the id apart."""
-    name, index = runnable["cases"][case]
-    info = runnable["benchmarks"][name]
-    if index is None:
-        return name, {}
-    combo = list(itertools.product(*info["params"]))[index]
-    return name, dict(zip(info["param_names"], combo))
+workload = parametrized_workload  # the benchmark name, and its parameters as asv's repr() strings
 
 
 def _plan(info: dict, invocation: dict) -> dict:
