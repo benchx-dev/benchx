@@ -43,11 +43,9 @@ are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
 is part of the protocol, so editing a benchmark starts a new series.
 """
 
-import itertools
 import json
 import math
 import os
-import re
 import shutil
 import signal
 import statistics
@@ -57,8 +55,8 @@ import tempfile
 from pathlib import Path
 
 from .. import snapshot
-from . import pyperf
-from .base import Unsupported, run_bounded
+from . import benchx_params, pyperf
+from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -68,6 +66,7 @@ QUANTITIES = pyperf.QUANTITIES
 ENV_ALLOWLIST = pyperf.ENV_ALLOWLIST
 
 RUNTIME = Path(__file__).with_name("asv_runtime.py")
+PARAMS = Path(__file__).with_name("benchx_params.py")  # the runtime loads it from its own directory
 CONF_NAMES = ("asv.conf.json", "asv.conf.jsonc")
 # asv's own defaults, where an order and a benchmark both leave a setting out.
 DEFAULT_ROUNDS = 2
@@ -182,6 +181,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     with tempfile.TemporaryDirectory() as scratch:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
+        shutil.copy(PARAMS, scratch)
         out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
                           timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
                           env=env, cwd=scratch)
@@ -191,17 +191,14 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     listing = json.loads(out.stdout.strip().splitlines()[-1])
     for failure in listing["failed"]:
         print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
-    cases, other = [], {}
+    cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
-        if info["params"]:
-            selected = [(f"{info['name']}-{i}", (info["name"], i))
-                        for i, combo in enumerate(itertools.product(*info["params"]))
-                        if not case_filter or re.search(case_filter, f"{info['name']}({', '.join(combo)})")]
-        else:
-            matches = not case_filter or re.search(case_filter, info["name"])
-            selected = [(info["name"], (info["name"], None))] if matches else []
+        selected = [(case, (info["name"], index))
+                    for case, index in benchx_params.expand(info["name"], info["params"], case_filter)]
         if not selected:
+            if benchx_params.matches_name_only(info["name"], info["params"], case_filter):
+                unmatched.append(info["name"])
             continue
         if info["type"] != "time":
             other[info["type"]] = other.get(info["type"], 0) + 1
@@ -217,9 +214,20 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                 raise Unsupported(f"asv benchmarks {_describe(runnable['cases'][case])} and {_describe(target)} "
                                   f"share the case id {case!r}; give one of them another benchmark_name")
             cases.append(case)
+    not_run = ", ".join(f"{n} {t}" for t, n in sorted(other.items()))
+    if not cases:
+        notes = []
+        if unmatched:
+            notes.append(name_only_note(unmatched))
+        if other:
+            notes.append(f"only benchmarks that are not run were selected (only time benchmarks map to wall-time): "
+                         f"{not_run}")
+        if listing["failed"]:
+            notes.append(f"{len(listing['failed'])} module(s) failed to import")
+        raise no_cases(runnable["benchmark_dir"], case_filter,
+                       {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
-        print("asv: not run (only time benchmarks map to wall-time): "
-              + ", ".join(f"{n} {t}" for t, n in sorted(other.items())), file=sys.stderr)
+        print(f"asv: not run (only time benchmarks map to wall-time): {not_run}", file=sys.stderr)
     return cases
 
 
@@ -228,17 +236,7 @@ def _describe(target: tuple[str, int | None]) -> str:
     return repr(name) if index is None else f"{name!r} (combination {index})"
 
 
-def workload(case: str, runnable: dict) -> tuple[str, dict]:
-    """The benchmark name, and its parameters as asv's repr() strings, by name. A case
-    id is `name-INDEX` for a parametrized benchmark, which a plain benchmark's own name
-    can look like, so the benchmark is found by the table `list_cases` made, not by
-    taking the id apart."""
-    name, index = runnable["cases"][case]
-    info = runnable["benchmarks"][name]
-    if index is None:
-        return name, {}
-    combo = list(itertools.product(*info["params"]))[index]
-    return name, dict(zip(info["param_names"], combo))
+workload = parametrized_workload  # the benchmark name, and its parameters as asv's repr() strings
 
 
 def _plan(info: dict, invocation: dict) -> dict:
@@ -361,7 +359,9 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     worker_env = native_path.with_name(f"{stem}.worker-env.json")
     sidecar = native_path.with_name(f"{stem}.asv.json")
     runtime = native_path.with_name("asv_runtime.py")
+    params = native_path.with_name(PARAMS.name)
     shutil.copyfile(RUNTIME, runtime)
+    shutil.copyfile(PARAMS, params)
     for stale in (native_path, worker_env, sidecar):
         stale.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
@@ -390,7 +390,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     asv = {"benchmark": info, "case": case, "plan": plan, "skipped": skip, **observed}
     sidecar.write_text(json.dumps(asv, indent=1) + "\n")
     artifacts = [("driver", "text/x-python", driver), ("asv-runtime", "text/x-python", runtime),
-                 ("asv-case", "application/json", sidecar)]
+                 ("params-helper", "text/x-python", params), ("asv-case", "application/json", sidecar)]
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
     # A worker over the benchmark's own timeout: pyperf's manager gives up with 124.

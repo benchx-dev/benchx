@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from benchx import cli, core, harnesses, session
+from benchx import cli, core, harnesses, runner, session
 from benchx.store import Store
 from conftest import SOURCE_URI, git
 
@@ -64,15 +64,23 @@ MODULE = textwrap.dedent('''
 ''')
 
 
-@pytest.fixture
-def worktrees(tmp_path):
+PARAM_MODULE = textwrap.dedent('''
+    def bench_s(n):
+        sum(range(n * {work}))
+
+    bench_s.params = [1, 2]
+    bench_s.param_names = ["n"]
+''')
+
+
+def make_worktrees(tmp_path, module):
     """Two commits of a pure-Python suite, a clean worktree at each."""
     src = tmp_path / "src"
     src.mkdir()
     git(src, "init", "-q")
     shas = []
     for work in (200, 2000):
-        (src / "mod.py").write_text(MODULE.format(work=work))
+        (src / "mod.py").write_text(module.format(work=work))
         git(src, "add", "-A")
         git(src, "commit", "-qm", f"work {work}")
         shas.append(git(src, "rev-parse", "HEAD"))
@@ -81,6 +89,16 @@ def worktrees(tmp_path):
         git(src, "worktree", "add", "-q", "--detach", str(tmp_path / name), sha)
         trees[name] = tmp_path / name
     return trees
+
+
+@pytest.fixture
+def worktrees(tmp_path):
+    return make_worktrees(tmp_path, MODULE)
+
+
+@pytest.fixture
+def param_worktrees(tmp_path):
+    return make_worktrees(tmp_path, PARAM_MODULE)
 
 
 def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
@@ -103,6 +121,31 @@ def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
     order = json.loads(Path(tmp / "out" / "orders" / "order-0000.json").read_text())
     assert order["suites"][0]["adapter"] == "pyperf"
     assert order["target"]["kind"] == "working_tree"
+
+
+def test_each_combination_of_a_function_with_params_is_a_unit(tmp, param_worktrees):
+    """Two combinations are two units, each paired with the same combination on the other side."""
+    pytest.importorskip("pyperf")
+    doc = session.compare_targets(
+        str(param_worktrees["base"]), str(param_worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
+        store=Store(tmp / "s.parquet"), flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
+        filter=harnesses.exact_filter(["bench_s"], arguments=True), out=tmp / "out", run_key="params")
+    assert sorted((u["workload"]["name"], u["workload"]["parameters"]["n"]) for u in doc["units"]) == [
+        ("bench_s", "1"), ("bench_s", "2")]
+    assert doc["missing"] == [] and doc["failed_invariants"] == []
+
+
+def test_a_filter_that_selects_no_case_refuses_the_comparison(tmp, worktrees):
+    """A comparison with nothing measured on a side is not "no difference": it is refused with the
+    side's own refusal, before any case runs, and nothing reaches the store."""
+    pytest.importorskip("pyperf")
+    store = Store(tmp / "s.parquet")
+    with pytest.raises(runner.Refused, match=r"filter '\^\(nosuch\)\$' selects no case in mod.py"):
+        session.compare_targets(
+            str(worktrees["base"]), str(worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
+            store=store, flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
+            filter=harnesses.exact_filter(["nosuch"]), out=tmp / "out", run_key="empty")
+    assert list(store.documents("empty")) == []
 
 
 def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):

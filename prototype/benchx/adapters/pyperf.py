@@ -6,6 +6,16 @@ runs `Runner.bench_func` in a child interpreter resolved from the child's own
 PATH. pyperf must be importable there, or the order is refused. Translating:
 one case's pyperf JSON (`-o`) to one measurement and procedure.
 
+Parameters: pyperf has none of its own, so a function declares them as asv does,
+with the attributes `params` (one list of values per parameter, or one flat list)
+and `param_names`. Each combination is a case, `function-INDEX`, and the driver
+calls the function with that combination as its positional arguments. The values
+are recorded as `workload.parameters`, in the strings `benchx_params` makes of
+them (asv's repr() strings). A filter is searched in `function(p0, p1)` for such
+a function, so its bare name selects every combination (`benchx_params.expand`).
+`setup`, `teardown` and `skip_params` are asv's, and pyperf's `bench_func` has no
+place for them.
+
 The driver records the environment it actually had, before it imports the
 user's module: a digest in every worker's run metadata and, from a worker,
 the full environment as an artifact. The adapter reports what the workers had, not what the manager
@@ -23,12 +33,13 @@ import sys
 from pathlib import Path
 
 from .. import snapshot
-from .base import Unsupported, run_bounded
+from . import benchx_params
+from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "pyperf"
 CONTEXT_KEY = "pyperf"
 WORKLOAD_PARAMETERS = False
-PRODUCER = {"name": "benchx/pyperf-adapter", "version": "0.1.0", "mapping_version": "pyperf-to-benchx/v1"}
+PRODUCER = {"name": "benchx/pyperf-adapter", "version": "0.2.0", "mapping_version": "pyperf-to-benchx/v1"}
 
 QUANTITIES = {
     "wall-time": ("values", {"name": "wall-time", "unit": "s", "direction": "lower-is-better"}),
@@ -44,6 +55,8 @@ DEFAULTS = {
 }
 # With no suites[].filter, the module's functions named like this are the cases.
 DEFAULT_CASE_PREFIXES = ("bench_", "benchmark_")
+
+PARAMS = Path(__file__).with_name("benchx_params.py")  # the driver loads a copy of it by path
 
 ENV_DIGEST_KEY = "benchx_env_sha256"
 # Variables recorded beside the core and project allowlist when set in a worker.
@@ -131,36 +144,77 @@ def locate(target_path, suite, env, timeout=None) -> dict:
 
 
 LISTER = r"""
-import importlib.util, json, re, sys
-module_path, case_filter, prefixes = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
-import os
+import importlib.util, json, os, sys
+module_path, params_path = sys.argv[1], sys.argv[2]
 sys.path[:0] = [os.path.dirname(module_path), os.getcwd()]
+spec = importlib.util.spec_from_file_location("benchx_params", params_path)
+params = importlib.util.module_from_spec(spec)
+sys.modules["benchx_params"] = params
+spec.loader.exec_module(params)
 spec = importlib.util.spec_from_file_location("benchx_suite", module_path)
 module = importlib.util.module_from_spec(spec)
 sys.modules["benchx_suite"] = module
 spec.loader.exec_module(module)
-names = [n for n, f in vars(module).items()
-         if callable(f) and getattr(f, "__module__", None) == "benchx_suite" and not n.startswith("_")
-         and (re.search(case_filter, n) if case_filter else n.startswith(tuple(prefixes)))]
-print(json.dumps(sorted(names)))
+found = []
+for name, func in sorted(vars(module).items()):
+    if callable(func) and getattr(func, "__module__", None) == "benchx_suite" and not name.startswith("_"):
+        info = {"name": name, "params": [], "param_names": []}
+        try:
+            _, info["param_names"], info["params"] = params.normalize(
+                getattr(func, "params", []), getattr(func, "param_names", []))
+        except Exception as error:
+            info["error"] = f"{type(error).__name__}: {error}"
+        found.append(info)
+print(json.dumps(found))
 """
 
 
 def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
-    """The module's functions: those matching the filter (a regex searched in the
-    name), or with no filter those named `bench_*` or `benchmark_*`."""
-    out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), case_filter or "",
-                       json.dumps(DEFAULT_CASE_PREFIXES)],
+    """The module's functions the filter selects: with no filter those named `bench_*` or
+    `benchmark_*`, with one any function, by a regex searched in the name (and, for a
+    function with `params`, in `name(p0, p1)`, once per combination; see
+    `benchx_params.expand`). A combination is the case `function-INDEX`."""
+    try:
+        where = runnable["module"].relative_to(runnable["root"])
+    except ValueError:  # a suite outside the target, named by its absolute path
+        where = runnable["module"]
+    out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), str(PARAMS)],
                       timeout=timeout, what=f"importing {runnable['module'].name} to list its benchmarks",
                       env=env, cwd=runnable["root"])
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    return json.loads(out.stdout.strip().splitlines()[-1])
+    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
+    cases, unmatched = [], []
+    for info in listing:
+        name = info["name"]
+        if not case_filter and not name.startswith(DEFAULT_CASE_PREFIXES):
+            continue
+        selected = benchx_params.expand(name, info["params"], case_filter)
+        if not selected:
+            if benchx_params.matches_name_only(name, info["params"], case_filter):
+                unmatched.append(name)
+            continue
+        if "error" in info:
+            raise Unsupported(f"cannot read the params of {name} in {where}: {info['error']}")
+        runnable["benchmarks"][name] = info
+        for case, index in selected:
+            runnable["cases"][case] = (name, index)
+            cases.append(case)
+    if not cases:
+        defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
+        raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],
+                       [name_only_note(unmatched)] if unmatched else [])
+    return cases
+
+
+workload = parametrized_workload  # the function, and its parameters as value strings
 
 
 DRIVER = '''\
-# Generated by benchx. Runs one function under pyperf.
+# Generated by benchx. Runs one function under pyperf: one case, which for a function
+# that declares params is one combination of them, passed as its arguments.
 import hashlib, json, os, sys
 from pathlib import Path
 
@@ -171,6 +225,11 @@ _DIGEST = hashlib.sha256(
 
 import importlib.util
 import pyperf
+
+spec = importlib.util.spec_from_file_location("benchx_params", {params!r})
+params = importlib.util.module_from_spec(spec)
+sys.modules["benchx_params"] = params
+spec.loader.exec_module(params)
 
 runner = pyperf.Runner()
 runner.parse_args()
@@ -185,7 +244,12 @@ spec = importlib.util.spec_from_file_location("benchx_suite", {module!r})
 module = importlib.util.module_from_spec(spec)
 sys.modules["benchx_suite"] = module
 spec.loader.exec_module(module)
-runner.bench_func({case!r}, getattr(module, {case!r}))
+func = getattr(module, {function!r})
+args = ()
+if {index!r} is not None:
+    values, _, _ = params.normalize(getattr(func, "params", []), getattr(func, "param_names", []))
+    args = params.combination(values, {index!r})
+runner.bench_func({case!r}, func, *args)
 '''
 
 
@@ -196,11 +260,15 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
     stem = native_path.name.removesuffix(".native.json")
     driver = native_path.with_name(f"{stem}.driver.py")
     worker_env = native_path.with_name(f"{stem}.worker-env.json")
+    params = native_path.with_name(PARAMS.name)
     for stale in (native_path, worker_env):
         stale.unlink(missing_ok=True)
+    shutil.copyfile(PARAMS, params)
+    function, index = runnable.get("cases", {}).get(case, (case, None))  # a case run without listing is a function
     driver.write_text(DRIVER.format(
         digest_key=ENV_DIGEST_KEY, worker_env=str(worker_env.resolve()), env_names=list(env_names), module=str(runnable["module"]),
-        module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case))
+        module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case, function=function, index=index,
+        params=str(params.resolve())))
     # Absolute: the child runs in the tree, not where the output directory was named.
     args = [runnable["python"], str(driver.resolve()), *flags, "-o", str(native_path.resolve())]
     # Its own process group, so a timeout takes the workers down with the manager.
@@ -226,7 +294,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
             captured = json.loads(worker_env.read_text())
         except ValueError:
             captured = None
-    artifacts = [("driver", "text/x-python", driver)]
+    artifacts = [("driver", "text/x-python", driver), ("params-helper", "text/x-python", params)]
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
     return {"exit_status": status, "timed_out": status is None, "stdout": stdout or "", "stderr": stderr or "",

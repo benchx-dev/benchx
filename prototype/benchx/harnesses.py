@@ -16,6 +16,9 @@ Each harness has
     suite_entry(suite, filter) -> one `suites[]` entry
     BARE_PATH_KIND          what a bare path names for this harness: a `build`
                             directory or a `working_tree`
+    NAMES_TAKE_ARGUMENTS    whether a case name may be followed by `(arguments)`, one
+                            combination of a parametrized benchmark; a bare name then
+                            selects all of them (see `exact_filter`)
 """
 
 import re
@@ -24,15 +27,25 @@ from . import config
 from .errors import SessionError
 
 
-def exact_filter(names) -> str | None:
-    """Exact case names as one regex; None leaves the adapter's default case set."""
-    return "^(" + "|".join(re.escape(n) for n in names) + ")$" if names else None
+def exact_filter(names, arguments=False) -> str | None:
+    """Exact case names as one regex; None leaves the adapter's default case set.
+
+    With `arguments`, a name may be followed by `(…)`: the filter is searched in
+    `name(p0, p1)` for a parametrized benchmark, so the name alone then selects every
+    combination and `name(10, 'a')` one, as `asv run --bench` does. The name stays
+    exact: `time_sum` does not select `time_sum_fast`.
+    """
+    if not names:
+        return None
+    tail = r"(\(.*\))?" if arguments else ""
+    return "^(" + "|".join(re.escape(n) for n in names) + ")" + tail + "$"
 
 
 class Harness:
     name: str
     FLAGS: tuple[str, ...] = ()
     BARE_PATH_KIND: str
+    NAMES_TAKE_ARGUMENTS = False
 
     def suite_entry(self, suite: str, filter: str | None = None) -> dict:
         entry = {"adapter": self.name, "suite": suite}
@@ -90,6 +103,7 @@ class Pyperf(Harness):
     name = "pyperf"
     FLAGS = ("processes", "values", "min_time", "loops", "warmups")
     BARE_PATH_KIND = "working_tree"  # the module is run as found; the path is its own source
+    NAMES_TAKE_ARGUMENTS = True  # a function with params is one case per combination
 
     def _precision_from(self, processes=None, values=None, min_time=None, loops=None, warmups=None) -> dict:
         if min_time is not None and loops is not None:
