@@ -1,7 +1,9 @@
 """ASV's benchmark language, read and run without asv (harness-adapter.md §6.7).
 
 Standalone: the standard library only, so the adapter copies this file beside
-each case's driver and the benchmark's interpreter imports it from there.
+each case's driver and the benchmark's interpreter imports it from there. The
+parameter conventions are in `benchx_params.py`, which it loads from its own
+directory, so that file is copied with it.
 
 This is the part of asv that gives a benchmark file its meaning: which
 functions and methods are benchmarks, how attributes resolve (the function,
@@ -17,8 +19,8 @@ import gc
 import hashlib
 import importlib
 import importlib.machinery
+import importlib.util
 import inspect
-import itertools
 import json
 import os
 import pkgutil
@@ -27,7 +29,23 @@ import sys
 import textwrap
 import time
 import traceback
-from collections import Counter
+
+
+
+def _load_params():
+    """benchx_params.py, beside this file: by its path and under its own module name, so that
+    nothing on sys.path (a benchmark's own `params` module, say) can stand in for it."""
+    if "benchx_params" in sys.modules:
+        return sys.modules["benchx_params"]
+    spec = importlib.util.spec_from_file_location(
+        "benchx_params", os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchx_params.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["benchx_params"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+params_ = _load_params()
 
 # asv's benchmark types and their `type` labels; the first whose regex matches wins.
 TYPES = (
@@ -113,37 +131,6 @@ def _source(items) -> str:
     return "\n\n".join(sources).rstrip()
 
 
-def _repr(obj) -> str:
-    """repr() without a default `at 0x…` address, so the string is stable across runs."""
-    text = repr(obj)
-    match = re.match(r"^(<.*) at (0x[\da-fA-F]*)(>)$", text)
-    if match:
-        default = re.match(r"^(<.*) at (0x[\da-fA-F]*)(>)$", object.__repr__(obj))
-        if default and default[2] == match[2]:
-            text = match[1] + match[3]
-    return text
-
-
-def _params(params, param_names):
-    params = list(params)
-    if params and not isinstance(params[0], (tuple, list)):
-        params = [params]
-    else:
-        params = [list(entry) for entry in params]
-    param_names = [str(n) for n in param_names][:len(params)]
-    param_names += [f"param{k + 1}" for k in range(len(param_names), len(params))]
-    ids = []
-    for entry in params:
-        entry = [_repr(item) for item in entry]
-        dupes = {n: 0 for n, count in Counter(entry).items() if count > 1}
-        for j, n in enumerate(entry):
-            if n in dupes:
-                entry[j] = f"{n} ({dupes[n]})"
-                dupes[n] += 1
-        ids.append(entry)
-    return params, param_names, ids
-
-
 def _setup_cache_key(func):
     if func is None:
         return None
@@ -165,8 +152,8 @@ class Benchmark:
         explicit = _first(sources, "version")
         code = _source([func] + self.setups + [self.setup_cache])
         self.version = str(explicit) if explicit is not None else hashlib.sha256(code.encode()).hexdigest()
-        self.raw_params, self.param_names, self.params = _params(_first(sources, "params", []),
-                                                                 _first(sources, "param_names", []))
+        self.raw_params, self.param_names, self.params = params_.normalize(_first(sources, "params", []),
+                                                                           _first(sources, "param_names", []))
         self.skip_params = _first(sources, "skip_params", [])
         self.declared = {k: _first(sources, k) for k in DECLARED if _first(sources, k) is not None}
         self.timer = _first(sources, "timer", time.perf_counter)
@@ -183,7 +170,7 @@ class Benchmark:
 
     def select(self, index):
         if index is not None:
-            self.current = next(itertools.islice(itertools.product(*self.raw_params), index, index + 1))
+            self.current = params_.combination(self.raw_params, index)
 
     def set_cache(self, cache):
         self.cache, self._has_cache = cache, True

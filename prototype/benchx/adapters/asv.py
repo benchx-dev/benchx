@@ -68,6 +68,7 @@ QUANTITIES = pyperf.QUANTITIES
 ENV_ALLOWLIST = pyperf.ENV_ALLOWLIST
 
 RUNTIME = Path(__file__).with_name("asv_runtime.py")
+PARAMS = Path(__file__).with_name("benchx_params.py")  # the runtime loads it from its own directory
 CONF_NAMES = ("asv.conf.json", "asv.conf.jsonc")
 # asv's own defaults, where an order and a benchmark both leave a setting out.
 DEFAULT_ROUNDS = 2
@@ -182,6 +183,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     with tempfile.TemporaryDirectory() as scratch:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
+        shutil.copy(PARAMS, scratch)
         out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
                           timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
                           env=env, cwd=scratch)
@@ -375,7 +377,9 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     worker_env = native_path.with_name(f"{stem}.worker-env.json")
     sidecar = native_path.with_name(f"{stem}.asv.json")
     runtime = native_path.with_name("asv_runtime.py")
+    params = native_path.with_name(PARAMS.name)
     shutil.copyfile(RUNTIME, runtime)
+    shutil.copyfile(PARAMS, params)
     for stale in (native_path, worker_env, sidecar):
         stale.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
@@ -404,7 +408,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     asv = {"benchmark": info, "case": case, "plan": plan, "skipped": skip, **observed}
     sidecar.write_text(json.dumps(asv, indent=1) + "\n")
     artifacts = [("driver", "text/x-python", driver), ("asv-runtime", "text/x-python", runtime),
-                 ("asv-case", "application/json", sidecar)]
+                 ("params-helper", "text/x-python", params), ("asv-case", "application/json", sidecar)]
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
     # A worker over the benchmark's own timeout: pyperf's manager gives up with 124.
