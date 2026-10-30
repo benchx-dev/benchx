@@ -54,3 +54,24 @@ def normalize(params, param_names):
 def combination(values, index):
     """The `index`-th combination of `values` (one list per parameter), as a tuple."""
     return next(itertools.islice(itertools.product(*values), index, index + 1))
+
+
+def expand(name, ids, case_filter):
+    """The cases of one benchmark that `case_filter` (a regex, or None for all) selects, as
+    (case id, combination index) pairs; the index is None for a benchmark without parameters.
+
+    As in `asv run --bench`, the filter is searched in `name(p0, p1)` once per combination
+    of a parametrized benchmark (`ids` are its value strings, one list per parameter), so
+    the name alone, with nothing after it, selects every combination, and `name$` none.
+    The case id of a combination is `name-INDEX`.
+    """
+    if not ids:
+        return [(name, None)] if not case_filter or re.search(case_filter, name) else []
+    return [(f"{name}-{i}", i) for i, combo in enumerate(itertools.product(*ids))
+            if not case_filter or re.search(case_filter, f"{name}({', '.join(combo)})")]
+
+
+def matches_name_only(name, ids, case_filter) -> bool:
+    """Whether a filter that selected none of a benchmark's cases matches its name alone:
+    a parametrized benchmark is searched in `name(p0, p1)`, so `name$` is a likely slip."""
+    return bool(ids and case_filter and re.search(case_filter, name))
