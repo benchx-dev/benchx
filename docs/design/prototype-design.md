@@ -436,7 +436,8 @@ Per comparison unit (one workload variant and quantity), the method
   of d across rounds (`noise_source: paired-rounds`);
 - indicates a change when |effect| > *k* × noise, labeled by the quantity's
   direction when known; otherwise *no change detected*;
-- is indeterminate with a reason when fewer than `min_rounds` pairs exist
+- is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
+  never with fewer than two, since the noise is a standard error
   (`insufficient-rounds`), when a baseline value is zero, or when the guard
   excluded the unit.
 

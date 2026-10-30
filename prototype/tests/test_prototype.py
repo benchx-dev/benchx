@@ -1,6 +1,7 @@
 """The success criteria of prototype-scope.md §3, on fake Google Benchmark output."""
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -314,6 +315,27 @@ def test_every_refusal_is_reported(repo, tmp):
     ]
 
 
+@pytest.mark.parametrize("script, message", [
+    ("#!/bin/sh\necho 'cannot open the dataset' >&2\nexit 3\n",
+     "demo-bench failed to list its benchmarks: exit status 3: cannot open the dataset"),
+    ("#!/bin/sh\nexit 1\n", "demo-bench failed to list its benchmarks: exit status 1: no message"),
+    ("\x00\x01 not a program", "cannot run demo-bench to list its benchmarks: "),
+], ids=["exits-3-with-a-message", "exits-1-silently", "cannot-start"])
+def test_a_binary_that_cannot_list_its_benchmarks_is_a_refusal(repo, tmp, capsys, script, message):
+    """The planned cases come from asking the binary, so one that fails or cannot start cannot be
+    planned: the order is refused with what it said, before any case runs, not with a traceback."""
+    from benchx import cli
+    build = make_build(tmp / "b", repo["wt-head"], cases())
+    (build / "demo-bench").write_bytes(script.encode())
+    path = tmp / "o.json"
+    path.write_text(json.dumps(order(build, repo["wt-head"], "nolist")))
+    with pytest.raises(runner.Refused, match=re.escape(message)):
+        runner.run(path, tmp / "out")
+    assert [p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-")] == []
+    assert cli.main(["run", str(path), "--out", str(tmp / "out")]) == cli.EXIT_REFUSED
+    assert f"refused: {message}" in capsys.readouterr().err
+
+
 def test_missing_build_is_refused_for_every_reason(tmp):
     problems = refused(tmp, order(tmp / "absent", None, "refused"))
     assert all(type(problem) is core.Refusal for problem in problems)
@@ -420,6 +442,32 @@ def test_entities_auto_create(revisions_run, tmp):
     assert set(entities) == {"project", "source", "workload_variant", "quantity", "environment", "revision",
                              "series", "series_point"}
     assert len(entities["revision"]) == 2
+
+
+def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, capsys):
+    """Schema §5.4: a batch is N independent documents with N outcomes. A file that is
+    not UTF-8, or is not there, is rejected as malformed, and the rest is ingested."""
+    from benchx import cli
+    sweep = tmp / "sweep"
+    sweep.mkdir()
+    (sweep / "good.json").write_text(json.dumps(adhoc))
+    (sweep / "garbage.json").write_bytes(b"\xff\xfe\x00not text")
+    (sweep / "workorder-garbage.json").write_bytes(b"\xff")
+    missing = tmp / "missing.json"
+    store = Store(tmp / "store.parquet")
+    outcome = store.ingest_paths([sweep, missing])
+    assert (outcome["ingested"], outcome["duplicate"]) == (1, 0)
+    rejected = {r["document"]: r for r in outcome["rejected"]}
+    assert set(rejected) == {"garbage.json", "workorder-garbage.json", "missing.json"}
+    assert {r["code"] for r in rejected.values()} == {"malformed"}
+    assert "invalid UTF-8 at byte 0" in rejected["garbage.json"]["message"]
+    assert "cannot read file" in rejected["missing.json"]["message"]
+    assert len(store.documents(adhoc["provenance"]["run_key"])) == 1
+
+    assert cli.main(["ingest", str(sweep), str(missing)]) == cli.EXIT_INVALID
+    captured = capsys.readouterr()
+    assert "rejected missing.json: malformed" in captured.err
+    assert "ingested 1, duplicate 0, rejected 3 (malformed)" in captured.out  # into the CLI's own store
 
 
 def test_reads_files_from_an_older_schema(revisions_run, tmp):

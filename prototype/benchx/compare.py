@@ -37,6 +37,9 @@ PROFILES = {
                                            "alternating-slots"]),
 }
 WORKLOAD = "/coordinates/workload"
+# The noise is the standard error of the per-round differences, so a verdict needs
+# at least two pairs, whatever `min_rounds` a caller asks for.
+MIN_PAIRS = 2
 
 
 class CompareError(Exception):
@@ -256,7 +259,7 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds):
         # Deferred: no prototype quantity is deterministic (prototype-design.md §5).
         unit["reason"] = "deterministic-deferred"
         return unit
-    if len(estimates) < min_rounds:
+    if len(estimates) < max(min_rounds, MIN_PAIRS):
         unit["reason"] = "insufficient-rounds"
         return unit
     if any(b == 0 for b, _ in estimates):

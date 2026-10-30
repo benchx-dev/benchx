@@ -11,9 +11,9 @@ import textwrap
 
 import pytest
 
-from benchx import cli, core
+from benchx import bench, cli, core
 from benchx.store import Store
-from conftest import QUIET, NOISY, cases, git, make_build
+from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build
 from test_target import PROVIDER, describe
 
 GBENCH = ["--adapter", "google-benchmark", "--suite", "demo-bench"]
@@ -52,6 +52,23 @@ def test_head_table_prints_the_bench_columns_of_the_stored_results(build, capsys
     assert QUIET in lines[3] + lines[4] and NOISY in lines[3] + lines[4]
     with pytest.raises(SystemExit):  # one shape at a time
         cli.main(["head", "--table", "--json"])
+
+
+def test_a_table_row_needs_nothing_the_schema_leaves_optional(example):
+    """`procedure` and the observations are optional in a result (schema §5.1), and the
+    table is built from whatever the store holds, not only from the runner's results."""
+    row = bench.row_of(example)
+    assert row["case"] and row["status"]
+    assert (row["loops"] is None) == ("inner_iterations" not in example.get("procedure", {}))
+
+
+def test_head_table_shows_results_from_other_producers(tmp, capsys):
+    """The schema's own examples, one of which has no `procedure`, are ingested and tabulated."""
+    assert cli.main(["ingest", str(EXAMPLES)]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["head", "--table", "-n", "20"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "truncate" in out and "parquet-read" in out  # narwhals-overhead-ratio.json has no procedure
 
 
 def test_head_filters_by_project_and_workload_before_taking_n(build, capsys):

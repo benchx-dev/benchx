@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 
 from . import core, identity, parquet
 from .core import loader
-from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, UnitConflict
+from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, ReadError, UnitConflict
 from .projection import Projection
 
 # Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
@@ -181,7 +181,11 @@ class Store:
             files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
         orders, documents, unreadable = {}, [], []
         for f in files:
-            text = f.read_text(encoding="utf-8")
+            # A file that cannot be read is one rejection, not the end of the sweep (§5.4).
+            text = loader.read_text(f)
+            if isinstance(text, ReadError):
+                unreadable.append(_rejection(f.name, text))
+                continue
             if not f.name.startswith("workorder-"):
                 documents.append((f.name, text))
                 continue

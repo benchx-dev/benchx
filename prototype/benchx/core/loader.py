@@ -12,7 +12,7 @@ MAX_EXACT_INTEGER = 2**53 - 1
 
 
 def read(path: Path) -> tuple[dict[str, Any] | None, list[ReadError]]:
-    text = _read_text(path)
+    text = read_text(path)
     if isinstance(text, ReadError):
         return None, [text]
     return parse(text)
@@ -35,7 +35,8 @@ def parse(text: str) -> tuple[dict[str, Any] | None, list[ReadError]]:
     return data, []
 
 
-def _read_text(path: Path) -> str | ReadError:
+def read_text(path: Path) -> str | ReadError:
+    """The file's text, or why it cannot be read: not there, not readable, not UTF-8."""
     try:
         raw = path.read_bytes()
     except OSError as exc:

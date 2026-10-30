@@ -85,7 +85,7 @@ def row_of(document: dict) -> dict:
         "stdev": statistics.stdev(values) if len(values) > 1 else None,
         "min": min(values) if values else None,
         "max": max(values) if values else None,
-        "loops": document["procedure"].get("inner_iterations"),
+        "loops": document.get("procedure", {}).get("inner_iterations"),
         "warnings": [w.get("code", str(w)) if isinstance(w, dict) else str(w)
                      for w in document.get("quality", {}).get("warnings", [])],
     }
