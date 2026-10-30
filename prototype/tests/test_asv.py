@@ -189,6 +189,17 @@ def test_cases_are_exact_names(suite):
         ("bm.Sort.time_sorted", json.dumps({"key": "'a'", "n": "10"})), ("bm.time_plain", "{}")]
 
 
+def test_a_parametrized_benchmarks_name_selects_all_its_combinations(suite):
+    """As `asv run --bench bm.Sort.time_sorted` does. The name stays exact: `names.time_sum`
+    does not select `names.time_sum_fast`."""
+    (suite / "benchmarks" / "names.py").write_text("def time_sum():\n    pass\n\n\ndef time_sum_fast():\n    pass\n")
+    assert cli.main([*ASV, "bm.Sort.time_sorted", "names.time_sum", "--run-key", "bare", "--no-ingest",
+                     *FAST]) == cli.EXIT_OK
+    assert sorted(results(suite, "bare")) == sorted(
+        [("bm.Sort.time_sorted", json.dumps({"key": key, "n": n})) for n in ("10", "100") for key in ("'a'", "'b'")]
+        + [("names.time_sum", "{}")])
+
+
 def test_a_benchmark_name_may_end_in_a_dash_and_digits(suite):
     """A parametrized case is `name-INDEX`, so a plain benchmark that asv names `time_dashed-1`
     (through `benchmark_name`) must not be read as combination 1 of `time_dashed`."""

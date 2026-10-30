@@ -1,5 +1,7 @@
 """The order-side harness specs used by bx bench and bx compare."""
 
+import re
+
 import pytest
 
 from benchx import adapters, harnesses
@@ -18,6 +20,15 @@ def test_unknown_harness_is_refused():
 def test_exact_filter_matches_names_exactly():
     assert harnesses.exact_filter([]) is None
     assert harnesses.exact_filter(["f", "a.b"]) == r"^(f|a\.b)$"
+
+
+def test_exact_filter_lets_a_name_take_arguments():
+    pattern = re.compile(harnesses.exact_filter(["time_sum", "m.C.time_x(1, 'a')"], arguments=True))
+    for text in ("time_sum", "time_sum(10, 'a')", "m.C.time_x(1, 'a')"):
+        assert pattern.search(text), text
+    for text in ("time_sum_fast", "time_sum_fast(10)", "a.time_sum", "m.C.time_x(2, 'a')"):
+        assert not pattern.search(text), text
+    assert [h.name for h in harnesses.HARNESSES.values() if h.NAMES_TAKE_ARGUMENTS] == ["asv"]
 
 
 @pytest.mark.parametrize("harness", list(harnesses.HARNESSES.values()))

@@ -155,10 +155,12 @@ def cmd_bench(args):
         target, forced_suite, forced_adapter = _bench_target(args)
         settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
         _needs_provider(cfg, target)
+        # A name may carry `(arguments)` where the harness has parametrized benchmarks.
+        names = harnesses.exact_filter(args.functions, harnesses.get(settings["adapter"]).NAMES_TAKE_ARGUMENTS)
     except (UsageError, config_mod.ConfigError, bench_mod.SessionError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    settings["filter"] = harnesses.exact_filter(args.functions) or settings["filter"]
+    settings["filter"] = names or settings["filter"]
     snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
     store = None if args.no_ingest else Store(cfg.store_path)
     try:
@@ -484,7 +486,9 @@ def main(argv=None):
                                    "writes one) and the flags: flags win.")
     p.add_argument("target", metavar="TARGET",
                    help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file or an asv suite")
-    p.add_argument("functions", nargs="*", metavar="FUNCTION", help="exact case names (default: all cases)")
+    p.add_argument("functions", nargs="*", metavar="FUNCTION",
+                   help="exact case names (default: all cases); asv: the name of a parametrized "
+                        "benchmark selects all its combinations")
     _add_target_options(p, "bench")
     p.add_argument("--tree", help="the shorthand's tree (default: the module's or suite's git checkout or directory)")
     p.add_argument("--case-timeout", type=float,
