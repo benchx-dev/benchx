@@ -78,15 +78,39 @@ def test_bench_command_runs_and_ingests(tree, capsys):
     assert levels(order["precision"]) == {"process": 2, "value": 2}
 
 
+def test_a_function_with_params_is_named_by_itself_or_by_one_combination(tree, capsys):
+    (tree / "mod.py").write_text(textwrap.dedent('''
+        def bench_sort(n, key):
+            sorted(range(n))
+
+        bench_sort.params = ([10, 100], ["a", "b"])
+        bench_sort.param_names = ["n", "key"]
+    '''))
+
+    def ran(run_key):
+        found = [json.loads(p.read_text()) for p in (tree / "results" / run_key).glob("*.json")
+                 if not p.name.startswith("workorder-")]
+        return sorted(d["coordinates"]["workload"]["parameters"]["n"] + d["coordinates"]["workload"]["parameters"]["key"]
+                      for d in found if d["measurement"].get("kind") != "condition")
+
+    assert cli.main(["bench", "mod.py", "bench_sort", "--run-key", "all", "--no-ingest", *FAST]) == cli.EXIT_OK
+    assert ran("all") == ["10'a'", "10'b'", "100'a'", "100'b'"]  # the name alone: every combination
+    assert cli.main(["bench", "mod.py", "bench_sort(100, 'a')", "--run-key", "one", "--no-ingest", *FAST]) == cli.EXIT_OK
+    assert ran("one") == ["100'a'"]
+    assert cli.main(["bench", "mod.py", "bench_srot", "--run-key", "typo", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
+    assert "selects no case in mod.py; available: bench_sort" in capsys.readouterr().err
+
+
 def test_shorthand_order_is_stable(tree):
-    """The order `bx bench MODULE.py FUNCTION` writes; unchanged by how bench is wired inside."""
+    """The order `bx bench MODULE.py FUNCTION` writes; unchanged by how bench is wired inside. The
+    name may be followed by `(…)`, the arguments of one combination of a function with params."""
     assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "snap", "--no-ingest", "-e", "A=1", *FAST]) == cli.EXIT_OK
     order = json.loads((tree / "results" / "snap" / "orders" / "order.json").read_text())
     here = str(tree.resolve())
     assert order.pop("work_order_id").startswith("urn:uuid:")
     assert order == {
         "schema_version": "benchx/work-order/0.1.0", "state": "resolved",
-        "suites": [{"adapter": "pyperf", "suite": "mod.py", "filter": "^(bench_a)$"}],
+        "suites": [{"adapter": "pyperf", "suite": "mod.py", "filter": r"^(bench_a)(\(.*\))?$"}],
         "target": {"kind": "working_tree", "path": here, "source_dir": here,
                    "source": {"uri": f"file://{here}", "type": "git"}},
         "quantities": ["wall-time"],

@@ -62,16 +62,20 @@ A bare path is read by the harness. For Google Benchmark it is
 `working_tree` target that is its own source, measured as found with its dirty
 state and tree id recorded; `--suite` is the module's path in it, and a case is
 a function in it (`bench_*` and `benchmark_*` by default). A case named on the
-command line is an exact name (for asv, the name of a parametrized benchmark selects
-all its combinations, as `asv run --bench` does, and `name(10, 'a')` one); `--filter` is a
-regex; not both. `-e` fills
+command line is an exact name (for pyperf and asv, the name of a parametrized benchmark
+selects all its combinations, as `asv run --bench` does, and `name(10, 'a')` one);
+`--filter` is a regex, searched in `name(p0, p1)` for a parametrized benchmark; not both. `-e` fills
 `environment_variables`. Precision is resolved before the order is written,
 flags over the harness's defaults and, for pyperf, over `.benchx/config.json`
 (found by walking up from the current directory), so the order always states
 what applied; a flag the chosen harness does not take is refused, as in
 `bx compare`. The pyperf adapter takes `python` from the `PATH` the workers
-start with and refuses the order if pyperf is not importable there. Both
-commands default to pyperf.
+start with and refuses the order if pyperf is not importable there. A pyperf
+function that declares `params` and `param_names` as attributes, as an asv
+benchmark does, is one case per combination: the driver calls it with that
+combination as its arguments, and the values are recorded in `workload.parameters`
+as asv's `repr()` strings (`harness-adapter.md` §6.8). Both commands default to
+pyperf.
 
 `bx bench MODULE.py [FUNCTION …]` is a shorthand for the pyperf form: the target
 is the git checkout containing the module (or `--tree`), the suite is the

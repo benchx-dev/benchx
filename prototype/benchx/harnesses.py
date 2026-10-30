@@ -103,6 +103,7 @@ class Pyperf(Harness):
     name = "pyperf"
     FLAGS = ("processes", "values", "min_time", "loops", "warmups")
     BARE_PATH_KIND = "working_tree"  # the module is run as found; the path is its own source
+    NAMES_TAKE_ARGUMENTS = True  # a function with params is one case per combination
 
     def _precision_from(self, processes=None, values=None, min_time=None, loops=None, warmups=None) -> dict:
         if min_time is not None and loops is not None:
@@ -134,7 +135,6 @@ class Asv(Pyperf):
 
     name = "asv"
     BARE_PATH_KIND = "working_tree"  # the suite is run as found, against the installed project
-    NAMES_TAKE_ARGUMENTS = True  # a parametrized benchmark is one case per combination
 
     def describe_precision(self, precision, config_path=None):
         reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}

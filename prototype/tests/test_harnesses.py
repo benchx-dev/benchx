@@ -28,7 +28,7 @@ def test_exact_filter_lets_a_name_take_arguments():
         assert pattern.search(text), text
     for text in ("time_sum_fast", "time_sum_fast(10)", "a.time_sum", "m.C.time_x(2, 'a')"):
         assert not pattern.search(text), text
-    assert [h.name for h in harnesses.HARNESSES.values() if h.NAMES_TAKE_ARGUMENTS] == ["asv"]
+    assert [h.name for h in harnesses.HARNESSES.values() if h.NAMES_TAKE_ARGUMENTS] == ["pyperf", "asv"]
 
 
 @pytest.mark.parametrize("harness", list(harnesses.HARNESSES.values()))

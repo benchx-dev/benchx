@@ -314,7 +314,8 @@ def _add_target_options(parser, command):
                         help=f"the harness (default {session.HARNESS.name})")
     parser.add_argument("--suite", help="pyperf: the module's path in the working tree; "
                                         "google-benchmark: the binary in the build directory")
-    parser.add_argument("--filter", help="a case filter regex (pyperf: function names; "
+    parser.add_argument("--filter", help="a case filter regex (pyperf, asv: searched in the name, and in "
+                                         "name(p0, p1) of a parametrized benchmark; "
                                          "google-benchmark: --benchmark_filter)")
     parser.add_argument("--quantity", help="wall-time (default); google-benchmark also cpu-time")
     parser.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
@@ -364,8 +365,8 @@ def main(argv=None):
     p.add_argument("target", metavar="TARGET",
                    help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file or an asv suite")
     p.add_argument("functions", nargs="*", metavar="FUNCTION",
-                   help="exact case names (default: all cases); asv: the name of a parametrized "
-                        "benchmark selects all its combinations")
+                   help="exact case names (default: all cases); pyperf, asv: the name of a "
+                        "parametrized benchmark selects all its combinations")
     _add_target_options(p, "bench")
     p.add_argument("--tree", help="the shorthand's tree (default: the module's or suite's git checkout or directory)")
     p.add_argument("--case-timeout", type=float,
