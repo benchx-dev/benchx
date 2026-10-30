@@ -131,6 +131,7 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert sorted(sort) == sorted(json.dumps({"n": n, "key": key}, sort_keys=True)
                                   for n in ("10", "100") for key in ("'a'", "'b'"))
     one = next(iter(sort.values()))
+    assert {"driver", "asv-runtime", "params-helper"} <= {a["kind"] for a in one["provenance"]["artifacts"]}
     assert one["measurement"]["status"] == "success"
     assert len(one["measurement"]["observations"]) == 4
     assert {o["group"] for o in one["measurement"]["observations"]} == {"0", "1"}
