@@ -7,6 +7,7 @@ processes × 2 values with a fixed loop count, so they take about a second each.
 import copy
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -109,6 +110,21 @@ def test_default_cases_are_bench_prefixed_functions(tmp, tree):
     docs = run_order(tmp, pyperf_order(tree, "default-cases", case_filter=None) | {"suites": [
         {"adapter": "pyperf", "suite": "mod.py"}]}, "default-cases")
     assert sorted(d["coordinates"]["workload"]["name"] for d in docs) == ["bench_a", "benchmark_b"]
+
+
+@pytest.mark.parametrize("case_filter, message", [
+    ("^nosuchfunction$", "filter '^nosuchfunction$' selects no case in mod.py"),
+    (None, "no case to run in mod.py"),  # none of the module's functions is named bench_* or benchmark_*
+])
+def test_a_plan_with_no_case_is_refused(tmp, tree, case_filter, message):
+    document = pyperf_order(tree, "no-case", case_filter=case_filter)
+    if case_filter is None:
+        del document["suites"][0]["filter"]
+    path = tmp / "o.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(runner.Refused, match=re.escape(message)):
+        runner.run(path, tmp / "out")
+    assert results(tmp / "out") == []
 
 
 def test_environment_passes_through_to_the_workers(tmp, tree):

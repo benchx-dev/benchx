@@ -18,7 +18,9 @@ Driving half (harness-adapter.md §5)
                               if absent or unusable in `env`, the environment it would
                               run in
     list_cases(runnable, case_filter, env, timeout=None) -> the planned cases, fixed
-                              before running. Both run the user's code to find out, so
+                              before running; the runner refuses an empty plan (an
+                              adapter that knows why may raise `no_cases(...)` with
+                              more to say). Both run the user's code to find out, so
                               each subprocess they start is limited to `timeout` seconds
                               (the order's `timeouts.order_s`; None is no limit), and
                               an overrun raises Unsupported (see `run_bounded`)
@@ -74,6 +76,20 @@ class Unsupported(Rejected):
 
     def __init__(self, *reasons: str) -> None:
         super().__init__([Refusal(reason) for reason in reasons])
+
+
+def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupported:
+    """The refusal for a plan with no case in it. Nothing would run, and a filter with a
+    typo must not end in `0 result(s)` and a success status. `available` are the names
+    that could have been selected (the first `limit` are shown) and `notes` say what else
+    the adapter knows about why the plan is empty."""
+    head = f"filter {case_filter!r} selects no case in {where}" if case_filter else f"no case to run in {where}"
+    parts = [head]
+    names = sorted(available)
+    if names:
+        more = f", … ({len(names) - limit} more)" if len(names) > limit else ""
+        parts.append(f"available: {', '.join(names[:limit])}{more}")
+    return Unsupported("; ".join(parts + list(notes)))
 
 
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:

@@ -336,6 +336,22 @@ def test_a_binary_that_cannot_list_its_benchmarks_is_a_refusal(repo, tmp, capsys
     assert f"refused: {message}" in capsys.readouterr().err
 
 
+def test_a_filter_that_selects_no_case_is_a_refusal(repo, tmp, capsys):
+    """Nothing to run is not a success: a typo in the filter would end in `0 result(s)` and exit 0."""
+    from benchx import cli
+    build = make_build(tmp / "b", repo["wt-head"], cases())
+    document = order(build, repo["wt-head"], "nocase")
+    document["suites"][0]["filter"] = "^BM_NoSuch$"
+    path = tmp / "o.json"
+    path.write_text(json.dumps(document))
+    message = "filter '^BM_NoSuch$' selects no case in demo-bench"
+    with pytest.raises(runner.Refused, match=re.escape(message)):
+        runner.run(path, tmp / "out")
+    assert [p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-")] == []
+    assert cli.main(["run", str(path), "--out", str(tmp / "out")]) == cli.EXIT_REFUSED
+    assert f"refused: {message}" in capsys.readouterr().err
+
+
 def test_missing_build_is_refused_for_every_reason(tmp):
     problems = refused(tmp, order(tmp / "absent", None, "refused"))
     assert all(type(problem) is core.Refusal for problem in problems)

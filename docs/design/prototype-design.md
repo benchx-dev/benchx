@@ -62,7 +62,9 @@ A bare path is read by the harness. For Google Benchmark it is
 `working_tree` target that is its own source, measured as found with its dirty
 state and tree id recorded; `--suite` is the module's path in it, and a case is
 a function in it (`bench_*` and `benchmark_*` by default). A case named on the
-command line is an exact name; `--filter` is a regex; not both. `-e` fills
+command line is an exact name (for asv, the name of a parametrized benchmark selects
+all its combinations, as `asv run --bench` does, and `name(10, 'a')` one); `--filter` is a
+regex; not both. `-e` fills
 `environment_variables`. Precision is resolved before the order is written,
 flags over the harness's defaults and, for pyperf, over `.benchx/config.json`
 (found by walking up from the current directory), so the order always states
@@ -232,7 +234,9 @@ for. It also refuses each field whose feature is deferred: `environment_policy`
 `components`, and `schedule`. A refusal names the field and says it is
 deferred. `timeouts.order_s` limits each step that runs the user's code before any case
 (probing the interpreter, listing the benchmarks), and an overrun is a refusal; it does not
-yet bound the order as a whole.
+yet bound the order as a whole. A plan with no case in it is a refusal too, naming the filter
+(asv also names the benchmarks it could have selected), so that a typo does not end in `0
+result(s)` and a success status.
 Precision keys the order leaves out are recorded with Google Benchmark's
 defaults.
 

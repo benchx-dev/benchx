@@ -58,7 +58,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import pyperf
-from .base import Unsupported, run_bounded
+from .base import Unsupported, no_cases, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -191,13 +191,15 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     listing = json.loads(out.stdout.strip().splitlines()[-1])
     for failure in listing["failed"]:
         print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
-    cases, other = [], {}
+    cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
         if info["params"]:
             selected = [(f"{info['name']}-{i}", (info["name"], i))
                         for i, combo in enumerate(itertools.product(*info["params"]))
                         if not case_filter or re.search(case_filter, f"{info['name']}({', '.join(combo)})")]
+            if not selected and case_filter and re.search(case_filter, info["name"]):
+                unmatched.append(info["name"])
         else:
             matches = not case_filter or re.search(case_filter, info["name"])
             selected = [(info["name"], (info["name"], None))] if matches else []
@@ -217,9 +219,21 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                 raise Unsupported(f"asv benchmarks {_describe(runnable['cases'][case])} and {_describe(target)} "
                                   f"share the case id {case!r}; give one of them another benchmark_name")
             cases.append(case)
+    not_run = ", ".join(f"{n} {t}" for t, n in sorted(other.items()))
+    if not cases:
+        notes = []
+        if unmatched:
+            notes.append(f"the filter matches the name of a parametrized benchmark ({', '.join(unmatched[:3])}) but "
+                         "not its arguments, and those are matched as name(p0, p1)")
+        if other:
+            notes.append(f"only benchmarks that are not run were selected (only time benchmarks map to wall-time): "
+                         f"{not_run}")
+        if listing["failed"]:
+            notes.append(f"{len(listing['failed'])} module(s) failed to import")
+        raise no_cases(runnable["benchmark_dir"], case_filter,
+                       {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
-        print("asv: not run (only time benchmarks map to wall-time): "
-              + ", ".join(f"{n} {t}" for t, n in sorted(other.items())), file=sys.stderr)
+        print(f"asv: not run (only time benchmarks map to wall-time): {not_run}", file=sys.stderr)
     return cases
 
 

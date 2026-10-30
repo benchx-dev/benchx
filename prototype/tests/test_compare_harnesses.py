@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from benchx import cli, core, harnesses, session
+from benchx import cli, core, harnesses, runner, session
 from benchx.store import Store
 from conftest import SOURCE_URI, git
 
@@ -103,6 +103,19 @@ def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
     order = json.loads(Path(tmp / "out" / "orders" / "order-0000.json").read_text())
     assert order["suites"][0]["adapter"] == "pyperf"
     assert order["target"]["kind"] == "working_tree"
+
+
+def test_a_filter_that_selects_no_case_refuses_the_comparison(tmp, worktrees):
+    """A comparison with nothing measured on a side is not "no difference": it is refused with the
+    side's own refusal, before any case runs, and nothing reaches the store."""
+    pytest.importorskip("pyperf")
+    store = Store(tmp / "s.parquet")
+    with pytest.raises(runner.Refused, match=r"filter '\^\(nosuch\)\$' selects no case in mod.py"):
+        session.compare_targets(
+            str(worktrees["base"]), str(worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
+            store=store, flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
+            filter=harnesses.exact_filter(["nosuch"]), out=tmp / "out", run_key="empty")
+    assert list(store.documents("empty")) == []
 
 
 def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):
