@@ -14,9 +14,14 @@ Identity and capabilities
 Driving half (harness-adapter.md §5)
     protocol(precision)       -> (applied protocol, invocation): the full protocol
                               that will apply, and what the harness is given to apply it
-    locate(target_path, suite, env) -> the thing to run; raises Unsupported if absent
-                              or unusable in `env`, the environment it would run in
-    list_cases(runnable, case_filter, env) -> the planned cases, fixed before running
+    locate(target_path, suite, env, timeout=None) -> the thing to run; raises Unsupported
+                              if absent or unusable in `env`, the environment it would
+                              run in
+    list_cases(runnable, case_filter, env, timeout=None) -> the planned cases, fixed
+                              before running. Both run the user's code to find out, so
+                              each subprocess they start is limited to `timeout` seconds
+                              (the order's `timeouts.order_s`; None is no limit), and
+                              an overrun raises Unsupported (see `run_bounded`)
     run_case(runnable, case, invocation, env, timeout, native_path) -> the run record;
                               never raises for harness failures, which become results.
                               The record may carry `artifacts`, a list of
@@ -57,6 +62,10 @@ Optional hooks (the runner calls them when present)
                               attempt. For a harness that repeats at several levels.
 """
 
+import os
+import signal
+import subprocess
+
 from ..core import Refusal, Rejected
 
 
@@ -65,3 +74,28 @@ class Unsupported(Rejected):
 
     def __init__(self, *reasons: str) -> None:
         super().__init__([Refusal(reason) for reason in reasons])
+
+
+def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run(args, capture_output=True, text=True, **kwargs)` with a time limit.
+
+    The child leads its own process group, and the whole group is killed when the limit
+    passes (or when the caller is interrupted), so nothing it started outlives it and
+    nothing it started keeps the output pipes open. An overrun raises Unsupported, naming
+    `what` was being done: an order whose discovery cannot finish cannot be planned.
+    `timeout` None means no limit.
+    """
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except BaseException as error:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        if isinstance(error, subprocess.TimeoutExpired):
+            raise Unsupported(f"{what} did not finish within {timeout:g} s (timeouts.order_s)") from None
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)

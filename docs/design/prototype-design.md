@@ -230,7 +230,9 @@ than `wall-time` or `cpu-time`, or a precision key the adapter has no flag
 for. It also refuses each field whose feature is deferred: `environment_policy`
 (enforcing launch settings, verifying requested hardware), a declared `build`,
 `components`, and `schedule`. A refusal names the field and says it is
-deferred. `timeouts.order_s` is required by the schema and not enforced.
+deferred. `timeouts.order_s` limits each step that runs the user's code before any case
+(probing the interpreter, listing the benchmarks), and an overrun is a refusal; it does not
+yet bound the order as a whole.
 Precision keys the order leaves out are recorded with Google Benchmark's
 defaults.
 

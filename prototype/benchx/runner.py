@@ -123,7 +123,8 @@ def run(order_path, out_dir) -> dict:
     target_path = Path(order["target"]["path"]).expanduser()
     child_env = {**os.environ, **order.get("environment_variables", {})}
     try:
-        runnable = adapter.locate(target_path, order["suites"][0]["suite"], child_env)
+        runnable = adapter.locate(target_path, order["suites"][0]["suite"], child_env,
+                                  timeout=order["timeouts"]["order_s"])
     except Unsupported as e:
         refusals += e.problems
     if order["target"]["kind"] == "working_tree":
@@ -163,7 +164,8 @@ def run(order_path, out_dir) -> dict:
 
     attempted = adapter.attempted(applied_protocol)
     try:
-        cases = adapter.list_cases(runnable, order["suites"][0].get("filter"), child_env)
+        cases = adapter.list_cases(runnable, order["suites"][0].get("filter"), child_env,
+                                   timeout=order["timeouts"]["order_s"])
     except Unsupported as e:
         raise Refused(e.problems) from None
     workloads = [adapter.workload(case, runnable) if hasattr(adapter, "workload") else (case, {}) for case in cases]
