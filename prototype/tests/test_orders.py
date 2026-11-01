@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from benchx import core, orders, session
+from benchx import core, harnesses, orders, session
 
 SUITE = {"adapter": "google-benchmark", "suite": "demo-bench"}
 TARGET = {"kind": "build", "path": "/b", "source_dir": "/s",
@@ -26,11 +26,12 @@ def test_round_and_slot_zero_are_kept():
     assert (order["round"], order["slot"]) == (0, 0)
 
 
-def test_quantity_sets_quantities_and_plan():
+def test_quantities_set_quantities_and_plan():
     order = orders.make_order(suite=SUITE, target=TARGET, precision={"repetitions": 1}, run_key="rk",
-                              quantity="cpu-time")
-    assert order["quantities"] == ["cpu-time"]
-    assert order["plan"] == [{"id": "p0", "case": "*", "quantity": "cpu-time"}]
+                              quantities=["wall-time", "cpu-time"])
+    assert order["quantities"] == ["wall-time", "cpu-time"]
+    assert order["plan"] == [{"id": "p0", "case": "*", "quantity": "wall-time"},
+                             {"id": "p1", "case": "*", "quantity": "cpu-time"}]
 
 
 def test_each_order_gets_its_own_id():
@@ -49,7 +50,7 @@ def test_default_run_key():
 
 def test_compare_orders_are_now_validated():
     side = {"kind": "build", "path": Path("/b"), "source": "/s", "identity": {}, "uri": None, "text": {}, "labels": {}}
-    kwargs = dict(harness=session.HARNESS, suite="demo-bench", filter=None, quantity="wall-time",
+    kwargs = dict(harness=harnesses.GOOGLE_BENCHMARK, suite="demo-bench", filter=None, quantities=["wall-time"],
                   environment_variables=None, project=None, run_key="rk", source_uri="https://example.org/demo.git",
                   round_=0, slot=0, labels=None)
     assert core.check(session._order(side, precision={"repetitions": 5}, **kwargs), "work-order") == []

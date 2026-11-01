@@ -15,13 +15,19 @@ from benchx import cli, core, harnesses, session
 from benchx.store import Store
 from conftest import SOURCE_URI, git
 
-MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"]
+MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"]
 
 
 @pytest.mark.parametrize("argv, message", [
     (MEASURE + ["--adapter", "google-benchmark", "--processes", "2"], "google-benchmark takes no --processes"),
     (MEASURE + ["--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
-    (MEASURE + ["--repetitions", "3"], "pyperf takes no --repetitions"),  # pyperf is the default
+    (MEASURE + ["--repetitions", "3"], "pyperf takes no --repetitions"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"], "--adapter is required"),
+    (["A", "B", "--profile", "revisions", "--rounds", "1", "--adapter", "pyperf"], "--suite is required"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf"], "--rounds is required"),
+    (["A", "B", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"], "--profile is required"),
+    (MEASURE + ["--project", "p", "--no-project"], "--project or --no-project"),
+    (MEASURE + ["--quantity", "wall-time,wall-time"], "twice"),
     (MEASURE + ["-e", "NOEQUALS"], "-e wants NAME=VALUE"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--adapter", "pyperf"], "belongs to measure mode"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "-e", "A=1"], "belongs to measure mode"),
@@ -42,9 +48,9 @@ def test_a_pyperf_side_order(tmp):
     side = {"kind": "working_tree", "path": tmp, "source": str(tmp), "identity": {}, "uri": None,
             "text": {"activation": "source .venv/bin/activate"}, "labels": {}}
     pyperf = harnesses.PYPERF
-    precision, _ = pyperf.precision(pyperf.flags_to_precision(processes=2, values=3, loops=10), start=tmp)
+    precision = pyperf.precision(pyperf.flags_to_precision(processes=2, values=3, loops=10))
     order = session._order(side, harness=pyperf, suite="bench/mod.py", filter=harnesses.exact_filter(["f"]),
-                           quantity="wall-time", precision=precision,
+                           quantities=["wall-time"], precision=precision,
                            environment_variables={"OPENBLAS_NUM_THREADS": "1"}, project=None, run_key="rk",
                            source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
     assert core.check(order, "work-order") == []
@@ -86,7 +92,7 @@ def worktrees(tmp_path):
 def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
     pytest.importorskip("pyperf")
 
-    def provider(spec, operation):  # what a minimal provider for two worktrees would answer
+    def provider(spec, operation, provider=None):  # what a minimal provider for two worktrees would answer
         tree = worktrees[spec.removeprefix("@")]
         return {"schema_version": "benchx/target-description/0.1.0",
                 "target": {"kind": "working_tree", "path": str(tree), "source": {"uri": SOURCE_URI, "type": "git"}},
@@ -110,8 +116,8 @@ def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):
     pytest.importorskip("pyperf")
     doc = session.compare_targets(
         str(worktrees["base"]), str(worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
-        store=Store(tmp / "s.parquet"), flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
-        filter=harnesses.exact_filter(["f"]), out=tmp / "out", run_key="bare")  # pyperf is the default
+        store=Store(tmp / "s.parquet"), adapter="pyperf", flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
+        filter=harnesses.exact_filter(["f"]), out=tmp / "out", run_key="bare")
     assert [u["workload"]["name"] for u in doc["units"]] == ["f"]
     order = json.loads(Path(tmp / "out" / "orders" / "order-0001.json").read_text())
     assert (order["suites"][0]["adapter"], order["target"]["kind"]) == ("pyperf", "working_tree")

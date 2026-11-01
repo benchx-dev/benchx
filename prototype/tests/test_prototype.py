@@ -454,7 +454,7 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
     (sweep / "garbage.json").write_bytes(b"\xff\xfe\x00not text")
     (sweep / "workorder-garbage.json").write_bytes(b"\xff")
     missing = tmp / "missing.json"
-    store = Store(tmp / "store.parquet")
+    store = Store(tmp / "direct.parquet")  # not the project's store.parquet, which the CLI below ingests into
     outcome = store.ingest_paths([sweep, missing])
     assert (outcome["ingested"], outcome["duplicate"]) == (1, 0)
     rejected = {r["document"]: r for r in outcome["rejected"]}
@@ -507,19 +507,18 @@ def test_head(revisions_run, tmp):
 def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     """bx run writes result files and ingests exactly those into the one local store."""
     from benchx import cli
-    from benchx.store import default_path
     build = make_build(tmp / "b", repo["wt-head"], cases())
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
-    assert default_path() == tmp / "benchx-home" / "store.parquet"
+    store_path = tmp / "store.parquet"  # no benchx.conf.json: the working directory is the root
     assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
     assert "ingested 4, duplicate 0" in capsys.readouterr().out  # this run's files only, with load averages
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
-    total, rows = Store().head()
+    total, rows = Store(store_path).head()
     assert total == 4 and {load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
     ref = json.loads(rows[0]["document"])["provenance"]["info"]["workorder_ref"]
-    assert Store().order(ref) == load(tmp / "o1.json")  # the order travelled with its results
+    assert Store(store_path).order(ref) == load(tmp / "o1.json")  # the order travelled with its results
 
 
 def _working_tree_order(path, run_key, **target):
