@@ -123,8 +123,10 @@ def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_su
     bench(subject, loose_suite, "e2")
     after = result("e2")
     assert before["provenance"]["benchmark_tree"] != after["provenance"]["benchmark_tree"]
-    series = Store().series()
+    # Each run also records the load average beside the case, a condition measurement and a series of its own.
+    series = Store().series(quantity="wall-time")
     assert len(series) == 1
+    assert len(Store().history(series[0]["fingerprint"])) == 2  # both runs are points of it
 
 
 def test_a_suite_inside_the_subject_is_recorded_as_before(subject):
