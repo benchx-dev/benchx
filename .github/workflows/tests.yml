@@ -61,3 +61,17 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: uv run --extra test --python ${{ matrix.python-version }} bash examples/archery-local/run.sh
+
+      # The end-to-end demo of both profiles: builds a small CMake project three
+      # ways, then measures and compares it. Needs cmake and a C++ compiler
+      # (preinstalled on the Linux and macOS runners) and network access to fetch
+      # Google Benchmark. ROUNDS is lowered from the default of 5 to keep the job
+      # short; it changes how many samples are taken, not what the script exercises.
+      # Run directly, the way the README shows it, so a lost executable bit
+      # fails here too.
+      - name: Run the archery-compare example
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          ROUNDS: "2"
+        run: uv run --extra test --python ${{ matrix.python-version }} examples/archery-compare/run.sh
