@@ -454,7 +454,7 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
     (sweep / "garbage.json").write_bytes(b"\xff\xfe\x00not text")
     (sweep / "workorder-garbage.json").write_bytes(b"\xff")
     missing = tmp / "missing.json"
-    store = Store(tmp / "store.parquet")
+    store = Store(tmp / "direct.parquet")  # not the project's store.parquet, which the CLI below ingests into
     outcome = store.ingest_paths([sweep, missing])
     assert (outcome["ingested"], outcome["duplicate"]) == (1, 0)
     rejected = {r["document"]: r for r in outcome["rejected"]}

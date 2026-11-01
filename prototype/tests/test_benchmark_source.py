@@ -116,7 +116,7 @@ def test_a_versioned_suite_is_recorded_with_its_own_revision(subject, versioned_
     assert document["revision"]["key"] == git(subject, "rev-parse", "HEAD")
 
 
-def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_suite):
+def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_suite, tmp):
     bench(subject, loose_suite, "e1")
     before = result("e1")
     loose_suite.write_text(SUITE + "\n# edited\n")
@@ -124,9 +124,10 @@ def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_su
     after = result("e2")
     assert before["provenance"]["benchmark_tree"] != after["provenance"]["benchmark_tree"]
     # Each run also records the load average beside the case, a condition measurement and a series of its own.
-    series = Store().series(quantity="wall-time")
+    store = Store(tmp / "store.parquet")  # the project root is the test directory
+    series = store.series(quantity="wall-time")
     assert len(series) == 1
-    assert len(Store().history(series[0]["fingerprint"])) == 2  # both runs are points of it
+    assert len(store.history(series[0]["fingerprint"])) == 2  # both runs are points of it
 
 
 def test_a_suite_inside_the_subject_is_recorded_as_before(subject):
