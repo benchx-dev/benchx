@@ -10,7 +10,9 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 : "${NUMPY_A:?run.sh sets NUMPY_A and NUMPY_B}" "${NUMPY_B:?run.sh sets NUMPY_A and NUMPY_B}"
 
-configuration=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("configuration") or "")')
+# The request is one flat JSON object (schemas/target-provider-request), so its configuration is the
+# string after that key. An absent or null one leaves this empty, and is refused below.
+configuration=$(sed -n 's/.*"configuration"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 case "$configuration" in
   a) version=$NUMPY_A ;;
   b) version=$NUMPY_B ;;
@@ -19,13 +21,18 @@ esac
 # The canonical URI this working tree's results are filed under, as in archery-local.
 uri=https://example.org/numpy-venvs/demo.git
 
-HERE=$HERE URI=$uri VERSION=$version python3 - <<'PY'
-import json, os
-print(json.dumps({
-    "schema_version": "benchx/target-description/0.1.0",
-    "target": {"kind": "working_tree", "path": os.environ["HERE"],
-               "source": {"uri": os.environ["URI"], "type": "git"}},
-    "how_built": {"summary": {"numpy": os.environ["VERSION"]}},
-    "provider": {"name": "provider.sh", "version": "1"},
-}, indent=1))
-PY
+# A JSON string's body: the backslash and the quote escaped, which is all a path or a version needs.
+json_string() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+cat <<JSON
+{
+ "schema_version": "benchx/target-description/0.1.0",
+ "target": {
+  "kind": "working_tree",
+  "path": "$(json_string "$HERE")",
+  "source": {"uri": "$(json_string "$uri")", "type": "git"}
+ },
+ "how_built": {"summary": {"numpy": "$(json_string "$version")"}},
+ "provider": {"name": "provider.sh", "version": "1"}
+}
+JSON
