@@ -57,7 +57,7 @@ The versions (`NUMPY_A`, `NUMPY_B`), the Python and the number of rounds are set
   `{"summary": {"numpy": "<version>"}}`, and that lands in each result's `environment.system.deps`,
   which the `environments` comparison treats as the varying coordinate. benchx knows nothing about
   venvs, conda or pixi: any command that prints facts about an environment does the same.
-- `provider.sh` is the **target provider**. For configuration `a` or `b` it declares, in
+- `provider.py` is the **target provider**. For configuration `a` or `b` it declares, in
   `how_built`, the numpy that side is meant to have. The collector has `verify: how_built`, so it
   compares the declaration with what it found. The declared object has the same shape as the
   collector's output, because the check compares key by key from the top.
@@ -97,6 +97,6 @@ prototype does not have. This is how each corresponds:
 |---|---|
 | `run.sh` | the driver: venvs, the loop, the comparison, the check |
 | `benchx.conf.json` | the project file: the adapter and suite, the provider, the `deps` collector |
-| `provider.sh` | the target provider: declares each side's numpy in `how_built` (`run.sh` exports the versions) |
+| `provider.py` | the target provider: declares each side's numpy in `how_built` (`run.sh` exports the versions) |
 | `describe_env.py` | the collector: prints the numpy this Python imports |
 | `bench_suite.py` | three small numpy benchmarks |

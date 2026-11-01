@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# provider.sh reads the numpy versions from the environment. numpy 1.26.4 has no wheels beyond
+# provider.py reads the numpy versions from the environment. numpy 1.26.4 has no wheels beyond
 # Python 3.12, so both venvs use it. Three rounds are the fewest that give a verdict.
 export NUMPY_A=1.26.4 NUMPY_B=2.0.2
 PYTHON_VERSION=3.12
