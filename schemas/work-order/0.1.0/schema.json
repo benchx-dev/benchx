@@ -52,10 +52,10 @@
       ]
     },
     "benchmark": {
-      "description": "Where the benchmark suite's own code lives, when different from target (§3.3 addendum). Absent means the benchmarks live in the same checkout as target.",
+      "description": "Where the benchmark suite's own code lives, when different from target (§3.3 addendum). Absent means the benchmarks live in the same checkout as target. The revision is absent when the suite is not under version control; the runner then identifies the suite file by its content hash.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "revision"],
+      "required": ["source"],
       "properties": {
         "source": { "$ref": "#/$defs/sourceRef" },
         "revision": { "$ref": "#/$defs/nonEmptyString" }
