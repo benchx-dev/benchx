@@ -136,6 +136,7 @@ The documents involved are in `../../../schemas/`: `target-provider-request`,
 
 The provider here builds one source tree, `WORKSPACE`. Comparing against a tag
 or a past revision (`@plain=v1.0`) is the provider's business and is not
-implemented in this example; the prototype's own `demo.sh` shows revisions
-with two prebuilt worktrees. A declared `build` object in a description is
-refused by the prototype's runner (it reads `CMakeCache.txt` instead).
+implemented in this example; the prototype's own
+`examples/archery-compare/run.sh` shows revisions with two prebuilt worktrees.
+A declared `build` object in a description is refused by the prototype's
+runner (it reads `CMakeCache.txt` instead).

@@ -174,10 +174,10 @@ every result is pyperf. Results also record the installed project's version
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
 $ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
-$ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
+$ examples/archery-compare/run.sh       # real builds; needs cmake, a C++ compiler, network once
 ```
 
-`demo.sh` prints every command before running it, as you would type it
+`examples/archery-compare/run.sh` prints every command before running it, as you would type it
 (`bx` for `.venv/bin/python -m benchx.cli`, `$WORK` for its scratch
 directory), so it doubles as a walkthrough. It prepares a git source with two
 commits and three CMake build directories of `examples/demo-suite` (base,
@@ -194,14 +194,14 @@ part, then:
    persistent one, lists series and history, and ends with `bx head`.
 
 Every `bx run` and every measure-mode `bx compare` delivers to the local store, so each demo run adds its
-results, ad hoc and tracked, to `examples/demo/store.parquet` (the demo's project root, set
+results, ad hoc and tracked, to `examples/archery-compare/store.parquet` (the demo's project root, set
 in its `benchx.conf.json`). Run keys carry a
 timestamp, so runs accumulate and each series' history grows. Look at it any
 time:
 
 ```console
-$ (cd examples/demo && ../../.venv/bin/python -m benchx.cli head -n 20)
-$ rm examples/demo/store.parquet    # start over
+$ (cd examples/archery-compare && ../../.venv/bin/python -m benchx.cli head -n 20)
+$ rm examples/archery-compare/store.parquet    # start over
 ```
 
 Both changes add two to three percent of work. The quiet benchmark flags them
@@ -237,7 +237,7 @@ benchx/
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
 examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
-examples/demo        the demo's project root: its benchx.conf.json, and its persistent store
+examples/archery-compare  the demo: run.sh, its project root's benchx.conf.json, and its persistent store
 examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
 tests/               test_prototype.py: the success criteria and the runner and store

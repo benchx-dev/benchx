@@ -15,17 +15,18 @@
 # Google Benchmark unless it is installed. ROUNDS=5 by default.
 #
 # `bx compare` (measure mode) and `bx run` deliver every result to the one local store,
-# examples/demo/store.parquet (paths.store in examples/demo/benchx.conf.json, the demo's
-# project file, from whose directory every `bx` command runs), so the store and
-# each series' history grow from run to run. `bx head` shows the latest rows
-# at any time. Delete the file to start over.
+# examples/archery-compare/store.parquet (paths.store in
+# examples/archery-compare/benchx.conf.json, the demo's project file, from whose
+# directory every `bx` command runs), so the store and each series' history grow
+# from run to run. `bx head` shows the latest rows at any time. Delete the file
+# to start over.
 set -euo pipefail
 cd "$(dirname "$0")"
-PROTOTYPE=$PWD
+DEMO_ROOT=$PWD
+PROTOTYPE=$(cd ../.. && pwd)
 PYTHON=${PYTHON:-$PROTOTYPE/.venv/bin/python}
 ROUNDS=${ROUNDS:-5}
 WORK=$(mktemp -d)
-DEMO_ROOT=$PROTOTYPE/examples/demo
 STORE=$DEMO_ROOT/store.parquet
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)  # run keys are unique per demo run, so runs accumulate
 RUN_REV="rev-adhoc-$STAMP"
@@ -59,7 +60,7 @@ into() {  # into <file> <bx ...>: run with stdout to a file, printed with its re
 printf '\033[36m$ WORK=%s\033[0m\n' "$WORK" >&2
 
 step "user: a source with two commits, a worktree at each"
-show cp -R examples/demo-suite "$WORK/src"
+show cp -R ../demo-suite "$WORK/src"
 show git -C "$WORK/src" init -q
 show git -C "$WORK/src" add -A
 show git -C "$WORK/src" commit -qm "base"

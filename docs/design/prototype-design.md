@@ -543,7 +543,7 @@ re-ingested to show idempotency, and compared again with `--results`; that
 document must equal the one from the local store (criterion 8).
 
 Every `bx run` delivers to the local store, so both shapes' results land in
-the demo project's store (`prototype/examples/demo/store.parquet`), the ad hoc ones as thin results of project
+the demo project's store (`prototype/examples/archery-compare/store.parquet`), the ad hoc ones as thin results of project
 `local/<hostname>`. Run keys carry a timestamp, so successive demo runs add
 rows rather than colliding on `ingest_key`. The store and each series'
 history grow from run to run, and the demo ends with `bx head`.
