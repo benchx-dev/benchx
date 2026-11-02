@@ -91,12 +91,18 @@ def _verdict(effect, noise, k, direction):
     return "changed"
 
 
+def _run_documents(documents, run_key) -> list[dict]:
+    """The measurands of one run, in a fixed order, so the same results give the same document."""
+    found = sorted((d for d in documents if d["provenance"].get("run_key") == run_key and _measurand(d)),
+                   key=lambda d: (d["producer"]["name"], d["ingest_key"]))
+    if not found:
+        raise CompareError(f"no results for run {run_key!r}")
+    return found
+
+
 def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rounds=3) -> dict:
     projection = profile_projection(profile, label)
-    documents = sorted((d for d in documents if d["provenance"].get("run_key") == run_key and _measurand(d)),
-                       key=lambda d: (d["producer"]["name"], d["ingest_key"]))
-    if not documents:
-        raise CompareError(f"no results for run {run_key!r}")
+    documents = _run_documents(documents, run_key)
     naming = projection.axis[0]
     varying = _dotted(naming)
     doc = {"schema_version": catalog.COMPARISON_DOCUMENT, "mode": "run", "run_key": run_key, "profile": profile,

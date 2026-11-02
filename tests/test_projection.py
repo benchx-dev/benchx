@@ -8,7 +8,7 @@ import pytest
 
 from benchx import compare, core, identity
 from benchx.core import catalog
-from benchx.projection import Projection, ProjectionError
+from benchx.projection import Projection, ProjectionError, workload_label
 
 POLICIES = catalog.SCHEMAS / "identity-policy" / "0.1.0" / "examples"
 DEFAULT = json.loads((POLICIES / "default.json").read_text())
@@ -134,6 +134,12 @@ def test_a_profile_is_named_after_itself_and_its_policy():
     assert a.apply(ARROW).identity == b.apply(ARROW).identity
     assert a.series_fingerprint(a.apply(ARROW), "wall-time", identity.MEDIAN) != \
         b.series_fingerprint(b.apply(ARROW), "wall-time", identity.MEDIAN)
+
+
+def test_a_workload_is_labelled_with_its_parameters():
+    assert workload_label({"name": "bench"}) == "bench"
+    assert workload_label({"name": "bench", "parameters": {}}) == "bench"
+    assert workload_label({"name": "bench", "parameters": {"size": "1000", "n": "2"}}) == "bench [size=1000, n=2]"
 
 
 def test_the_quantity_is_never_a_coordinate():

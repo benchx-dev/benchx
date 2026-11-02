@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import core, snapshot
 from .errors import SessionError
+from .projection import workload_label
 from .store import warning_codes
 
 
@@ -75,10 +76,8 @@ def row_of(document: dict) -> dict:
     measurement = document["measurement"]
     # An observation is a number, or an object carrying one with its metadata (pyperf's).
     values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
-    workload = document["coordinates"]["workload"]
-    parameters = ", ".join(f"{k}={v}" for k, v in workload.get("parameters", {}).items())
     return {
-        "case": workload["name"] + (f" [{parameters}]" if parameters else ""),
+        "case": workload_label(document["coordinates"]["workload"]),
         "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
         "n": len(values),
         "median": statistics.median(values) if values else None,
