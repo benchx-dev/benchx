@@ -61,6 +61,13 @@ def _search_text(name, combo) -> str:
     return f"{name}({', '.join(combo)})"
 
 
+def search_name(name, ids, index) -> str:
+    """The text a case filter is searched in: `name(p0, p1)` for the `index`-th combination of a
+    parametrized benchmark (`ids` are its value strings, one list per parameter), else the name.
+    Selecting a case by this text, exactly, is how a caller picks that one case (see `expand`)."""
+    return name if index is None else _search_text(name, combination(ids, index))
+
+
 def expand(name, ids, case_filter):
     """The cases of one benchmark that `case_filter` (a regex, or None for all) selects, as
     (case id, combination index) pairs; the index is None for a benchmark without parameters.

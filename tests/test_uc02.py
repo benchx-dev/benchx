@@ -210,3 +210,38 @@ def test_the_loop_with_an_asv_suite_and_a_second_parameter(tmp, monkeypatch, cap
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "trunc.time_truncate", "parameters": {"size": "10"}},
         {"name": "trunc.time_truncate", "parameters": {"size": "100"}}]
+
+
+# --- measure mode: the same loop in one command (§1) --------------------------------------------
+
+def measure(capsys, *extra):
+    capsys.readouterr()
+    code = cli.main(["compare", ".", "--profile", "variants", "--suite", "mod.py", "--adapter", "pyperf",
+                     "--rounds", "3", "--run-key", RUN, "--json", *PYPERF, *extra])
+    captured = capsys.readouterr()
+    return code, (json.loads(captured.out) if captured.out.strip() else None), captured.err
+
+
+def test_measure_mode_runs_the_loop_in_one_command_and_equals_read_mode(tree, capsys):
+    code, doc, err = measure(capsys)
+    assert code == cli.EXIT_OK and doc["failed_invariants"] == [] and core.check(doc, "comparison-document") == []
+    assert "varying: role (the only parameter)" in err and "round 3/3 role='variant'" in err
+    assert (doc["baseline"], doc["contender"]) == (BASELINE, VARIANT) and doc["local_only"] is False
+    [unit] = doc["units"]
+    assert unit["workload"] == {"name": "bench_truncate"} and unit["rounds"] == 3 and unit["effect"] > 0
+    # What the session stored compares to the same document when read back (criterion 8).
+    code, again, _ = compare(capsys)
+    assert code == cli.EXIT_OK and again == doc
+
+
+def test_measure_mode_takes_the_baseline_value(tree, capsys):
+    code, doc, _ = measure(capsys, "--baseline", VARIANT)
+    assert code == cli.EXIT_OK and doc["failed_invariants"] == []
+    assert (doc["baseline"], doc["contender"]) == (VARIANT, BASELINE) and doc["units"][0]["effect"] < 0
+
+
+def test_measure_mode_refuses_a_baseline_that_is_not_a_value_before_running(tree, capsys):
+    code, doc, err = measure(capsys, "--baseline", "variant")  # the recorded value has its quotes
+    assert code == cli.EXIT_REFUSED and doc is None
+    assert "baseline 'variant' is not a value of role; use one of: 'baseline', 'variant'" in err
+    assert not (tree / "results").exists()  # nothing ran

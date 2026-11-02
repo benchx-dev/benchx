@@ -355,19 +355,24 @@ def _flags(args, names):
     return [f"--{n.replace('_', '-')}" for n in names if getattr(args, n) not in (None, [], False)]
 
 
-def _mode(args) -> str:
+def _mode(args, profile) -> str:
+    """read or measure. Measure mode takes two targets, except for variants, whose sides are two
+    values of one parameter of one target; and there `--baseline` picks the baseline value."""
+    variants = profile == "variants"
+    targets = "one target" if variants else "two targets"
     if args.targets and args.run:
-        raise UsageError("give two targets or --run, not both")
+        raise UsageError(f"give {targets} or --run, not both")
     if not args.targets and not args.run:
-        raise UsageError("give two targets (measure mode) or --run KEY (read mode)")
+        raise UsageError(f"give {targets} (measure mode) or --run KEY (read mode)")
     if args.targets:
-        if len(args.targets) != 2:
-            raise UsageError("measure mode takes exactly two targets: BASELINE CONTENDER")
-        if wrong := _flags(args, _READ_ONLY):
+        if len(args.targets) != (1 if variants else 2):
+            raise UsageError("measure mode takes exactly one target for variants: TARGET" if variants
+                             else "measure mode takes exactly two targets: BASELINE CONTENDER")
+        if wrong := _flags(args, ("results",) if variants else _READ_ONLY):
             raise UsageError(f"{', '.join(wrong)} belongs to read mode (--run)")
         return "measure"
     if wrong := _flags(args, _MEASURE_ONLY):
-        raise UsageError(f"{', '.join(wrong)} belongs to measure mode (two targets)")
+        raise UsageError(f"{', '.join(wrong)} belongs to measure mode ({targets})")
     if not args.baseline:
         raise UsageError("read mode needs --baseline")
     return "read"
@@ -377,8 +382,8 @@ def cmd_compare(args):
     if (cfg := _load("compare")) is None:
         return EXIT_REFUSED
     try:
-        mode = _mode(args)
         policy = _policy(cfg, args)
+        mode = _mode(args, policy["profile"])
         _profile_flags(args, policy["profile"])
     except (UsageError, config_mod.ConfigError) as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
@@ -426,11 +431,16 @@ def _measure(cfg, args, policy):
         settings = _common(cfg, args)
         _needs_provider(cfg, *args.targets)
         snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
-        label = session.parse_label(args.label) if args.label else None
-        doc = session.compare_targets(
-            *args.targets, rounds=cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds",
-                                           key="compare.rounds"),
-            store=store, label=label, progress=lambda message: print(message, file=sys.stderr), **policy, **settings)
+        rounds = cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds", key="compare.rounds")
+        progress = lambda message: print(message, file=sys.stderr)  # noqa: E731
+        if policy["profile"] == "variants":
+            doc = session.compare_variants(
+                *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
+                progress=progress, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
+        else:
+            label = session.parse_label(args.label) if args.label else None
+            doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=progress,
+                                          **policy, **settings)
     except runner.Refused as e:
         return _refused(e)
     except (UsageError, config_mod.ConfigError) as e:
@@ -602,8 +612,12 @@ def main(argv=None):
                                    "Measure mode runs two prepared targets, alternating them over "
                                    "--rounds rounds, delivers the results to the local store, then compares: "
                                    "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
-                                   "or @CONFIG[=SOURCE_REF] (the project's target provider).")
-    p.add_argument("targets", nargs="*", metavar="TARGET", help="measure mode: BASELINE CONTENDER")
+                                   "or @CONFIG[=SOURCE_REF] (the project's target provider). "
+                                   "The variants profile takes one target: its sides are two values of one "
+                                   "benchmark parameter (--vary), as in TARGET --profile variants --suite NAME "
+                                   "--rounds R.")
+    p.add_argument("targets", nargs="*", metavar="TARGET",
+                   help="measure mode: BASELINE CONTENDER (variants: TARGET)")
     p.add_argument("--profile", choices=list(compare_mod.PROFILES), help="default: compare.profile")
     p.add_argument("--vary", metavar="NAME",
                    help="variants: the workload parameter whose two values are the sides "
@@ -613,10 +627,12 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--label", help="read mode: the label that names the sides (environments); "
                                    "measure mode: NAME=BASE,CONTENDER")
+    p.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value; "
+                                      "variants: the parameter's recorded value, quotes included ('baseline'); "
+                                      "required in read mode, and in measure mode only for variants "
+                                      "(default: the first declared value)")
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
-    read.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value; "
-                                         "variants: the parameter's recorded value, quotes included ('baseline')")
     read.add_argument("--results", nargs="+",
                       help="compare these result directories through a throwaway store, not the local one")
     measure = p.add_argument_group("measure mode")

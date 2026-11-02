@@ -151,7 +151,30 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
      "--vary names the parameter"),
     (["--run", "k", "--profile", "variants", "--baseline", "x", "--label", "e"], "--label names the sides"),
     (["--run", "k", "--profile", "variants"], "needs --baseline"),
+    (["A", "B", "--profile", "variants", "--suite", "s", "--rounds", "3"], "exactly one target for variants"),
+    (["--profile", "variants"], "give one target (measure mode) or --run KEY"),
+    (["A", "--run", "k", "--profile", "variants"], "give one target or --run, not both"),
+    (["A", "--profile", "variants", "--results", "r"], "belongs to read mode"),
+    (["--run", "k", "--profile", "variants", "--baseline", "x", "--rounds", "3"], "belongs to measure mode (one target)"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3", "--vary", "role"], "--vary names the parameter"),
+    (["A", "--profile", "variants", "--suite", "s", "--rounds", "3", "--label", "e=a,b"], "--label names the sides"),
 ])
 def test_mode_selection(argv, message, capsys):
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv, message", [
+    # one target, and --baseline in measure mode: both are for variants only; no --vary is fine in either mode
+    (["nowhere", "--profile", "variants", "--suite", "s", "--rounds", "3", "--adapter", "pyperf"],
+     "working tree not found"),
+    (["nowhere", "--profile", "variants", "--suite", "s", "--rounds", "3", "--adapter", "pyperf",
+      "--baseline", "'variant'", "--vary", "role"], "working tree not found"),
+    (["--run", "k", "--profile", "variants", "--baseline", "'x'"], "no results for run 'k'"),
+    (["--run", "k", "--profile", "variants", "--baseline", "'x'", "--vary", "role"], "no results for run 'k'"),
+])
+def test_variants_mode_selection_is_accepted(argv, message, capsys):
+    """These get past mode selection; what refuses them is later (the target, the run)."""
+    assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert message in err and "bx compare: error" not in err

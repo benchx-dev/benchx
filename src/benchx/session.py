@@ -10,6 +10,10 @@ as `spin bench --compare` calls it.
 The session builds nothing itself. Both targets must exist when it looks; a
 target provider it calls may build them first (`prepare`), and plays the
 target-provider role.
+
+`compare_variants` is the same loop for one target: its sides are the two values
+of one workload parameter of the benchmark (UC-02), so each round runs the cases
+of one value, then the other's.
 """
 
 import json
@@ -18,6 +22,7 @@ from pathlib import Path
 
 from . import adapters, harnesses, orders, runner, snapshot, target as target_mod
 from . import compare as compare_mod
+from .adapters import benchx_params
 from .adapters.base import Unsupported
 from .errors import SessionError
 from .identity import normalize_remote
@@ -212,12 +217,13 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
     return {**summary, "outcome": outcome, "precision": precision}
 
 
-def _refuse_unknown_tree(name: str, side: dict) -> None:
+def _refuse_unknown_tree(side: dict, name: str | None = None) -> None:
     """UC-03 §10: a dirty side is compared and labeled local-only. A side with no working-tree id
     (its dirty state is `unknown`) cannot be named, so it is refused before any measurement, not
-    after R rounds."""
+    after R rounds. `name` says which side of a comparison, when there are two."""
     if side["identity"]["dirty"] == "unknown":  # schema §4.1: no tree id exactly when unknown
-        raise SessionError(f"{name} tree {side['source']} has no working-tree id (its dirty state is "
+        who = f"{name} tree" if name else "tree"
+        raise SessionError(f"{who} {side['source']} has no working-tree id (its dirty state is "
                            f"{side['identity']['dirty']}): the sides cannot be told apart, or checked for "
                            "a change during the run. Make every file in the tree readable, or git-ignore "
                            "it (UC-03 §10)")
@@ -231,7 +237,7 @@ def _note_local_only(progress, sides) -> None:
                             ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):
             if state != "clean":
                 where = f" {side['source']}" if what == "tree" else ""
-                progress(f"{name} {what}{where} is {state}: the comparison will be local-only")
+                progress(f"{f'{name} ' if name else ''}{what}{where} is {state}: the comparison will be local-only")
 
 
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
@@ -259,9 +265,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     if profile not in PROFILES:
         raise SessionError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
     if profile == "variants":
-        # Its sides are two values of one parameter of one target, not two targets.
-        raise SessionError("the variants profile is not available in measure mode yet: measure each value "
-                           "with bx bench --run-key/--round/--slot, then bx compare --run KEY --profile variants")
+        raise SessionError("the variants profile compares two values of one parameter of one target: "
+                           "use compare_variants")
     if rounds < 1:
         raise SessionError("--rounds must be at least 1")
     if profile == "environments" and label is None:
@@ -274,7 +279,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                    timeout=orders.ORDER_TIMEOUT_S) for spec in (baseline, contender)]
     if profile == "revisions":
         for name, side in zip(("baseline", "contender"), sides):
-            _refuse_unknown_tree(name, side)
+            _refuse_unknown_tree(side, name)
     if progress:
         _note_local_only(progress, zip(("baseline", "contender"), sides))
     source_uri = _source_uri(sides, source_uri)
@@ -305,3 +310,151 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     return compare_mod.compare(store.documents(run_key), run_key=run_key, profile=profile,
                                baseline=base_value, label=label[0] if label else None, k=k,
                                min_rounds=min_rounds)
+
+
+def _declared_by(runnable: dict, environment_variables) -> dict[str, list[str]]:
+    """Each workload parameter an order would record, and who declares it: the selected
+    benchmarks' `param_names`, and the order's `-e` variables (shown as `-e`), which the
+    runner records as workload parameters too."""
+    found: dict[str, list[str]] = {}
+    for name, info in sorted(runnable["benchmarks"].items()):
+        for parameter in info["param_names"]:
+            found.setdefault(parameter, []).append(name)
+    for name in sorted(environment_variables or {}):
+        found.setdefault(name, []).append("-e")
+    return found
+
+
+def _infer_parameter(runnable: dict, environment_variables) -> str:
+    """The workload parameter to vary when the caller names none: the only one the selected
+    benchmarks and the order's variables give. Several are refused, naming who declares each."""
+    found = _declared_by(runnable, environment_variables)
+    if not found:
+        raise SessionError("nothing to vary: no workload parameter in the selected benchmarks "
+                           "(declare one in `params`/`param_names`)")
+    if len(found) > 1:
+        who = ", ".join(f"{parameter} ({', '.join(declared)})" for parameter, declared in sorted(found.items()))
+        raise SessionError(f"several workload parameters: {who}: give --vary NAME, "
+                           "or --filter to select the benchmarks")
+    return next(iter(found))
+
+
+def _split_cases(module, runnable: dict, cases: list[str], parameter: str) -> tuple[dict, list[str]]:
+    """The selected cases by their value of `parameter`, as the search names that select each
+    one exactly (`benchx_params.search_name`), in declaration order; and the benchmarks that
+    have no such parameter, whose cases run on neither side."""
+    by_value: dict[str, list[str]] = {}
+    without: list[str] = []
+    for case in cases:
+        name, index = runnable["cases"][case]
+        value = module.workload(case, runnable)[1].get(parameter)
+        if value is None:
+            if name not in without:
+                without.append(name)
+            continue
+        by_value.setdefault(value, []).append(
+            benchx_params.search_name(name, runnable["benchmarks"][name]["params"], index))
+    return by_value, without
+
+
+def _the_two_values(runnable: dict, cases: list[str], parameter: str) -> list[str]:
+    """The two values of `parameter` the selected cases take, in declaration order. Every
+    benchmark that has the parameter must take the same two, or a third value would fail
+    `two-sides` only after the whole run."""
+    taken: dict[str, list[str]] = {}
+    for case in cases:
+        name, index = runnable["cases"][case]
+        info = runnable["benchmarks"][name]
+        if parameter in info["param_names"]:
+            value = benchx_params.combination(info["params"], index)[info["param_names"].index(parameter)]
+            taken.setdefault(name, [])
+            if value not in taken[name]:
+                taken[name].append(value)
+    if not taken:
+        declared = sorted(_declared_by(runnable, None))
+        raise SessionError(f"no selected benchmark declares a parameter {parameter!r}"
+                           + (f" (declared: {', '.join(declared)})" if declared else ""))
+    values = next(iter(taken.values()))
+    if len(values) != 2 or any(set(v) != set(values) for v in taken.values()):
+        shown = "; ".join(f"{name}: {', '.join(v)}" for name, v in taken.items())
+        raise SessionError(f"a comparison has two sides: the selected benchmarks must take the same two "
+                           f"values of {parameter}, not [{shown}]. Narrow them with --filter")
+    return values
+
+
+def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, parameter=None, baseline=None,
+                     flags=None, file_precision=None, environment_variables=None, filter=None,
+                     quantities=("wall-time",), project=None, run_key=None, out=None, source_uri=None,
+                     k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
+                     case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
+                     collectors=None) -> dict:
+    """Alternate the two values of one workload parameter of one target over `rounds` rounds,
+    deliver every result to `store`, and return the run-mode comparison document (UC-02).
+
+    The benchmark declares the parameter (`params` and `param_names`). `parameter` is its
+    name, else the only parameter the selected benchmarks and `environment_variables` give.
+    Each round runs one order per value: that value's cases only, `baseline` first at slot
+    2r (a value as recorded, `'baseline'` with its quotes; default the first declared), the
+    other at slot 2r + 1. Benchmarks without the parameter run on neither side. The other
+    arguments are as for `compare_targets`. Raises SessionError when the session cannot
+    start, and runner.Refused when the runner refuses an order.
+    """
+    if rounds < 1:
+        raise SessionError("--rounds must be at least 1")
+    harness, precision = _harness(adapter, flags, file_precision, quantities)
+    module = adapters.get(harness.name)
+    if not hasattr(module, "workload"):
+        raise SessionError(f"variants needs a parameter the benchmark declares, and {harness.name} "
+                           "benchmarks have none")
+    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables, provider,
+                 timeout=order_s)
+    _refuse_unknown_tree(side)
+    if progress:
+        _note_local_only(progress, [(None, side)])
+    source_uri = _source_uri([side], source_uri)
+
+    # List the cases once, as the runner will, to find the parameter and split them by value.
+    env = {**os.environ, **(environment_variables or {})}
+    try:
+        runnable = module.locate(side["path"], suite, env, timeout=order_s)
+        cases = module.list_cases(runnable, filter, env, timeout=order_s)
+    except Unsupported as e:
+        raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
+    if parameter is None:
+        parameter = _infer_parameter(runnable, environment_variables)
+        if progress:
+            progress(f"varying: {parameter} (the only parameter)")
+    by_value, without = _split_cases(module, runnable, cases, parameter)
+    values = _the_two_values(runnable, cases, parameter)
+    if baseline is None:
+        baseline = values[0]
+    elif baseline not in values:
+        raise SessionError(f"baseline {baseline!r} is not a value of {parameter}; use one of: "
+                           f"{', '.join(values)}")
+    contender = next(value for value in values if value != baseline)
+    if without and progress:
+        progress(f"not run on either side (no parameter {parameter}): {', '.join(without)}")
+
+    run_key = run_key or orders.default_run_key("compare")
+    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
+    filters = {value: harnesses.exact_filter(by_value[value], arguments=True) for value in values}
+
+    slot = 0
+    for round_ in range(rounds):
+        for value in (baseline, contender):
+            summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store,
+                                         harness=harness, suite=suite, filter=filters[value], quantities=quantities,
+                                         precision=precision, environment_variables=environment_variables,
+                                         project=project, run_key=run_key, source_uri=source_uri,
+                                         round_=round_, slot=slot, case_s=case_s, order_s=order_s,
+                                         collectors=collectors)
+            if outcome["rejected"]:
+                codes = sorted({r["code"] for r in outcome["rejected"]})
+                raise SessionError(f"the store rejected results of round {round_} ({parameter}={value}): "
+                                   f"{', '.join(codes)}")
+            if progress:
+                progress(f"round {round_ + 1}/{rounds} {parameter}={value}: {summary['results']} result(s)")
+            slot += 1
+
+    return compare_mod.compare(store.documents(run_key), run_key=run_key, profile="variants",
+                               baseline=baseline, parameter=parameter, k=k, min_rounds=min_rounds)
