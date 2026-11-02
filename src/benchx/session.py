@@ -212,6 +212,28 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
     return {**summary, "outcome": outcome, "precision": precision}
 
 
+def _refuse_unknown_tree(name: str, side: dict) -> None:
+    """UC-03 §10: a dirty side is compared and labeled local-only. A side with no working-tree id
+    (its dirty state is `unknown`) cannot be named, so it is refused before any measurement, not
+    after R rounds."""
+    if side["identity"]["dirty"] == "unknown":  # schema §4.1: no tree id exactly when unknown
+        raise SessionError(f"{name} tree {side['source']} has no working-tree id (its dirty state is "
+                           f"{side['identity']['dirty']}): the sides cannot be told apart, or checked for "
+                           "a change during the run. Make every file in the tree readable, or git-ignore "
+                           "it (UC-03 §10)")
+
+
+def _note_local_only(progress, sides) -> None:
+    """Say before measuring which (name, side) pairs are not clean: the comparison will be local-only.
+    TODO: log these at logging.WARNING once benchx has logging (plan, Q13)."""
+    for name, side in sides:
+        for what, state in (("tree", side["identity"]["dirty"]),
+                            ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):
+            if state != "clean":
+                where = f" {side['source']}" if what == "tree" else ""
+                progress(f"{name} {what}{where} is {state}: the comparison will be local-only")
+
+
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
                     adapter, flags=None, file_precision=None, environment_variables=None, filter=None,
                     quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
@@ -251,22 +273,10 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     sides = [_side(spec, suite, operation, harness, environment_variables, provider,
                    timeout=orders.ORDER_TIMEOUT_S) for spec in (baseline, contender)]
     if profile == "revisions":
-        # UC-03 §10: a dirty side is compared and labeled local-only. A side with no working-tree id
-        # (its dirty state is `unknown`) cannot be named, so it is refused before any measurement,
-        # not after R rounds.
         for name, side in zip(("baseline", "contender"), sides):
-            if side["identity"]["dirty"] == "unknown":  # schema §4.1: no tree id exactly when unknown
-                raise SessionError(f"{name} tree {side['source']} has no working-tree id (its dirty state is "
-                                   f"{side['identity']['dirty']}): the sides cannot be told apart, or checked for "
-                                   "a change during the run. Make every file in the tree readable, or git-ignore "
-                                   "it (UC-03 §10)")
-    if progress:  # TODO: log these at logging.WARNING once benchx has logging (plan, Q13)
-        for name, side in zip(("baseline", "contender"), sides):
-            for what, state in (("tree", side["identity"]["dirty"]),
-                                ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):
-                if state != "clean":
-                    where = f" {side['source']}" if what == "tree" else ""
-                    progress(f"{name} {what}{where} is {state}: the comparison will be local-only")
+            _refuse_unknown_tree(name, side)
+    if progress:
+        _note_local_only(progress, zip(("baseline", "contender"), sides))
     source_uri = _source_uri(sides, source_uri)
     if len({json.dumps((side.get("benchmark") or {}).get("source")) for side in sides}) != 1:
         raise SessionError("the sides' suites come from different sources; give --suite as one absolute path")
