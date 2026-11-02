@@ -16,7 +16,7 @@ import statistics
 
 from . import identity
 from .core import canonical, catalog
-from .projection import Projection, get, workload_label
+from .projection import Projection, axis_order, get, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -242,7 +242,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
         return doc
 
     for (_, quantity), unit in sorted(
-            units.items(), key=lambda item: (_c(_workload(item[1]["docs"], projection.axis)), item[0][1])):
+            units.items(),
+            key=lambda item: _unit_order(_workload(item[1]["docs"], projection.axis), item[0][1])):
         by_side = unit["docs"]
         where = {"workload": _workload(by_side, projection.axis), "quantity": quantity}
         absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
@@ -317,6 +318,14 @@ def _workload(by_side, axis=()) -> dict:
     varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
     parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
     return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
+
+
+def _unit_order(workload: dict, quantity: str) -> tuple:
+    """The order units are listed in: by workload name, then by parameter name and value, then by
+    quantity, with numbers inside names and values in natural order (`axis_order`), so that `n=50`
+    comes before `n=100` and `bench_2` before `bench_10`, as people read them."""
+    parameters = sorted((workload.get("parameters") or {}).items())
+    return (axis_order(workload["name"]), tuple((name, axis_order(value)) for name, value in parameters), quantity)
 
 
 _ABSENT = object()

@@ -582,3 +582,40 @@ def test_infer_parameter_reads_only_the_run_and_only_measurands():
     assert compare.infer_parameter([*docs, other], "run") == "role"
     with pytest.raises(compare.CompareError, match="no results for run"):
         compare.infer_parameter(docs, "missing")
+
+
+# --- units are listed in natural order ----------------------------------------------------------
+
+def test_units_are_listed_with_numbers_in_natural_order():
+    """`n=50` before `n=100`, as people read sizes, though "100" sorts before "50" as text."""
+    doc = vevaluate(variants_run(sizes=("100", "10", "50", "1000")))
+    assert invariants(doc) == []
+    assert [u["workload"]["parameters"]["size"] for u in doc["units"]] == ["10", "50", "100", "1000"]
+    shown = [line.split()[1] for line in compare.render(doc).splitlines() if "bench_truncate [" in line]
+    assert shown == ["[size=10]", "[size=50]", "[size=100]", "[size=1000]"]
+
+
+def test_units_are_listed_with_numbers_in_workload_names_in_natural_order():
+    docs = []
+    for name in ("BM_W10", "BM_W2", "BM_W1"):
+        slot = 0
+        for r in range(3):
+            for side, scale in ((BASE, 1.0), (HEAD, 1.1)):
+                docs.append(result(side, r, slot, (r + 1) * scale, workload=name))
+                slot += 1
+    assert [u["workload"]["name"] for u in evaluate(docs)["units"]] == ["BM_W1", "BM_W2", "BM_W10"]
+
+
+def test_units_with_more_than_one_other_parameter_are_ordered_by_name_then_value():
+    docs = variants_run()
+    extra = []
+    for n in ("10", "2"):
+        for size in ("100", "20"):
+            for d in docs:
+                clone = copy.deepcopy(d)
+                clone["ingest_key"] += f":{n}:{size}"
+                clone["coordinates"]["workload"]["parameters"].update(n=n, size=size)
+                extra.append(clone)
+    doc = vevaluate(extra)
+    assert [(u["workload"]["parameters"]["n"], u["workload"]["parameters"]["size"]) for u in doc["units"]] == [
+        ("2", "20"), ("2", "100"), ("10", "20"), ("10", "100")]
