@@ -136,6 +136,28 @@ def test_a_profile_is_named_after_itself_and_its_policy():
         b.series_fingerprint(b.apply(ARROW), "wall-time", identity.MEDIAN)
 
 
+def test_the_variants_profile_follows_one_workload_parameter():
+    """Its axis is the parameter, added per comparison; the rest of the result, tree included, must match."""
+    assert compare.PROFILES["variants"].axis == []
+    variants = compare.profile_projection("variants", parameter="role")
+    assert variants.identity_schema == "benchx/profile/variants/v1+benchx/benchx-identity/v1"
+    assert variants.axis == ["/coordinates/workload/parameters/role"]
+    doc = copy.deepcopy(ARROW)
+    doc["coordinates"]["workload"]["parameters"] = {"role": "'baseline'", "size": "1000"}
+    projected = variants.apply(doc)
+    assert projected.axis == ("'baseline'",)
+    assert "/coordinates/workload/parameters/role" not in projected.identity
+    assert projected.identity["/coordinates/workload/parameters/size"] == "1000"
+    assert {"/revision/key", "/provenance/subject_tree"} <= set(projected.identity)
+    assert compare.PROFILES["variants"].axis == []  # the profile itself is not changed
+
+
+@pytest.mark.parametrize("parameter", [None, "", "a b", "a.b", "a/b", "a~b", "role]"])
+def test_a_variants_parameter_must_be_a_token_that_needs_no_escaping(parameter):
+    with pytest.raises(compare.CompareError):
+        compare.profile_projection("variants", parameter=parameter)
+
+
 def test_a_workload_is_labelled_with_its_parameters():
     assert workload_label({"name": "bench"}) == "bench"
     assert workload_label({"name": "bench", "parameters": {}}) == "bench"

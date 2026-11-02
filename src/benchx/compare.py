@@ -11,11 +11,12 @@ store.
 
 import json
 import math
+import re
 import statistics
 
 from . import identity
 from .core import canonical, catalog
-from .projection import Projection, get
+from .projection import Projection, get, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -36,8 +37,22 @@ PROFILES = {
                                paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
                                invariants=["one-run", "two-sides", "sides-differ", "equal-attempts",
                                            "alternating-slots"]),
+    # UC-02: one revision, one environment, two values of one workload parameter. Everything else
+    # must agree, so the axis (the parameter) is added per comparison: see `profile_projection`.
+    "variants": Projection(identity.POLICY_DATA, [],
+                           profile="benchx/profile/variants/v1",
+                           paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
+                           invariants=["one-run", "two-sides", "equal-attempts", "alternating-slots",
+                                       "one-benchmark-tree"]),
 }
+# Profiles for which a failed attempt on either side fails its unit (UC-02 §10): a variant that
+# times out in the slow rounds must not be judged on the fast ones. The other profiles drop the
+# attempt's pair and keep the verdict from the rest.
+STRICT_STATUS = {"variants"}
+FAILED_STATUSES = ("partial", "censored", "error")  # `skipped` is not a failure
 WORKLOAD = "/coordinates/workload"
+PARAMETERS = WORKLOAD + "/parameters/"
+_PARAMETER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 # The noise is the standard error of the per-round differences, so a verdict needs
 # at least two pairs, whatever `min_rounds` a caller asks for.
 MIN_PAIRS = 2
@@ -51,9 +66,10 @@ def _c(value) -> str:
     return canonical(value).decode()
 
 
-def profile_projection(profile: str, label: str | None = None) -> Projection:
+def profile_projection(profile: str, label: str | None = None, parameter: str | None = None) -> Projection:
     """The profile's projection; for environments, with the label that names
-    the sides at the front of its axis."""
+    the sides at the front of its axis, and for variants, with the workload
+    parameter whose two values are the sides."""
     if profile not in PROFILES:
         raise CompareError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
     projection = PROFILES[profile]
@@ -61,6 +77,12 @@ def profile_projection(profile: str, label: str | None = None) -> Projection:
         if not label:
             raise CompareError("the environments profile needs the label that names the sides")
         projection = projection.with_axis_first(f"/provenance/labels/{label}")
+    if profile == "variants":
+        if not parameter:
+            raise CompareError("the variants profile needs the workload parameter whose values are the sides")
+        if not _PARAMETER_NAME.fullmatch(parameter):  # keeps the document's `varying` a token
+            raise CompareError(f"workload parameter {parameter!r}: use letters, digits, '_' and '-' only")
+        projection = projection.with_axis_first(PARAMETERS + parameter)
     return projection
 
 
@@ -100,8 +122,24 @@ def _run_documents(documents, run_key) -> list[dict]:
     return found
 
 
-def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rounds=3) -> dict:
-    projection = profile_projection(profile, label)
+def infer_parameter(documents, run_key) -> str:
+    """The workload parameter a variants comparison of this run varies, when the caller names none:
+    the only parameter the run's results carry. An `-e` variable counts, since the runner records
+    it as a workload parameter. Read mode only; measure mode asks before running (session)."""
+    names = sorted({name for d in _run_documents(documents, run_key)
+                    for name in (d["coordinates"]["workload"].get("parameters") or {})})
+    if not names:
+        raise CompareError("nothing to vary: no workload parameter in the results "
+                           "(declare one in `params`/`param_names`)")
+    if len(names) > 1:
+        raise CompareError(f"several workload parameters ({', '.join(names)}): give --vary NAME")
+    return names[0]
+
+
+def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, k=3.0, min_rounds=3) -> dict:
+    """The run-mode comparison document. `label` names the sides of `environments`, and `parameter`
+    those of `variants`."""
+    projection = profile_projection(profile, label, parameter)
     documents = _run_documents(documents, run_key)
     naming = projection.axis[0]
     varying = _dotted(naming)
@@ -121,6 +159,9 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
             detail = (f"a result has no {varying}: its tree's dirty state is unknown, so the side cannot be told "
                       "apart from the other or checked for a change during the run. Make every file in the "
                       "tree readable, or git-ignore it")
+        elif profile == "variants":
+            detail = (f"a result has no workload parameter {parameter}: declare it in the benchmark's "
+                      "`params`/`param_names`")
         else:
             detail = f"a result has no {varying}: give every bx bench call --label NAME=VALUE, and name that label here"
         failed.append({"invariant": "sides", "detail": detail})
@@ -165,12 +206,15 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
     if "one-benchmark-tree" in check:
         failed.extend(_benchmark_file(documents, names, sides))
     if "alternating-slots" in check:
+        # Variants are usually measured by one command, so say how to get an alternating run.
+        how = ("; make one bx bench call per value, each with --run-key, --round and --slot, "
+               "or run bx compare TARGET --profile variants" if profile == "variants" else "")
         slots = {}
         for d, s in zip(documents, sides):
             slot = d.get("procedure", {}).get("slot")
             if slot is None:
                 failed.append({"invariant": "alternating-slots",
-                               "detail": "a result has no slot: give every bx bench call --slot"})
+                               "detail": "a result has no slot: give every bx bench call --slot" + how})
                 break
             slots.setdefault(slot, set()).add(s)
         else:
@@ -178,7 +222,7 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
             if any(len(o) != 1 for o in order) or any(a == b for a, b in zip(order, order[1:])):
                 failed.append({"invariant": "alternating-slots",
                                "detail": "sides do not alternate by procedure.slot: run the sides in the same "
-                                         "order every round (a, b, a, b, ...)"})
+                                         "order every round (a, b, a, b, ...)" + how})
 
     # Units: one workload variant and quantity each. Everything else the
     # projection matches must agree across both sides (schema §5.5).
@@ -192,14 +236,15 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
     for (_, quantity), unit in units.items():
         differing = _differing(unit["identities"])
         if differing:
-            failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"]), "quantity": quantity,
-                           "detail": f"{', '.join(differing)} differ"})
+            failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"], projection.axis),
+                           "quantity": quantity, "detail": f"{', '.join(differing)} differ"})
     if failed:
         return doc
 
-    for (_, quantity), unit in sorted(units.items(), key=lambda item: (_c(_workload(item[1]["docs"])), item[0][1])):
+    for (_, quantity), unit in sorted(
+            units.items(), key=lambda item: (_c(_workload(item[1]["docs"], projection.axis)), item[0][1])):
         by_side = unit["docs"]
-        where = {"workload": _workload(by_side), "quantity": quantity}
+        where = {"workload": _workload(by_side, projection.axis), "quantity": quantity}
         absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
         if absent:
             doc["missing"].extend({**where, "side": role} for role in absent)
@@ -209,18 +254,19 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
                            "detail": f"{len(by_side[base])} against {len(by_side[contender])}: run the same "
                                      "number of rounds on both sides"})
             continue
-        rounds = {}
+        rounds, side_failed = {}, False
         for s in (base, contender):
             for d in by_side[s]:
                 if d["measurement"]["status"] != "success":
                     status, reason = d["measurement"]["status"], d["measurement"].get("reason")
                     result = {"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]}
                     doc["exclusions"].append({"result": result, "reason": f"{status}: {reason}" if reason else status})
+                    side_failed = side_failed or (profile in STRICT_STATUS and status in FAILED_STATUSES)
                     continue
                 rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
         pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
                  if base in r and contender in r]
-        unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds)
+        unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed)
         unit_doc["unmatched_differences"] = _differences(projection, by_side[base], by_side[contender])
         if caveats := _caveats(by_side, base, contender):
             unit_doc["caveats"] = caveats
@@ -229,7 +275,7 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
 
 
 def _benchmark_file(documents, names, sides) -> list[dict]:
-    """The `one-benchmark-tree` invariant (schema §5.5, UC-03 §10). A benchmark recorded apart from
+    """The `one-benchmark-tree` invariant (schema §5.5, UC-03 §10, UC-02 §5). A benchmark recorded apart from
     the subject has its own `benchmark_tree`, which differs from `subject_tree`; it must be one file
     on both sides and in every round. A benchmark in the subject's checkout has `benchmark_tree`
     equal to `subject_tree` and differs between the sides as the subject does, so it is not
@@ -264,10 +310,13 @@ def _benchmark_file(documents, names, sides) -> list[dict]:
     return failed
 
 
-def _workload(by_side) -> dict:
-    """The unit's workload variant, as the comparison document names it."""
+def _workload(by_side, axis=()) -> dict:
+    """The unit's workload variant, as the comparison document names it: what both sides share,
+    so the parameters on the profile's axis (the ones that tell the sides apart) are left out."""
     workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
-    return {"name": workload["name"], **({"parameters": workload["parameters"]} if workload.get("parameters") else {})}
+    varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
+    parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
+    return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
 
 
 _ABSENT = object()
@@ -315,12 +364,16 @@ def _caveats(by_side, base, contender) -> list[str]:
     return sorted(found)
 
 
-def _unit(where, pairs, by_side, base, contender, k, min_rounds):
+def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False):
     first = {s: by_side[s][0] for s in (base, contender)}
     quantity = first[base]["measurement"]["quantity"]
     unit = {**where, "series": {name: identity.series_fingerprint(first[s], store_project(first[s]), identity.MEDIAN)
                                 for name, s in (("baseline", base), ("contender", contender))},
             "rounds": len(pairs), "noise_source": "paired-rounds", "verdict": "indeterminate"}
+    if side_failed:
+        # UC-02 §10: if either side fails to run, the benchmark has failed; no effect is reported.
+        unit["reason"] = "side-failed"
+        return unit
     estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
     estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
     if estimates:
@@ -394,7 +447,7 @@ def render(doc: dict) -> str:
             effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
             noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
             reason = f"  ({u['reason']})" if "reason" in u else ""
-            lines.append(f"  {u['workload']['name']:<32} {u['quantity']:<10} effect {effect}  noise {noise}"
+            lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} effect {effect}  noise {noise}"
                          f"  rounds={u['rounds']}{reason}")
     for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
                        ("exclusions", "excluded")):
