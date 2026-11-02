@@ -379,6 +379,7 @@ def cmd_compare(args):
     try:
         mode = _mode(args)
         policy = _policy(cfg, args)
+        _profile_flags(args, policy["profile"])
     except (UsageError, config_mod.ConfigError) as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
@@ -394,6 +395,16 @@ def _policy(cfg, args) -> dict:
         "min_rounds": cfg.pick(args.min_rounds, compare.get("min_rounds"), 3, flag="--min-rounds",
                                key="compare.min_rounds"),
     }
+
+
+def _profile_flags(args, profile):
+    """The flags that name the sides of one profile only."""
+    if args.vary and profile != "variants":
+        raise UsageError(f"--vary names the parameter whose values are the sides of a variants comparison, "
+                         f"not of {profile}")
+    if args.label and profile == "variants":
+        raise UsageError("--label names the sides of an environments comparison; the sides of a variants "
+                         "comparison are two values of a parameter (--vary)")
 
 
 def _read(cfg, args, policy):
@@ -434,8 +445,14 @@ def _measure(cfg, args, policy):
 
 def _compare(store, args, policy):
     try:
-        doc = compare_mod.compare(store.documents(args.run), run_key=args.run, profile=policy["profile"],
-                                  baseline=args.baseline, label=args.label, k=policy["k"],
+        documents = store.documents(args.run)
+        parameter = None
+        if policy["profile"] == "variants":
+            parameter = args.vary or compare_mod.infer_parameter(documents, args.run)
+            if not args.vary:  # the choice is recorded in the document's `varying`, and said here too
+                print(f"varying: {parameter} (the only parameter)", file=sys.stderr)
+        doc = compare_mod.compare(documents, run_key=args.run, profile=policy["profile"],
+                                  baseline=args.baseline, label=args.label, parameter=parameter, k=policy["k"],
                                   min_rounds=policy["min_rounds"])
     except compare_mod.CompareError as e:
         print(f"cannot compare: {e}", file=sys.stderr)
@@ -587,7 +604,10 @@ def main(argv=None):
                                    "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
                                    "or @CONFIG[=SOURCE_REF] (the project's target provider).")
     p.add_argument("targets", nargs="*", metavar="TARGET", help="measure mode: BASELINE CONTENDER")
-    p.add_argument("--profile", choices=["revisions", "environments"], help="default: compare.profile")
+    p.add_argument("--profile", choices=list(compare_mod.PROFILES), help="default: compare.profile")
+    p.add_argument("--vary", metavar="NAME",
+                   help="variants: the workload parameter whose two values are the sides "
+                        "(default: the only parameter the results carry)")
     p.add_argument("--k", type=float, help="noise multiplier (default: compare.k, else 3)")
     p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 3)")
     p.add_argument("--json", action="store_true")
@@ -595,7 +615,8 @@ def main(argv=None):
                                    "measure mode: NAME=BASE,CONTENDER")
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
-    read.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value")
+    read.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value; "
+                                         "variants: the parameter's recorded value, quotes included ('baseline')")
     read.add_argument("--results", nargs="+",
                       help="compare these result directories through a throwaway store, not the local one")
     measure = p.add_argument_group("measure mode")

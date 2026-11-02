@@ -22,7 +22,7 @@ from .adapters.base import Unsupported
 from .errors import SessionError
 from .identity import normalize_remote
 
-PROFILES = ("revisions", "environments")
+PROFILES = tuple(compare_mod.PROFILES)
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -236,6 +236,10 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     """
     if profile not in PROFILES:
         raise SessionError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
+    if profile == "variants":
+        # Its sides are two values of one parameter of one target, not two targets.
+        raise SessionError("the variants profile is not available in measure mode yet: measure each value "
+                           "with bx bench --run-key/--round/--slot, then bx compare --run KEY --profile variants")
     if rounds < 1:
         raise SessionError("--rounds must be at least 1")
     if profile == "environments" and label is None:

@@ -146,6 +146,11 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3", "--baseline", "x"], "read mode"),
     (["--run", "k", "--profile", "revisions"], "needs --baseline"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--rounds", "3"], "measure mode"),
+    (["--run", "k", "--profile", "revisions", "--baseline", "x", "--vary", "role"], "--vary names the parameter"),
+    (["--run", "k", "--profile", "environments", "--label", "e", "--baseline", "x", "--vary", "role"],
+     "--vary names the parameter"),
+    (["--run", "k", "--profile", "variants", "--baseline", "x", "--label", "e"], "--label names the sides"),
+    (["--run", "k", "--profile", "variants"], "needs --baseline"),
 ])
 def test_mode_selection(argv, message, capsys):
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
