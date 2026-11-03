@@ -1,0 +1,169 @@
+name: e2e examples
+
+# Runs the numpy-spin examples in benchx-dev/benchx_examples and prints their output:
+#
+#   track.sh        builds NumPy with spin at several revisions and benchmarks each
+#   num_threads.sh  benchmarks one prebuilt revision at several OPENBLAS_NUM_THREADS
+#
+# Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
+# crashes); the scripts exit 0 even when a revision fails, so read the printed output.
+#
+# Runs on every pull request, and on demand. A run on demand can take another
+# benchx_examples branch, tag or commit (examples_ref), which a pull request here cannot:
+# the examples live in another repository.
+#
+# The benchmarks are pinned to two cores (BENCH_CPUS). num_threads.sh should use 1, 2 and 4
+# threads, so that the last of them oversubscribes the two cores. The NumPy builds are not
+# pinned.
+#
+on:
+  workflow_dispatch:
+    inputs:
+      examples_ref:
+        description: "benchx_examples branch, tag or commit to run"
+        default: main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  numpy-spin:
+    name: numpy-spin (track.sh, num_threads.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      NUMPY: ${{ github.workspace }}/numpy
+      EXAMPLE: ${{ github.workspace }}/benchx_examples/examples/numpy-spin
+      BENCH_CPUS: "0,1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - name: Check out benchx
+        uses: actions/checkout@v4
+        with:
+          path: benchx
+
+      - name: Clone benchx_examples
+        uses: actions/checkout@v4
+        with:
+          repository: benchx-dev/benchx_examples
+          ref: ${{ inputs.examples_ref || 'main' }}
+          path: benchx_examples
+
+      # The repository keeps the output of earlier runs next to the scripts.
+      # Start clean instead
+      - name: Remove the output from examples/numpy-spin
+        working-directory: ${{ env.EXAMPLE }}
+        run: rm -rf results store.parquet
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev pkg-config ccache
+
+      # The key is new for every run, because a cache cannot be overwritten; a run starts
+      # from the most recent one. It is saved at the end, also when a later step fails.
+      - name: Restore the ccache cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Zero the ccache statistics
+        run: ccache --zero-stats
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: benchx/prototype/uv.lock
+
+      # The scripts run plain `python`, `bx` and `spin`, and hard-code
+      # lib/python3.12/site-packages, so this is Python 3.12 on the PATH. The `test`
+      # extra is only for pyperf, which the benchmarks need.
+      - name: Install benchx on Python 3.12
+        working-directory: benchx/prototype
+        run: |
+          uv python install 3.12
+          uv sync --extra test --python 3.12
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install NumPy's build tools
+        run: uv pip install --python benchx/prototype/.venv/bin/python spin ninja meson-python cython
+
+      # The full history and the tags: track.sh checks out v2.4.3 and v2.4.0.
+      - name: Clone NumPy
+        run: |
+          git clone --quiet https://github.com/numpy/numpy.git "$NUMPY"
+          git -C "$NUMPY" submodule update --init
+
+      # Two cores for the benchmarks, all of them for the builds, so only `bx` is pinned:
+      # a `bx` ahead of the real one on the PATH, which the scripts call without knowing.
+      - name: Pin the benchmarks to two cores
+        run: |
+          mkdir -p "$RUNNER_TEMP/pin"
+          cat > "$RUNNER_TEMP/pin/bx" <<EOF
+          #!/bin/sh
+          exec taskset -c $BENCH_CPUS $PWD/benchx/prototype/.venv/bin/bx "\$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/pin/bx"
+          echo "$RUNNER_TEMP/pin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/pin/bx" --help > /dev/null
+
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "bx: $(command -v bx)"
+          echo "ccache: $(ccache --version | head -1)"
+          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
+          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
+          echo "numpy main: $(git -C "$NUMPY" rev-parse --short main)"
+
+      # num_threads.sh assumes a prebuilt NumPy at main, checked out.
+      - name: Build NumPy main
+        working-directory: ${{ env.NUMPY }}
+        run: spin build
+
+      # Before track.sh, which leaves the NumPy checkout at the last revision it built.
+      - name: Run num_threads.sh
+        working-directory: ${{ env.EXAMPLE }}
+        run: bash ./num_threads.sh
+
+      - name: Print the thread sweep results
+        working-directory: ${{ env.EXAMPLE }}
+        run: bx head --table -n 100
+
+      - name: Run track.sh
+        working-directory: ${{ env.EXAMPLE }}
+        run: bash ./track.sh
+
+      - name: Print the results across history
+        working-directory: ${{ env.EXAMPLE }}
+        run: bx head --table -n 100
+
+      - name: Show the ccache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Save the ccache cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numpy-spin-output
+          path: |
+            benchx_examples/examples/numpy-spin/results
+            benchx_examples/examples/numpy-spin/store.parquet
+          if-no-files-found: warn
+          retention-days: 14
