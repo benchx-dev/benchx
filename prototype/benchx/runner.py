@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import __version__, adapters, collectors, core, snapshot
 from . import target as target_mod
-from .adapters.base import Unsupported
+from .adapters.base import Unsupported, no_cases
 from .core import Refusal, Rejected
 
 RUNNER = {"name": "benchx-prototype", "version": __version__}
@@ -196,6 +196,8 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
                                    timeout=order["timeouts"]["order_s"])
     except Unsupported as e:
         raise Refused(e.problems) from None
+    if not cases:
+        raise Refused(no_cases(order["suites"][0]["suite"], order["suites"][0].get("filter")).problems)
     workloads = [adapter.workload(case, runnable) if hasattr(adapter, "workload") else (case, {}) for case in cases]
     # Both share workload.parameters: a clash would overwrite the case's own value and merge distinct cases.
     clashes = sorted({name for _, case_parameters in workloads for name in case_parameters} & parameters.keys())

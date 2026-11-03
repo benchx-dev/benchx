@@ -131,6 +131,7 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert sorted(sort) == sorted(json.dumps({"n": n, "key": key}, sort_keys=True)
                                   for n in ("10", "100") for key in ("'a'", "'b'"))
     one = next(iter(sort.values()))
+    assert {"driver", "asv-runtime", "params-helper"} <= {a["kind"] for a in one["provenance"]["artifacts"]}
     assert one["measurement"]["status"] == "success"
     assert len(one["measurement"]["observations"]) == 4
     assert {o["group"] for o in one["measurement"]["observations"]} == {"0", "1"}
@@ -187,6 +188,43 @@ def test_cases_are_exact_names(suite):
                      *FAST]) == cli.EXIT_OK
     assert sorted(results(suite, "exact")) == [
         ("bm.Sort.time_sorted", json.dumps({"key": "'a'", "n": "10"})), ("bm.time_plain", "{}")]
+
+
+def test_a_filter_that_selects_nothing_is_refused(suite, capsys):
+    """A typo in a filter must not end in `0 result(s)` and a success status; asv itself says
+    "No benchmarks selected" and fails."""
+    assert cli.main([*ASV, "--filter", "time_plian", "--run-key", "typo", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "refused: filter 'time_plian' selects no case in" in err
+    assert "available: bm.Cached.time_sum, bm.Mutating.time_pop," in err
+    assert results(suite, "typo") == {}
+
+
+def test_an_anchored_name_of_a_parametrized_benchmark_is_refused_with_a_hint(suite, capsys):
+    # asv searches `name(p0, p1)`, so `time_sorted$` matches none of the combinations.
+    assert cli.main([*ASV, "--filter", "time_sorted$", "--run-key", "anchored", "--no-ingest",
+                     *FAST]) == cli.EXIT_REFUSED
+    assert ("the filter matches the name of a parametrized benchmark (bm.Sort.time_sorted) but not its arguments"
+            in capsys.readouterr().err)
+
+
+def test_a_filter_that_selects_only_benchmarks_that_are_not_run_is_refused(suite, capsys):
+    assert cli.main([*ASV, "--filter", "peakmem_sorted", "--run-key", "notrun", "--no-ingest",
+                     *FAST]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "only benchmarks that are not run were selected" in err
+    assert "1 peakmem" in err
+
+
+def test_a_parametrized_benchmarks_name_selects_all_its_combinations(suite):
+    """As `asv run --bench bm.Sort.time_sorted` does. The name stays exact: `names.time_sum`
+    does not select `names.time_sum_fast`."""
+    (suite / "benchmarks" / "names.py").write_text("def time_sum():\n    pass\n\n\ndef time_sum_fast():\n    pass\n")
+    assert cli.main([*ASV, "bm.Sort.time_sorted", "names.time_sum", "--run-key", "bare", "--no-ingest",
+                     *FAST]) == cli.EXIT_OK
+    assert sorted(results(suite, "bare")) == sorted(
+        [("bm.Sort.time_sorted", json.dumps({"key": key, "n": n})) for n in ("10", "100") for key in ("'a'", "'b'")]
+        + [("names.time_sum", "{}")])
 
 
 def test_a_benchmark_name_may_end_in_a_dash_and_digits(suite):
