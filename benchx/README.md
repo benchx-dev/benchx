@@ -88,7 +88,8 @@ pyperf.
 functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
-`examples/pyperf-bench` is a runnable walk-through.
+`examples/pyperf-suite` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
+is a runnable walk-through.
 
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
@@ -219,7 +220,6 @@ benchx/
   compare.py         run mode over a profile's projection, comparison document (comparator.md)
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
-examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/numpy-venvs  UC-04 with two venvs and two numpy versions, driven by run.sh (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
