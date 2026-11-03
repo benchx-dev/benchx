@@ -1,9 +1,13 @@
 name: e2e examples
 
-# Runs the numpy-spin examples in benchx-dev/benchx_examples and prints their output:
+# Runs examples from benchx-dev/benchx_examples and prints their output. Two jobs:
 #
-#   track.sh        builds NumPy with spin at several revisions and benchmarks each
-#   num_threads.sh  benchmarks one prebuilt revision at several OPENBLAS_NUM_THREADS
+#   numpy-spin  builds NumPy with spin and benchmarks it:
+#                 track.sh        several revisions, each built and benchmarked
+#                 num_threads.sh  one prebuilt revision at several OPENBLAS_NUM_THREADS
+#   arrow       builds a small Google Benchmark suite with CMake and compares the builds:
+#                 examples/arrow/demo/run.sh
+#                 examples/arrow/archery-local/run.sh
 #
 # Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
 # crashes); the scripts exit 0 even when a revision fails, so read the printed output.
@@ -12,9 +16,9 @@ name: e2e examples
 # benchx_examples branch, tag or commit (examples_ref), which a pull request here cannot:
 # the examples live in another repository.
 #
-# The benchmarks are pinned to two cores (BENCH_CPUS). num_threads.sh should use 1, 2 and 4
-# threads, so that the last of them oversubscribes the two cores. The NumPy builds are not
-# pinned.
+# In the numpy-spin job the benchmarks are pinned to two cores (BENCH_CPUS). num_threads.sh
+# should use 1, 2 and 4 threads, so that the last of them oversubscribes the two cores. The
+# NumPy builds are not pinned.
 #
 on:
   workflow_dispatch:
@@ -165,5 +169,66 @@ jobs:
           path: |
             benchx_examples/examples/numpy-spin/results
             benchx_examples/examples/numpy-spin/store.parquet
+          if-no-files-found: warn
+          retention-days: 14
+
+  arrow:
+    name: arrow (demo, archery-local)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out benchx
+        uses: actions/checkout@v4
+        with:
+          path: benchx
+
+      - name: Clone benchx_examples
+        uses: actions/checkout@v4
+        with:
+          repository: benchx-dev/benchx_examples
+          ref: ${{ inputs.examples_ref || 'main' }}
+          path: benchx_examples
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: benchx/prototype/uv.lock
+
+      # The scripts run plain `python` and `bx`. benchx is installed in editable mode,
+      # which is where it reads its schemas from.
+      - name: Install benchx
+        working-directory: benchx/prototype
+        run: |
+          uv python install 3.13
+          uv sync --extra test --python 3.13
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # cmake and a C++ compiler are preinstalled on the runner; CMake fetches
+      # Google Benchmark.
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "bx: $(command -v bx)"
+          echo "cmake: $(cmake --version | head -1)"
+          echo "c++: $(c++ --version | head -1)"
+          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
+          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
+
+      - name: Run the demo
+        working-directory: benchx_examples/examples/arrow/demo
+        run: bash ./run.sh
+
+      - name: Run archery-local
+        working-directory: benchx_examples/examples/arrow/archery-local
+        run: bash ./run.sh
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arrow-output
+          path: |
+            benchx_examples/examples/arrow/demo/store.parquet
+            benchx_examples/examples/arrow/archery-local/_work/results
           if-no-files-found: warn
           retention-days: 14

@@ -560,9 +560,10 @@ Allowing a local-only `revisions` comparison of a dirty tree is open
 
 Both profiles use one shape: two prepared build directories, one run key, R
 rounds, and `bx compare` in measure mode, which alternates the sides and
-assigns `round` and `slot`. The demo script plays the user, and in that role
+assigns `round` and `slot`. The demo script (`examples/arrow/demo/run.sh` in
+the benchx_examples repository) plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
-and CMake, since benchx builds nothing. `benchx/examples/archery-local`
+and CMake, since benchx builds nothing. `examples/arrow/archery-local` there
 shows the other route, where a provider script named in
 `benchx.conf.json` builds and describes the targets and the sides are
 given as `@plain` and `@hardened`.
@@ -589,7 +590,7 @@ re-ingested to show idempotency, and compared again with `--results`; that
 document must equal the one from the local store (criterion 8).
 
 Every `bx run` delivers to the local store, so both shapes' results land in
-the demo project's store (`benchx/examples/demo/store.parquet`), the ad hoc ones as thin results of project
+the demo project's store (`examples/arrow/demo/store.parquet` in benchx_examples), the ad hoc ones as thin results of project
 `local/<hostname>`. Run keys carry a timestamp, so successive demo runs add
 rows rather than colliding on `ingest_key`. The store and each series'
 history grow from run to run, and the demo ends with `bx head`.
