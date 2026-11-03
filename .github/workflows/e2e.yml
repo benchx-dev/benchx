@@ -1,6 +1,6 @@
 name: e2e examples
 
-# Runs examples from benchx-dev/benchx_examples and prints their output. Two jobs:
+# Runs examples from benchx-dev/benchx_examples and prints their output. Three jobs:
 #
 #   numpy-spin  builds NumPy with spin and benchmarks it:
 #                 track.sh        several revisions, each built and benchmarked
@@ -8,6 +8,8 @@ name: e2e examples
 #   arrow       builds a small Google Benchmark suite with CMake and compares the builds:
 #                 examples/arrow/demo/run.sh
 #                 examples/arrow/archery-local/run.sh
+#   pyperf-suite  runs a suite of Python functions with `bx bench`:
+#                 examples/pyperf-suite/run.sh
 #
 # Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
 # crashes); the scripts exit 0 even when a revision fails, so read the printed output.
@@ -230,5 +232,58 @@ jobs:
           path: |
             benchx_examples/examples/arrow/demo/store.parquet
             benchx_examples/examples/arrow/archery-local/_work/results
+          if-no-files-found: warn
+          retention-days: 14
+
+  pyperf-suite:
+    name: pyperf-suite (run.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out benchx
+        uses: actions/checkout@v4
+        with:
+          path: benchx
+
+      - name: Clone benchx_examples
+        uses: actions/checkout@v4
+        with:
+          repository: benchx-dev/benchx_examples
+          ref: ${{ inputs.examples_ref || 'main' }}
+          path: benchx_examples
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: benchx/prototype/uv.lock
+
+      # The script runs plain `python` and `bx`, and the workers need pyperf, which the
+      # `test` extra brings. benchx is installed in editable mode, which is where it reads
+      # its schemas from.
+      - name: Install benchx
+        working-directory: benchx/prototype
+        run: |
+          uv python install 3.13
+          uv sync --extra test --python 3.13
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "bx: $(command -v bx)"
+          echo "pyperf: $(python -c 'import pyperf; print(pyperf.__version__)')"
+          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
+          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
+
+      - name: Run the pyperf suite
+        working-directory: benchx_examples/examples/pyperf-suite
+        run: bash ./run.sh
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyperf-suite-output
+          path: benchx_examples/examples/pyperf-suite/out
           if-no-files-found: warn
           retention-days: 14
