@@ -93,6 +93,17 @@ class Config:
         return self._path(self.section("paths").get("results", DEFAULT_RESULTS))
 
     @property
+    def collectors(self) -> list[dict]:
+        """The context collectors, as a work order lists them. `{root}` in a command
+        argument is the project root, because a collector runs in the harness's
+        working directory, not here."""
+        out = []
+        for name, spec in self.section("collectors").items():
+            command = [argument.replace("{root}", str(self.root)) for argument in spec["command"]]
+            out.append({"name": name, **spec, "command": command})
+        return out
+
+    @property
     def provider(self) -> tuple[list[str], Path] | None:
         """The provider command, and the directory it runs in (the root)."""
         command = self.section("provider").get("command")
