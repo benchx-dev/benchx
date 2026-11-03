@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import core
-from .core import Refusal
+from .core import Refusal, loader
 
 DEFAULT_TIMEOUT_S = 60.0
 MAX_DIFFS = 5
@@ -39,7 +39,8 @@ class Collected:
 
 def _differences(wanted, found, path=""):
     """The paths at which `found` does not contain `wanted` exactly. A mapping is
-    compared key by key (extra keys in `found` are fine); anything else by value."""
+    compared key by key (extra keys in `found` are fine); anything else by its
+    canonical JSON, so `true` is not `1` as Python's `==` would have it."""
     if isinstance(wanted, dict):
         if not isinstance(found, dict):
             yield f"{path or '.'}: expected an object, found {_short(found)}"
@@ -49,7 +50,7 @@ def _differences(wanted, found, path=""):
                 yield f"{path}/{key}: missing (declared {_short(value)})"
             else:
                 yield from _differences(value, found[key], f"{path}/{key}")
-    elif wanted != found:
+    elif core.canonical(wanted) != core.canonical(found):
         yield f"{path or '.'}: declared {_short(wanted)}, observed {_short(found)}"
 
 
@@ -70,12 +71,9 @@ def _collect(spec, cwd, env) -> tuple[dict | None, str | None]:
     if done.returncode != 0:
         last = (done.stderr.strip().splitlines() or ["no message"])[-1]
         return None, f"exit {done.returncode}: {last}"
-    try:
-        facts = json.loads(done.stdout)
-    except ValueError:
-        return None, "printed something other than a JSON object"
-    if not isinstance(facts, dict):
-        return None, "printed something other than a JSON object"
+    facts, errors = loader.parse(done.stdout)
+    if facts is None:
+        return None, "; ".join(str(error) for error in errors)
     return facts, None
 
 

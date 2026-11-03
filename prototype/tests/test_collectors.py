@@ -35,6 +35,8 @@ def test_facts_are_recorded_in_full_and_in_summary(tmp):
 
 
 @pytest.mark.parametrize("script", ["import sys; sys.exit(3)", "print('not json')", "print('[1, 2]')",
+                                    "print('{\"a\": NaN}')", "print('{\"a\": 1e999}')",
+                                    "print('{\"a\": 1, \"a\": 2}')", "print('{\"a\": 9007199254740993}')",
                                     "import time; time.sleep(5)"])
 def test_a_failed_collector_adds_no_facts_and_only_warns(tmp, script):
     collected = run_all([spec(script=script, timeout_s=1)], tmp)
@@ -65,6 +67,22 @@ def test_expect_compares_by_value(tmp):
     assert run_all([spec(expect={"a": 1})], tmp).refusals == []
     collected = run_all([spec(expect={"a": 2})], tmp)
     assert "expect /a: declared 2, observed 1" in messages(collected)[0]
+
+
+@pytest.mark.parametrize("declared, printed", [(True, "1"), (1, "true"), (False, "0"), ([True], "[1]"),
+                                               ({"k": 1}, '{"k": true}')])
+def test_a_bool_is_not_an_int_in_a_comparison(tmp, declared, printed):
+    script = f"print('{{\"a\": {printed}}}')"
+    for check in ({"expect": {"a": declared}}, {"verify": "how_built"}):
+        collected = run_all([spec(script=script, **check)], tmp, declared={"a": declared})
+        assert collected.warnings == ["collector-mismatch"] and messages(collected), check
+
+
+def test_equal_values_still_match_whatever_their_spelling(tmp):
+    script = 'print(\'{"a": [1.0, {"b": true}], "c": "x"}\')'
+    wanted = {"a": [1, {"b": True}], "c": "x"}
+    collected = run_all([spec(script=script, expect=wanted, verify="how_built")], tmp, declared=wanted)
+    assert collected.warnings == [] and collected.refusals == []
 
 
 def test_warn_runs_on_and_marks_the_results(tmp):
