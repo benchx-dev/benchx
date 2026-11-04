@@ -1,4 +1,4 @@
-"""benchx prototype: the slice of docs/design/prototype-design.md.
+"""The benchx implementation: the slice of docs/design/prototype-design.md.
 
 One module per component behind the `bx` command line: core (reading and
 checking documents), snapshot (what is recorded), adapters.gbench, runner,

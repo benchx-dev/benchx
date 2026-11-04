@@ -1,6 +1,6 @@
 # Minimal Prototype Scope
 
-**Status:** Agreed scope for a first prototype; decisions recorded 2026-08-30, revised 2026-09-25 to follow the merged design documents and 2026-09-29 for the runner-does-not-build stance
+**Status:** Agreed scope for a first implementation; decisions recorded 2026-08-30, revised 2026-09-25 to follow the merged design documents and 2026-09-29 for the runner-does-not-build stance
 **Companion to:** `prototype-design.md` (how it is built), `benchmark-result-schema.md`, `benchmark-environments.md`, `harness-adapter.md`, `comparator.md`, `runner-schema.md` (the work order), and `system-decomposition.md` §3.4 (the workbench)
 
 ## 1. The slice
@@ -36,11 +36,11 @@ one run:
   with one build option changed, hardened against plain. The sides differ in
   subject configuration and are named by a label.
 
-## 2. Component scope in the prototype
+## 2. Component scope in the implementation
 
-| Component | In prototype | Deferred | Out of scope |
+| Component | In implementation | Deferred | Out of scope |
 |---|---|---|---|
-| Runner | execute a `build` or `working_tree` target per a work order; apply the order's `environment_variables` to the launched process; capture the zero-configuration snapshot, the build configuration, and source identity; account for planned cases; refuse an order it cannot apply exactly, including one that names a deferred field | `python_env` targets, context collectors that run after the harness or per case (the prototype runs them once per order, before the cases), environment policy (enforcing launch settings, verifying requested hardware, refusing an unsatisfiable run) | building revisions, tuning the machine (`benchmark-environments.md` §2.3) |
+| Runner | execute a `build` or `working_tree` target per a work order; apply the order's `environment_variables` to the launched process; capture the zero-configuration snapshot, the build configuration, and source identity; account for planned cases; refuse an order it cannot apply exactly, including one that names a deferred field | `python_env` targets, context collectors that run after the harness or per case (the implementation runs them once per order, before the cases), environment policy (enforcing launch settings, verifying requested hardware, refusing an unsatisfiable run) | building revisions, tuning the machine (`benchmark-environments.md` §2.3) |
 | Adapter | Google Benchmark, both halves: drive filter and repetitions, translate output; pyperf, both halves, for Python functions in a working tree, through `bx bench` and `bx compare` (the default adapter of both) | all other harnesses; pyperf's `tags`, `date`, per-run load and frequency, and `pyperf check` | — |
 | Store | one Parquet file; ingest per schema §5.4 (validated and durable, auto-create, unit-conflict rejection, idempotency, attempt integrity); one default identity policy; queries: list series, series history, get result | continuity events, quarantine, artifact storage, identity-policy authoring | — |
 | Comparator | run mode with the `revisions` and `environments` profiles; eligibility guard; comparison document | history mode; `single-run`, `variants`, and `cross-machine` profiles; batch requests; provisional noise rules | — |
@@ -48,7 +48,7 @@ one run:
 | Documents | work order (`schemas/work-order/0.1.0`), result (schema §5.2), comparison document | — | — |
 
 **Out entirely:** scheduler, change detector, alerting, views beyond query
-output, importers, workbench packaging (the prototype's CLI *is* the
+output, importers, workbench packaging (the implementation's CLI *is* the
 proto-workbench).
 
 ## 3. Success criteria
@@ -73,10 +73,10 @@ proto-workbench).
 8. The same comparison computed from a throwaway store and from a persistent
    store yields the same document.
 
-## 4. Decisions locked for the prototype
+## 4. Decisions locked for the implementation
 
 - benchx builds nothing and tunes nothing; it records the environment and
-  applies only launch settings (`benchmark-environments.md` §2). The prototype
+  applies only launch settings (`benchmark-environments.md` §2). The implementation
   applies `environment_variables` and defers the rest of the environment
   policy.
 - The work order is `schemas/work-order/0.1.0` (`runner-schema.md`), plus one

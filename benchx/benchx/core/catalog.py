@@ -69,7 +69,7 @@ def _read(kind: str, release: str) -> dict | None:
 
     schema = json.loads(file.read_text("utf-8"))
     if kind == "work-order":
-        # Prototype extension: assigned by whoever coordinates the sides
+        # Extension of the implementation: assigned by whoever coordinates the sides
         # (runner-schema.md §3), not by the runner.
         schema["properties"]["slot"] = {
             "description": "The realized position across all sides; copied to procedure.slot.",

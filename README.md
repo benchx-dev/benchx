@@ -39,8 +39,8 @@ allow all of them.
   migration contract (the core design document).
 - `docs/user_stories/` — user story template and collected stories.
 - `schemas` -- JSON schemas for the benchmark result and other components.
-- `prototype/` -- an in-progress implementation.
-- `prototype/examples/` -- worked examples of benchmarking setup(s).
+- `benchx/` -- an in-progress implementation.
+- `benchx/examples/` -- worked examples of benchmarking setup(s).
 
 ## Documentation site
 
@@ -53,7 +53,7 @@ uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
 uv run --with-requirements docs/requirements.txt zensical serve
 ```
 
-`tools/gen_docs.py` generates the landing page, the prototype page, and the
+`tools/gen_docs.py` generates the landing page, the benchx page, and the
 schema reference pages into `docs/` (those paths are gitignored); `zensical.toml`
 configures the site, and `.github/workflows/docs.yml` builds and deploys it.
 

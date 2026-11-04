@@ -62,7 +62,7 @@ def test_dirty_tree_refused_before_anything_runs(repo, tmp, builds):
     ({"profile": "revisions", "label": ("build", "a", "b")}, "--label names the sides"),
     ({"profile": "revisions", "rounds": 0}, "at least 1"),
     ({"profile": "revisions", "suite": "missing-binary"}, "suite binary not found"),
-    ({"profile": "history"}, "not in the prototype"),
+    ({"profile": "history"}, "not in the implementation"),
 ])
 def test_session_refusals(tmp, builds, kwargs, message):
     args = {"adapter": "google-benchmark", "suite": "demo-bench", "rounds": 3, "store": Store(tmp / "store.parquet"), "out": tmp / "out", **kwargs}

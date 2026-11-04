@@ -1,16 +1,16 @@
-name: prototype tests
+name: benchx tests
 
 on:
   push:
     branches: [main]
     paths:
-      - "prototype/**"
+      - "benchx/**"
       - "schemas/**"
       - ".github/workflows/**"
   pull_request:
     branches: [main]
     paths:
-      - "prototype/**"
+      - "benchx/**"
       - "schemas/**"
       - ".github/workflows/**"
 
@@ -32,14 +32,14 @@ jobs:
         python-version: ["3.11", "3.13"]
     defaults:
       run:
-        working-directory: prototype
+        working-directory: benchx
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: prototype/uv.lock
+          cache-dependency-glob: benchx/uv.lock
 
       - name: Install Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}

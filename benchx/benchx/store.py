@@ -9,7 +9,7 @@ documents in transit, never for the store.
 A Parquet file cannot be appended to, so every ingest that accepts something
 rewrites the file: to a temporary file beside it, synced, then renamed over
 it, which is atomic. The acknowledgment therefore means validated and durable
-(schema §5.4). Uniqueness checks are scans, which is fine at prototype scale.
+(schema §5.4). Uniqueness checks are scans, which is fine at this scale.
 """
 
 import json
@@ -148,7 +148,7 @@ class Store:
     def history(self, fingerprint_prefix: str, projection: Projection = identity.POLICY) -> list[dict]:
         """A series' points in axis order, each with the ignored facts that
         changed since the point before it (§4.3). On the revision axis they
-        are listed by measurement start instead: the prototype has no revision
+        are listed by measurement start instead: the implementation has no revision
         graph (schema §4.1)."""
         points = [p for p in self.entities(projection).get("series_point", [])
                   if p["series_fingerprint"].startswith(fingerprint_prefix)]

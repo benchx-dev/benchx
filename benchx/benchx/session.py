@@ -67,7 +67,7 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         if kind not in KINDS:
             raise SessionError(f"{spec}: only build and working_tree targets are supported; {kind!r} is deferred")
         if "build" in description:
-            raise SessionError(f"{spec}: a declared build is deferred in the prototype "
+            raise SessionError(f"{spec}: a declared build is deferred in the implementation "
                                "(the runner reads CMakeCache.txt)")
         path = description["target"]["path"]
         # A working tree is its own source, as for the runner.
@@ -229,7 +229,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     the runner refuses an order.
     """
     if profile not in PROFILES:
-        raise SessionError(f"profile {profile!r} is not in the prototype ({', '.join(PROFILES)})")
+        raise SessionError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
     if rounds < 1:
         raise SessionError("--rounds must be at least 1")
     if profile == "environments" and label is None:
