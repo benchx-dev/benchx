@@ -1,6 +1,6 @@
 name: e2e examples
 
-# Runs examples from benchx-dev/benchx_examples and prints their output. Three jobs:
+# Runs examples from benchx-dev/benchx_examples and prints their output. Four jobs:
 #
 #   numpy-spin  builds NumPy with spin and benchmarks it:
 #                 track.sh        several revisions, each built and benchmarked
@@ -10,6 +10,9 @@ name: e2e examples
 #                 examples/arrow/archery-local/run.sh
 #   pyperf-suite  runs a suite of Python functions with `bx bench`:
 #                 examples/pyperf-suite/run.sh
+#   matmul-params  runs one parametrized benchmark, numpy and torch at three sizes, with
+#                 `bx bench`; the quick version from the example's README:
+#                 examples/matmul-params
 #
 # Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
 # crashes); the scripts exit 0 even when a revision fails, so read the printed output.
@@ -285,5 +288,72 @@ jobs:
         with:
           name: pyperf-suite-output
           path: benchx_examples/examples/pyperf-suite/out
+          if-no-files-found: warn
+          retention-days: 14
+
+  matmul-params:
+    name: matmul-params (quick version)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Keep the result store with the output, as the README does, not in the home directory.
+      BENCHX_HOME: ${{ github.workspace }}/benchx_examples/examples/matmul-params/out/home
+    steps:
+      - name: Check out benchx
+        uses: actions/checkout@v4
+        with:
+          path: benchx
+
+      - name: Clone benchx_examples
+        uses: actions/checkout@v4
+        with:
+          repository: benchx-dev/benchx_examples
+          ref: ${{ inputs.examples_ref || 'main' }}
+          path: benchx_examples
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: benchx/prototype/uv.lock
+
+      # The workers need pyperf, which the `test` extra brings. benchx is installed in
+      # editable mode, which is where it reads its schemas from.
+      - name: Install benchx
+        working-directory: benchx/prototype
+        run: |
+          uv python install 3.13
+          uv sync --extra test --python 3.13
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # The README's install lines. torch comes from PyTorch's CPU index: the default
+      # build is several GB of CUDA libraries that the runner has no use for.
+      - name: Install NumPy and PyTorch
+        run: |
+          uv pip install --python benchx/prototype/.venv/bin/python numpy
+          uv pip install --python benchx/prototype/.venv/bin/python torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "bx: $(command -v bx)"
+          echo "pyperf: $(python -c 'import pyperf; print(pyperf.__version__)')"
+          echo "numpy: $(python -c 'import numpy; print(numpy.__version__)')"
+          echo "torch: $(python -c 'import torch; print(torch.__version__)')"
+          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
+          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
+
+      # The quick version of the README: 2 processes x 2 values per case, 0.01 s of
+      # calibration. With pyperf's defaults it takes several minutes, mostly importing torch
+      # in every worker. `bx bench` prints one row per case.
+      - name: Run the quick version
+        working-directory: benchx_examples/examples/matmul-params
+        run: bx bench bench_matmul.py --processes 2 --values 2 --min-time 0.01 --out out
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matmul-params-output
+          path: benchx_examples/examples/matmul-params/out
           if-no-files-found: warn
           retention-days: 14
