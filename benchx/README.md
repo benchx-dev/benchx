@@ -5,24 +5,8 @@ the slice in [`prototype-scope.md`](../docs/design/prototype-scope.md), from a
 work order to a comparison document.
 
 ```
-bx run <order.json> [--out DIR] [--no-ingest]
-                                         # runner + Google Benchmark adapter → result files → local store
-bx ingest <dir|file>                     # result files and work orders → the local store
-bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query); dirty ones are marked
-bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
-bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--json]
-                                         # read mode: compare results already measured
-bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
-bx compare BASELINE CONTENDER --profile revisions|environments
-           [--adapter pyperf|google-benchmark]                  # default pyperf
-           --suite NAME [--filter REGEX] [--quantity wall-time]
-           --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
-           [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
-                                         # measure mode: run both sides, then compare
-bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
+# Execute benchmarks:
+
 bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compare: one order, a table
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
@@ -33,6 +17,32 @@ bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
 bx bench PATH --adapter asv [CASE …] [--filter REGEX] [--tree DIR] [...]
                                           # shorthand: an asv benchmark suite, timed by pyperf
+
+# Comparisons:
+
+# measure mode: run both sides, then compare
+bx compare BASELINE CONTENDER --profile revisions|environments
+           [--adapter pyperf|google-benchmark]                  # default pyperf
+           --suite NAME [--filter REGEX] [--quantity wall-time]
+           --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
+           [--project P] [--label NAME=BASE,CONTENDER]
+           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
+
+# read mode: compare results already measured
+bx compare --run KEY --profile revisions|environments --baseline VALUE
+           [--label NAME] [--results DIR] [--k 3] [--json]
+
+# low-level command: run a handwritten work oreder
+bx run <order.json> [--out DIR] [--no-ingest]
+                                         # runner + Google Benchmark adapter → result files → local store
+
+bx ingest <dir|file>                     # result files and work orders → the local store
+bx series [--workload … --quantity …]    # list series
+bx history <series>                      # one series' points (a query); dirty ones are marked
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
+
+bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
+bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
 bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
 bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
