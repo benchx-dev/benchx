@@ -95,7 +95,8 @@ Environments that cannot share a process, such as two venvs with different numpy
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
 and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
 --label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
-`examples/numpy-venvs` is the worked example, with a shell script that drives it.
+`examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
+is the worked example, with a shell script that drives it.
 
 `bx bench PATH --adapter asv` runs an [asv](https://asv.readthedocs.io) benchmark suite
 unchanged, reading asv's benchmark format as a language and timing it with pyperf;
@@ -220,7 +221,6 @@ benchx/
   compare.py         run mode over a profile's projection, comparison document (comparator.md)
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
-examples/numpy-venvs  UC-04 with two venvs and two numpy versions, driven by run.sh (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
                      comparator's invariants and method on hand-built results;

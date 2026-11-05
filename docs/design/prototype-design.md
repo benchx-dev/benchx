@@ -75,8 +75,8 @@ environment kind: a context collector (§3) prints facts about the environment i
 under `environment.system.<name>`, a part of the varying coordinate; a setup file does the same for
 declared facts. A collector with `verify: how_built` and `on_fail: warn` checks the facts a target's
 `how_built` object declares against what it found, and the comparison lists the warning beside the
-facts that differ. `prototype/examples/numpy-venvs` is the worked example, with the map from UC-04's
-spellings to these.
+facts that differ. `examples/numpy-venvs` in benchx_examples is the worked example, with the map from
+UC-04's spellings to these.
 
 A bare path is read by the harness. For Google Benchmark it is
 `BUILD_DIR[:SOURCE_DIR]`, a `build` target. For pyperf it is a working tree, a
