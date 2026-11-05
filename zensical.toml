@@ -48,8 +48,9 @@ nav = [
     { "Target provider request" = "schemas/target-provider-request.md" },
     { "Environment policy" = "schemas/environment-policy.md" },
     { "Environment identity" = "schemas/env-identity.md" },
-    { "Observed-context record" = "schemas/observed-context-record.md" },
+    { "Identity policy" = "schemas/identity-policy.md" },
     { "Comparison document" = "schemas/comparison-document.md" },
+    { "Project configuration" = "schemas/config.md" },
   ] },
   { "Use cases" = [
     { "Overview" = "use-cases/README.md" },
