@@ -13,6 +13,15 @@ dependencies = [
     "referencing",
     "rfc8785",
 ]
+readme = "README.md"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python"
+]
+
+[project.urls]
+Documentation = "https://benchx-dev.github.io/benchx/benchx/"
+Repository = "https://github.com/benchx-dev/benchx"
 
 [project.optional-dependencies]
 test = ["pytest", "pyperf", "asv_runner"]
