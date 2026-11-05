@@ -1,4 +1,4 @@
-# benchx prototype
+# benchx
 
 An implementation of [`docs/design/prototype-design.md`](../docs/design/prototype-design.md):
 the slice in [`prototype-scope.md`](../docs/design/prototype-scope.md), from a

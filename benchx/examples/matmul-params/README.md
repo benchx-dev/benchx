@@ -6,7 +6,7 @@ case, under [pyperf](https://pyperf.readthedocs.io).
 
 ## Run it
 
-From `prototype/`, in an environment of your choice:
+From `benchx/`, in an environment of your choice:
 
 ```sh
 pip install -e . pyperf numpy torch

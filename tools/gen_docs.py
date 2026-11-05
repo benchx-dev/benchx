@@ -4,7 +4,7 @@ Run before `zensical build` (the docs workflow does; locally: `python tools/gen_
 It writes, into docs/, files that are gitignored and never committed:
 
 - index.md, from the repository README (links to docs/... rewritten);
-- prototype.md, from prototype/README.md;
+- benchx.md, from benchx/README.md;
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
 - schemas/<name>/<version>/schema.json and examples/*.json, so the raw
@@ -480,7 +480,7 @@ def schema_index(pages: list[SchemaPage]) -> str:
         desc = desc.split(". ")[0].rstrip(".") + "." if desc else ""
         out.append(f"| [{p.schema.get('title', p.name)}]({p.name}.md) | {p.version} | {desc} |")
     out.append("")
-    out.append("Each page links the raw `schema.json` and its examples. Schemas are validated by the prototype's `bx validate`.")
+    out.append("Each page links the raw `schema.json` and its examples. Schemas are validated by the implementation's `bx validate`.")
     return "\n".join(out)
 
 
@@ -492,7 +492,7 @@ def rewrite_readme(text: str, strip_prefix: str) -> str:
 
 # --------------------------------------------------------------------------- main
 
-GENERATED = ["index.md", "prototype.md", "schemas"]  # paths under docs/, all gitignored
+GENERATED = ["index.md", "benchx.md", "schemas"]  # paths under docs/, all gitignored
 
 
 def main() -> None:
@@ -516,10 +516,10 @@ def main() -> None:
     # Landing page from the repository README.
     write("index.md", rewrite_readme((ROOT / "README.md").read_text(), "docs/"))
 
-    # Prototype README.
-    proto = ROOT / "prototype" / "README.md"
-    if proto.exists():
-        write("prototype.md", proto.read_text().replace("](../docs/", "]("))
+    # The README of the benchx implementation.
+    readme = ROOT / "benchx" / "README.md"
+    if readme.exists():
+        write("benchx.md", readme.read_text().replace("](../docs/", "]("))
 
     # Schema reference pages and raw documents.
     pages = discover()

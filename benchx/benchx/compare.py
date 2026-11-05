@@ -54,7 +54,7 @@ def profile_projection(profile: str, label: str | None = None) -> Projection:
     """The profile's projection; for environments, with the label that names
     the sides at the front of its axis."""
     if profile not in PROFILES:
-        raise CompareError(f"profile {profile!r} is not in the prototype ({', '.join(PROFILES)})")
+        raise CompareError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
     projection = PROFILES[profile]
     if profile == "environments":
         if not label:
@@ -277,7 +277,7 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds):
     if estimates:
         unit["reference_estimate"] = statistics.median(b for b, _ in estimates)
     if quantity.get("deterministic"):
-        # Deferred: no prototype quantity is deterministic (prototype-design.md §5).
+        # Deferred: no quantity of the implementation is deterministic (prototype-design.md §5).
         unit["reason"] = "deterministic-deferred"
         return unit
     if len(estimates) < max(min_rounds, MIN_PAIRS):

@@ -1,9 +1,9 @@
-"""Fingerprints, the prototype identity policy, and series points (schema §4.3, §4.5).
+"""Fingerprints, the identity policy of the implementation, and series points (schema §4.3, §4.5).
 
 The identity policy is the default projection, with the subject revision as
 its axis; its roles are a document (schemas/identity-policy/0.1.0), and the
-prototype has one, here. It is the default of the schema's examples with the
-benchmark's revision ignored: the prototype runs only benchmarks in the
+implementation has one, here. It is the default of the schema's examples with the
+benchmark's revision ignored: the implementation runs only benchmarks in the
 subject's own checkout, so that revision is the subject revision, the axis,
 and matching it would split every series at every commit.
 """
@@ -14,7 +14,7 @@ from .projection import (Projection, normalize_remote, reported_coordinates_fing
 # Any change to POLICY_DATA other than its description needs a new
 # identity_schema; tests/test_projection.py pins the two together.
 POLICY_DATA = {
-    "identity_schema": "benchx/prototype-identity/v1",
+    "identity_schema": "benchx/benchx-identity/v1",
     "default": "match",
     "paths": {
         "/source/uri": {"normalize": {"rule": "canonical-uri"}},
@@ -33,7 +33,7 @@ POLICY_DATA = {
 POLICY = Projection(POLICY_DATA, ["/revision/key"])
 IDENTITY_SCHEMA = POLICY.identity_schema
 MEDIAN = {"name": "median", "method_version": "benchx/median/v1", "input_level": "observations"}
-# The estimators the prototype derives series for (schema §4.5). Project
+# The estimators the implementation derives series for (schema §4.5). Project
 # configuration beside the identity policy, not part of it: the estimator
 # enters series_fingerprint on its own, so adding one adds series without
 # renaming the policy or changing any existing series.
@@ -51,7 +51,7 @@ def series_fingerprint(doc: dict, project: str, estimator: dict, projection: Pro
 
 def points(doc: dict, project: str, projection: Projection = POLICY, estimators=ESTIMATORS) -> list[dict]:
     """The series points a result contributes (§4.5): each of `estimators`
-    the prototype can derive from its observations, and each producer
+    the implementation can derive from its observations, and each producer
     estimate it carries."""
     if doc["measurement"]["status"] not in ("success", "partial"):
         return []

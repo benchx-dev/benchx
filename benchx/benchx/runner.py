@@ -28,7 +28,7 @@ class Refused(Rejected):
     """The order cannot be carried out as written; nothing was run."""
 
 
-# Order fields whose feature the prototype does not implement. Ignoring one
+# Order fields whose feature the implementation does not have. Ignoring one
 # would run the order without what it asked for, so the runner refuses it.
 DEFERRED = {
     "environment_policy": "enforcing launch settings and verifying requested hardware",
@@ -79,7 +79,7 @@ def _load_output(load: float | None) -> dict:
 
 
 def check(order: dict) -> Iterator[Refusal]:
-    """Everything in a valid order the prototype cannot apply exactly."""
+    """Everything in a valid order the implementation cannot apply exactly."""
     if len(order["suites"]) != 1:
         yield Refusal("exactly one suite per order is supported")
     suite = order["suites"][0]
@@ -98,7 +98,7 @@ def check(order: dict) -> Iterator[Refusal]:
             yield Refusal(f"quantities not supported: {sorted(unknown)}")
     for field, what in DEFERRED.items():
         if field in order:
-            yield Refusal(f"{field} is deferred in the prototype: {what}")
+            yield Refusal(f"{field} is deferred in the implementation: {what}")
     if adapter is not None:
         try:
             adapter.protocol(order["precision"])
@@ -175,7 +175,7 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
         declared_text["target_provider"] = declared_text.pop("provider")
     setup, setup_warning = snapshot.setup_facts(source["path"], child_env)
     if setup:
-        system["setup"] = setup  # declared; no placement rules in the prototype, so matched as a whole
+        system["setup"] = setup  # declared; no placement rules in the implementation, so matched as a whole
 
     out_dir = Path(out_dir)
     ref = core.order_ref(order)

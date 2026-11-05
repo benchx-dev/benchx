@@ -7,7 +7,7 @@ writes benchx result files, delivers them to a local store, and prints a table.
 ## Run it
 
 ```sh
-cd prototype
+cd benchx
 python3 -m venv .venv && . .venv/bin/activate    # Python >= 3.11, or any environment you like
 pip install -e . pyperf
 examples/pyperf-bench/run.sh

@@ -9,7 +9,7 @@ on:
       - "tools/gen_docs.py"
       - "zensical.toml"
       - "README.md"
-      - "prototype/README.md"
+      - "benchx/README.md"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
@@ -19,7 +19,7 @@ on:
       - "tools/gen_docs.py"
       - "zensical.toml"
       - "README.md"
-      - "prototype/README.md"
+      - "benchx/README.md"
       - ".github/workflows/docs.yml"
 
 concurrency:
@@ -37,7 +37,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      - name: Generate derived pages (landing page, prototype, schema reference)
+      - name: Generate derived pages (landing page, benchx page, schema reference)
         run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py
 
       - name: Build site

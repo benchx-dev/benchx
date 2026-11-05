@@ -1,4 +1,4 @@
-// Two benchmarks for the prototype demo: a quiet one and a noisy one.
+// Two benchmarks for the benchx demo: a quiet one and a noisy one.
 //
 // kWork is what the revisions demo changes between commits; DEMO_HARDENED is
 // what the environments demo changes between two builds of one commit. Both

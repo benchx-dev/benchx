@@ -30,7 +30,7 @@ access the first time (CMake fetches Google Benchmark v1.9.1 unless it is
 installed). From the repository root:
 
 ```console
-$ cd prototype
+$ cd benchx
 $ python3 -m venv .venv && . .venv/bin/activate    # Python >= 3.11, or any environment you like
 $ pip install -e .
 $ examples/archery-local/run.sh
@@ -136,6 +136,6 @@ The documents involved are in `../../../schemas/`: `target-provider-request`,
 
 The provider here builds one source tree, `WORKSPACE`. Comparing against a tag
 or a past revision (`@plain=v1.0`) is the provider's business and is not
-implemented in this example; the prototype's own `demo.sh` shows revisions
+implemented in this example; the implementation's own `demo.sh` shows revisions
 with two prebuilt worktrees. A declared `build` object in a description is
-refused by the prototype's runner (it reads `CMakeCache.txt` instead).
+refused by the runner (it reads `CMakeCache.txt` instead).

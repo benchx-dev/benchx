@@ -87,7 +87,7 @@ _ESTIMATORS = {
 
 
 def estimate(estimator: dict, values: list[float]) -> float | None:
-    """The estimator applied to an observation batch; None if the prototype has no such method."""
+    """The estimator applied to an observation batch; None if the implementation has no such method."""
     method = _ESTIMATORS.get((estimator["name"], estimator.get("method_version")))
     return method(values) if method and values and estimator.get("input_level") == "observations" else None
 
@@ -223,7 +223,7 @@ class Projection:
 
     def order_key(self, point_axis: tuple) -> tuple:
         """A sort key for a point: none for a revision axis, which the
-        prototype orders by time since it has no revision graph (schema §4.1);
+        implementation orders by time since it has no revision graph (schema §4.1);
         otherwise the axis values in natural order (`axis_order`)."""
         return () if self.axis == ["/revision/key"] else tuple(axis_order(value) for value in point_axis)
 

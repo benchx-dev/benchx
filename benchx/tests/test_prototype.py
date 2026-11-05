@@ -230,7 +230,7 @@ def test_tracked_series_and_history(revisions_run, tmp):
     series = store.series(workload=QUIET, quantity="wall-time")
     medians = [s for s in series if json.loads(s["estimator"]) == identity.MEDIAN]
     # the benchmark revision is ignored by the identity policy, so both revisions share a series
-    assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/prototype-identity/v1"
+    assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/benchx-identity/v1"
     # Google Benchmark's own median is a different estimator, so a different series
     assert {json.loads(s["estimator"])["method_version"] for s in series} == {
         "benchx/median/v1", "google-benchmark/median", "google-benchmark/mean"}
@@ -310,7 +310,7 @@ def test_every_refusal_is_reported(repo, tmp):
     assert [str(problem) for problem in refused(tmp, document)] == [
         "google-benchmark takes no workload_parameters",
         "quantities not supported: ['peak-rss']",
-        "schedule is deferred in the prototype: side scheduling (the session loop alternates the sides)",
+        "schedule is deferred in the implementation: side scheduling (the session loop alternates the sides)",
         "google-benchmark warmup is time-based only, not count-based",
     ]
 

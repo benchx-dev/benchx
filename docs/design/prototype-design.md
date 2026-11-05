@@ -75,7 +75,7 @@ environment kind: a context collector (§3) prints facts about the environment i
 under `environment.system.<name>`, a part of the varying coordinate; a setup file does the same for
 declared facts. A collector with `verify: how_built` and `on_fail: warn` checks the facts a target's
 `how_built` object declares against what it found, and the comparison lists the warning beside the
-facts that differ. `prototype/examples/numpy-venvs` is the worked example, with the map from UC-04's
+facts that differ. `benchx/examples/numpy-venvs` is the worked example, with the map from UC-04's
 spellings to these.
 
 A bare path is read by the harness. For Google Benchmark it is
@@ -161,10 +161,10 @@ not post to the original store.
 
 ## 2. The three documents
 
-**Work order.** The prototype reads the work order of `runner-schema.md`
+**Work order.** The implementation reads the work order of `runner-schema.md`
 (`schemas/work-order/0.1.0`, `benchx/work-order/0.1.0`) and defines no format
 of its own. One order is one side of one round: the runner executes one order
-per invocation (`runner.md` §7), and the prototype accepts two target kinds:
+per invocation (`runner.md` §7), and the implementation accepts two target kinds:
 `build`, an existing build directory with an optional `source_dir`, and
 `working_tree`, a checkout measured as found, which comes from a provider or from
 a bare path read by pyperf. The
@@ -173,7 +173,7 @@ runner never builds either (`runner.md` §1).
 Interleaving needs two order fields. `round` is native to the schema and is
 copied to `procedure.round`. `slot`, the realized position across all sides,
 is one only whoever coordinates the sides can assign, and the schema rejects
-unknown top-level fields, so the prototype validates orders against the schema
+unknown top-level fields, so the implementation validates orders against the schema
 extended by exactly one optional integer, `slot`, copied to `procedure.slot`;
 nothing else is added, and `slot` is proposed to the schema. The session loop
 is the coordinator: `bx compare` in measure mode writes one order per side and
@@ -218,7 +218,7 @@ is the fuller form.
 quantity, named by its `ingest_key`. The order is referenced by
 `provenance.info.workorder_ref` = `sha256:` over the order's RFC 8785 form;
 `runner-schema.md` §5.1 puts the resolved order in `provenance.artifacts`
-instead, which the prototype does not yet do. No prototype-only fields, so
+instead, which the implementation does not yet do. No implementation-only fields, so
 criterion 1 holds by construction.
 
 **Comparison document** (output of `bx compare`), following `comparator.md`
@@ -235,7 +235,7 @@ criterion 1 holds by construction.
   "contender": "hardened",
   "method": {"name": "benchx/paired-relative", "version": "v1",
              "estimator": "median", "k": 3.0, "min_rounds": 3},
-  "identity_schema": "benchx/profile/environments/v1+benchx/prototype-identity/v1",
+  "identity_schema": "benchx/profile/environments/v1+benchx/benchx-identity/v1",
   "local_only": true,
   "units": [
     {"workload": {"name": "TakeChunked…/4194304/2", "parameters": {}},
@@ -295,7 +295,7 @@ variant, as `timeouts.case_s` requires, and confines a crash to its case. Stdout
 and the native JSON are kept as provenance artifacts. Its translating half follows
 `harness-adapter.md` §6.1: iteration rows become observations, aggregate rows
 producer summaries, encoded names and user counters are split only under
-`parameter_rules` (none in the prototype, so names stay whole and counters go
+`parameter_rules` (none in the implementation, so names stay whole and counters go
 to `environment.system`), and a planned case absent from the output is an `error`
 result with reason `harness.no-output` (§5 step 5). Keys follow §4.6: one
 `attempt_key` per case per invocation, and an `ingest_key` whose attempt
@@ -347,7 +347,7 @@ the same way report the same configuration. Nobody declared these, so the detect
   different series.
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
-  dependency was installed. The prototype has no placement rules, so they
+  dependency was installed. The implementation has no placement rules, so they
   land in `environment.system.setup`, which the default identity policy matches.
 - **Context collectors** (`harness-adapter.md` §5.1), named under `collectors` in
   `benchx.conf.json` and copied into the work order. The runner runs each command once,
@@ -365,17 +365,17 @@ the same way report the same configuration. Nobody declared these, so the detect
   same value, at any depth; extra collected keys are fine. `expect` requires facts by
   value. A failed check, or a collector that cannot run, refuses the order before any case
   (`on_fail: refuse`, the default), or with `on_fail: warn` gives every result the
-  warning `collector-mismatch`. `prototype/examples/numpy-bench` uses this to check that
+  warning `collector-mismatch`. `benchx/examples/numpy-bench` uses this to check that
   the numpy a provider described is the numpy the workers import.
 
 `benchmark-environments.md` §3.4 asks that every fact carry its source
-(`detected`, `declared`, or a plugin name). The prototype does not record it
+(`detected`, `declared`, or a plugin name). The implementation does not record it
 yet: §9 question 1 leaves the representation open, and nothing in the slice
 would read it.
 
-What the prototype does not detect is recorded as absent, never guessed. In
+What the implementation does not detect is recorded as absent, never guessed. In
 particular a build directory can be stale against its `source_dir`; the
-prototype records the tree as it is at run time and does not detect staleness
+implementation records the tree as it is at run time and does not detect staleness
 (`runner.md` §8 question 2).
 
 ## 4. Store (`bx ingest` + queries)
@@ -405,7 +405,7 @@ The other core tables of schema §4.1, `project`, `source`,
 `workload_variant`, `quantity`, `environment`, `revision`, `series`, and
 `series_point`, are not stored. They are computed from the rows when a query
 asks for them. Schema §4.1 already calls series and series points rebuildable
-indexes; at prototype scale, rebuilding them on every query is cheaper than
+indexes; at this scale, rebuilding them on every query is cheaper than
 keeping them consistent, and "entities auto-create" (schema §5.4) holds in the
 sense that nothing is rejected for being first seen: the first result with a
 quantity defines its unit, and later results are checked against it.
@@ -432,13 +432,13 @@ counted (`ingested 42, duplicate 3, rejected 1 (unit-conflict)`). Re-running
 `bx ingest` on the same directory is a visible no-op (criterion 2).
 
 Series need an identity policy and a list of estimators (schema §4.3, §4.5).
-The prototype has one of each, in code (`benchx/identity.py`), and keeps them
+The implementation has one of each, in code (`benchx/identity.py`), and keeps them
 apart, so adding an estimator never renames the policy:
 
-- **Identity policy** `benchx/prototype-identity/v1` (`benchx/identity.py`):
+- **Identity policy** `benchx/benchx-identity/v1` (`benchx/identity.py`):
   the default policy (`schemas/identity-policy/0.1.0/examples/default.json`)
   with the benchmark's revision ignored. A test checks it against the schema
-  and pins it to its name, so an edit without a new name fails. The prototype has no declared benchmark versions, and
+  and pins it to its name, so an edit without a new name fails. The implementation has no declared benchmark versions, and
   with benchmarks in the subject's checkout the benchmark revision changes on
   every commit, so matching it would split history at every point (schema §1).
   Being ignored, its change is flagged on each point where it happens. A thin
@@ -452,7 +452,7 @@ its roles over the same rows; nothing in the CLI asks for one yet.
 
 A thin result gets the implicit project `local/<hostname>` (schema §4.1).
 Idempotency, unit, and attempt-integrity checks scan the store's bookkeeping
-columns, which is fine at prototype scale; a real deployment would index them.
+columns, which is fine at this scale; a real deployment would index them.
 
 `bx head` shows the store's size and its latest results, newest first, with
 run key, workload, quantity, status, median, revision, project, and labels;
@@ -512,20 +512,20 @@ Per comparison unit (one workload variant and quantity), the method
   (`insufficient-rounds`), when a baseline value is zero, or when the guard
   excluded the unit.
 
-Deterministic quantities are deferred: none of the prototype's quantities is
+Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with
 reason `deterministic-deferred` rather than compared exactly (comparator §4).
 Default
 *k* = 3 and `min_rounds` = 3, overridable per invocation; per-project
 configuration is deferred. Choosing a paired method for run mode is the
-prototype's answer to `comparator.md` §7 question 1, open until reviewed.
+the implementation's answer to `comparator.md` §7 question 1, open until reviewed.
 
 Comparison documents are recomputed on demand and not stored
 (`comparator.md` §5); the store keeps their inputs.
 
 **Measure mode.** `bx compare BASELINE CONTENDER …` runs both sides and then
 compares them; it is the workbench's session loop (`system-decomposition.md`
-§3.4) in the prototype's CLI. It:
+§3.4) in the implementation's CLI. It:
 
 1. checks that both build directories and the suite binary exist, and locates
    each side's source checkout, from `SOURCE_DIR` or the
@@ -562,7 +562,7 @@ Both profiles use one shape: two prepared build directories, one run key, R
 rounds, and `bx compare` in measure mode, which alternates the sides and
 assigns `round` and `slot`. The demo script plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
-and CMake, since benchx builds nothing. `prototype/examples/archery-local`
+and CMake, since benchx builds nothing. `benchx/examples/archery-local`
 shows the other route, where a provider script named in
 `benchx.conf.json` builds and describes the targets and the sides are
 given as `@plain` and `@hardened`.
@@ -589,7 +589,7 @@ re-ingested to show idempotency, and compared again with `--results`; that
 document must equal the one from the local store (criterion 8).
 
 Every `bx run` delivers to the local store, so both shapes' results land in
-the demo project's store (`prototype/examples/demo/store.parquet`), the ad hoc ones as thin results of project
+the demo project's store (`benchx/examples/demo/store.parquet`), the ad hoc ones as thin results of project
 `local/<hostname>`. Run keys carry a timestamp, so successive demo runs add
 rows rather than colliding on `ingest_key`. The store and each series'
 history grow from run to run, and the demo ends with `bx head`.
@@ -598,7 +598,7 @@ history grow from run to run, and the demo ends with `bx head`.
 
 - Two harnesses (pyperf and Google Benchmark, through `bx bench` and `bx compare`) and two target
   kinds (`build`, `working_tree`). The runner builds nothing, ever: the user
-  prepares both sides (`benchmark-environments.md` §2). The prototype applies
+  prepares both sides (`benchmark-environments.md` §2). The implementation applies
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
 - The target-provider hook is minimal: one provider command per project
@@ -610,7 +610,7 @@ history grow from run to run, and the demo ends with `bx head`.
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
 - One identity policy, in code, and two profiles; median, mean, and min are
-  the only estimators the prototype can derive.
+  the only estimators the implementation can derive.
 - The store is one file, rewritten on every ingest that accepts something,
   with no concurrency story beyond the atomic rename; entities and series are
   computed on query, and ingest-time checks are scans, not indexes.
@@ -622,7 +622,7 @@ None of these changes a contract; each is a smaller implementation of one.
 
 ## 8. Implementation notes
 
-The prototype is written in **Python**, chosen on 2026-08-31 after an
+The implementation is written in **Python**, chosen on 2026-08-31 after an
 ecosystem survey against Rust and Go for the most mature libraries on every
 contract-critical need and the fastest iteration while the document formats
 settle:
@@ -644,5 +644,5 @@ cheap.
 
 ## 9. Review checklist
 
-The prototype is correct when the eight criteria in `prototype-scope.md` §3
+The implementation is correct when the eight criteria in `prototype-scope.md` §3
 pass. The demo script performs §6 for both profiles, in both shapes.
