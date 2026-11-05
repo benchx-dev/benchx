@@ -2,6 +2,8 @@
 name = "benchx"
 version = "0.1.0"
 description = "BenchX: a flexible and powerful benchmarking framework"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pyarrow>=19",
@@ -19,7 +21,7 @@ test = ["pytest", "pyperf", "asv_runner"]
 bx = "benchx.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
