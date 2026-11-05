@@ -384,9 +384,10 @@ jobs:
           cache-dependency-glob: benchx/uv.lock
 
       # The script makes two venvs of its own with uv (Python 3.12, the newest with numpy
-      # 1.26.4 wheels) and installs benchx in both, from the checkout that the benchx of the
-      # active environment runs from. So this environment needs benchx in editable mode,
-      # which is also where it reads its schemas from. The venvs bring their own pyperf.
+      # 1.26.4 wheels) and installs benchx in both, from BENCHX_SRC (set on the run step).
+      # Left unset, it takes the checkout from the benchx of the active environment and assumes
+      # that the package sits directly in the project directory, which it does not under src/.
+      # The venvs bring their own pyperf.
       - name: Install benchx
         working-directory: benchx
         run: |
@@ -403,6 +404,8 @@ jobs:
 
       - name: Run the numpy-venvs example
         working-directory: benchx_examples/examples/numpy-venvs
+        env:
+          BENCHX_SRC: ${{ github.workspace }}/benchx
         run: bash ./run.sh
 
       - name: Upload the output
