@@ -1,6 +1,6 @@
 name: e2e examples
 
-# Runs examples from benchx-dev/benchx_examples and prints their output. Four jobs:
+# Runs examples from benchx-dev/benchx_examples and prints their output. Five jobs:
 #
 #   numpy-spin  builds NumPy with spin and benchmarks it:
 #                 track.sh        several revisions, each built and benchmarked
@@ -13,6 +13,9 @@ name: e2e examples
 #   matmul-params  runs one parametrized benchmark, numpy and torch at three sizes, with
 #                 `bx bench`; the quick version from the example's README:
 #                 examples/matmul-params
+#   numpy-venvs  measures the same benchmarks under two numpy versions, each in its own venv,
+#                 with a `bx bench` call per side and round, and compares them:
+#                 examples/numpy-venvs/run.sh
 #
 # Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
 # crashes); the scripts exit 0 even when a revision fails, so read the printed output.
@@ -355,5 +358,58 @@ jobs:
         with:
           name: matmul-params-output
           path: benchx_examples/examples/matmul-params/out
+          if-no-files-found: warn
+          retention-days: 14
+
+  numpy-venvs:
+    name: numpy-venvs (run.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out benchx
+        uses: actions/checkout@v4
+        with:
+          path: benchx
+
+      - name: Clone benchx_examples
+        uses: actions/checkout@v4
+        with:
+          repository: benchx-dev/benchx_examples
+          ref: ${{ inputs.examples_ref || 'main' }}
+          path: benchx_examples
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: benchx/prototype/uv.lock
+
+      # The script makes two venvs of its own with uv (Python 3.12, the newest with numpy
+      # 1.26.4 wheels) and installs benchx in both, from the checkout that the benchx of the
+      # active environment runs from. So this environment needs benchx in editable mode,
+      # which is also where it reads its schemas from. The venvs bring their own pyperf.
+      - name: Install benchx
+        working-directory: benchx/prototype
+        run: |
+          uv python install 3.13
+          uv sync --python 3.13
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "uv: $(uv --version)"
+          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
+          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
+
+      - name: Run the numpy-venvs example
+        working-directory: benchx_examples/examples/numpy-venvs
+        run: bash ./run.sh
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: numpy-venvs-output
+          path: benchx_examples/examples/numpy-venvs/out
           if-no-files-found: warn
           retention-days: 14
