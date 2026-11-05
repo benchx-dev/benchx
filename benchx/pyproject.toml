@@ -1,7 +1,7 @@
 [project]
 name = "benchx"
 version = "0.1.0"
-description = "Implementation of the benchx design docs: runner, Google Benchmark adapter, Parquet store, run-mode comparator"
+description = "BenchX: a flexible and powerful benchmarking framework"
 requires-python = ">=3.11"
 dependencies = [
     "pyarrow>=19",
