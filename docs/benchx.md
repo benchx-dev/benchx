@@ -127,7 +127,7 @@ is a runnable walk-through.
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
 and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
---label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
+--label NAME --baseline VALUE` compares the sides ([UC-04](use-cases/UC-04-cross-env.md)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
 
@@ -217,9 +217,12 @@ every result is pyperf. Results also record the installed project's version
 ## Run it
 
 ```console
-$ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
+$ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
 $ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
 ```
+
+A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
+`pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.
 
 The end-to-end examples that build real software are in
 [benchx_examples](https://github.com/benchx-dev/benchx_examples), and the `e2e`

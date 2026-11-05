@@ -4,7 +4,6 @@ Run before `zensical build` (the docs workflow does; locally: `python tools/gen_
 It writes, into docs/, files that are gitignored and never committed:
 
 - index.md, from the repository README (links to docs/... rewritten);
-- benchx.md, from benchx/README.md;
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
 - schemas/<name>/<version>/schema.json and examples/*.json, so the raw
@@ -25,7 +24,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMAS = ROOT / "schemas"
+SCHEMAS = ROOT / "src" / "benchx" / "schemas"
 DOCS = ROOT / "docs"
 REPO_URL = "https://github.com/benchx-dev/benchx"  # keep in step with repo_url in zensical.toml
 URN = re.compile(r"^urn:benchx:schema:(?P<name>[a-z0-9-]+):(?P<version>[0-9.]+)(?:#(?P<frag>.*))?$")
@@ -399,7 +398,7 @@ class SchemaPage:
         src = f"{self.name}/{self.version}/schema.json"
         links = [f"[schema.json]({src})"]
         if repo_url:
-            links.append(f"[source]({repo_url}/blob/main/schemas/{src})")
+            links.append(f"[source]({repo_url}/blob/main/src/benchx/schemas/{src})")
         out.append(f"`{s.get('$id', '')}` · version {self.version} · " + " · ".join(links))
         if self.older:
             out.append("")
@@ -492,7 +491,7 @@ def rewrite_readme(text: str, strip_prefix: str) -> str:
 
 # --------------------------------------------------------------------------- main
 
-GENERATED = ["index.md", "benchx.md", "schemas"]  # paths under docs/, all gitignored
+GENERATED = ["index.md", "schemas"]  # paths under docs/, all gitignored
 
 
 def main() -> None:
@@ -515,11 +514,6 @@ def main() -> None:
 
     # Landing page from the repository README.
     write("index.md", rewrite_readme((ROOT / "README.md").read_text(), "docs/"))
-
-    # The README of the benchx implementation.
-    readme = ROOT / "benchx" / "README.md"
-    if readme.exists():
-        write("benchx.md", readme.read_text().replace("](../docs/", "]("))
 
     # Schema reference pages and raw documents.
     pages = discover()

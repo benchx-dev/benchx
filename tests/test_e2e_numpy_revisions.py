@@ -58,7 +58,7 @@ PROJECT_FILE_ENTRIES = {"provider", "collectors", "compare"}
 
 
 def missing_project_file_entries():
-    schema = PACKAGE_ROOT.parent / "schemas" / "config" / "0.1.0" / "schema.json"
+    schema = Path(benchx.__file__).resolve().parent / "schemas" / "config" / "0.1.0" / "schema.json"
     present = set(json.loads(schema.read_text())["properties"]) if schema.exists() else set()
     return PROJECT_FILE_ENTRIES - present
 

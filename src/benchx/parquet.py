@@ -17,7 +17,7 @@ _VALIDATOR = catalog.lookup("measurement-result", catalog.MEASUREMENT_RESULT)
 if _VALIDATOR is None:
     raise RuntimeError(
         f"result schema not found under {catalog.SCHEMAS}; "
-        "run from a benchx checkout or set BENCHX_SCHEMAS"
+        "reinstall benchx, or set BENCHX_SCHEMAS to a directory of schemas"
     )
 RESULT_SCHEMA = _VALIDATOR.schema
 

@@ -1,4 +1,4 @@
-"""The schemas in the repository's schemas/ directory, or in $BENCHX_SCHEMAS."""
+"""The schemas shipped inside the package (benchx/schemas), or in $BENCHX_SCHEMAS."""
 
 import json
 import os
@@ -9,8 +9,9 @@ from pathlib import Path
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
+# Package data, so an installed copy finds them just as an editable install does.
 SCHEMAS = Path(
-    os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[3] / "schemas"
+    os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[1] / "schemas"
 )
 
 # The version string each document kind declares in its schema_version. Bump a
