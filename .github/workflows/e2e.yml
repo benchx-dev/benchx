@@ -93,20 +93,20 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/prototype/uv.lock
+          cache-dependency-glob: benchx/benchx/uv.lock
 
       # The scripts run plain `python`, `bx` and `spin`, and hard-code
       # lib/python3.12/site-packages, so this is Python 3.12 on the PATH. The `test`
       # extra is only for pyperf, which the benchmarks need.
       - name: Install benchx on Python 3.12
-        working-directory: benchx/prototype
+        working-directory: benchx/benchx
         run: |
           uv python install 3.12
           uv sync --extra test --python 3.12
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install NumPy's build tools
-        run: uv pip install --python benchx/prototype/.venv/bin/python spin ninja meson-python cython
+        run: uv pip install --python benchx/benchx/.venv/bin/python spin ninja meson-python cython
 
       # The full history and the tags: track.sh checks out v2.4.3 and v2.4.0.
       - name: Clone NumPy
@@ -121,7 +121,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pin"
           cat > "$RUNNER_TEMP/pin/bx" <<EOF
           #!/bin/sh
-          exec taskset -c $BENCH_CPUS $PWD/benchx/prototype/.venv/bin/bx "\$@"
+          exec taskset -c $BENCH_CPUS $PWD/benchx/benchx/.venv/bin/bx "\$@"
           EOF
           chmod +x "$RUNNER_TEMP/pin/bx"
           echo "$RUNNER_TEMP/pin" >> "$GITHUB_PATH"
@@ -200,12 +200,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/prototype/uv.lock
+          cache-dependency-glob: benchx/benchx/uv.lock
 
       # The scripts run plain `python` and `bx`. benchx is installed in editable mode,
       # which is where it reads its schemas from.
       - name: Install benchx
-        working-directory: benchx/prototype
+        working-directory: benchx/benchx
         run: |
           uv python install 3.13
           uv sync --extra test --python 3.13
@@ -261,13 +261,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/prototype/uv.lock
+          cache-dependency-glob: benchx/benchx/uv.lock
 
       # The script runs plain `python` and `bx`, and the workers need pyperf, which the
       # `test` extra brings. benchx is installed in editable mode, which is where it reads
       # its schemas from.
       - name: Install benchx
-        working-directory: benchx/prototype
+        working-directory: benchx/benchx
         run: |
           uv python install 3.13
           uv sync --extra test --python 3.13
@@ -317,12 +317,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/prototype/uv.lock
+          cache-dependency-glob: benchx/benchx/uv.lock
 
       # The workers need pyperf, which the `test` extra brings. benchx is installed in
       # editable mode, which is where it reads its schemas from.
       - name: Install benchx
-        working-directory: benchx/prototype
+        working-directory: benchx/benchx
         run: |
           uv python install 3.13
           uv sync --extra test --python 3.13
@@ -332,8 +332,8 @@ jobs:
       # build is several GB of CUDA libraries that the runner has no use for.
       - name: Install NumPy and PyTorch
         run: |
-          uv pip install --python benchx/prototype/.venv/bin/python numpy
-          uv pip install --python benchx/prototype/.venv/bin/python torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --python benchx/benchx/.venv/bin/python numpy
+          uv pip install --python benchx/benchx/.venv/bin/python torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Show what is under test
         run: |
@@ -381,14 +381,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/prototype/uv.lock
+          cache-dependency-glob: benchx/benchx/uv.lock
 
       # The script makes two venvs of its own with uv (Python 3.12, the newest with numpy
       # 1.26.4 wheels) and installs benchx in both, from the checkout that the benchx of the
       # active environment runs from. So this environment needs benchx in editable mode,
       # which is also where it reads its schemas from. The venvs bring their own pyperf.
       - name: Install benchx
-        working-directory: benchx/prototype
+        working-directory: benchx/benchx
         run: |
           uv python install 3.13
           uv sync --python 3.13
