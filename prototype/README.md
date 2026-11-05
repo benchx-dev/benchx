@@ -27,6 +27,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
          [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
@@ -87,6 +88,12 @@ functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
 `examples/pyperf-bench` is a runnable walk-through.
+
+Environments that cannot share a process, such as two venvs with different numpy versions, are
+measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
+and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
+--label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
+`examples/numpy-venvs` is the worked example, with a shell script that drives it.
 
 `bx bench PATH --adapter asv` runs an [asv](https://asv.readthedocs.io) benchmark suite
 unchanged, reading asv's benchmark format as a language and timing it with pyperf;
@@ -240,6 +247,7 @@ examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
 examples/demo        the demo's project root: its benchx.conf.json, and its persistent store
 examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
+examples/numpy-venvs  UC-04 with two venvs and two numpy versions, driven by run.sh (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
                      comparator's invariants and method on hand-built results;

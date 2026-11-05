@@ -61,3 +61,12 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: uv run --extra test --python ${{ matrix.python-version }} bash examples/archery-local/run.sh
+
+      # Makes two venvs of its own with uv (Python 3.12, the newest with numpy 1.26.4 wheels), so
+      # the matrix Python only runs the outer script and one cell is enough. Needs network access.
+      - name: Run the numpy-venvs example
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        shell: bash
+        run: >-
+          uv run --extra test --python ${{ matrix.python-version }}
+          bash examples/numpy-venvs/run.sh
