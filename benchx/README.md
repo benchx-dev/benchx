@@ -1,8 +1,28 @@
-# benchx
+# BenchX
 
-An implementation of [`docs/design/prototype-design.md`](../docs/design/prototype-design.md):
-the slice in [`prototype-scope.md`](../docs/design/prototype-scope.md), from a
-work order to a comparison document.
+BenchX is a powerful and flexible benchmarking framework which aims to address multiple
+usage scenarios, from running one-off in-development benchmarks to tracking performance
+over history of large projects.
+
+The project is grounded in [user stories](https://benchx-dev.github.io/benchx/user_stories/)
+collected from experience of multiple projects. We aim to address various pain points
+we faced and worked around while working on Apache Arrow, NumPy, SciPy, Pandas
+and related projects, so that `benchx` becomes the go-to solution for performance benchmarking
+across the community.
+
+We welcome contributions of all sorts: add a user story, tell us about your use case, try
+`benchx` on your workflow/project, open an issue if you found a rough edge,
+implement a missing feature.
+
+Documentation: https://benchx-dev.github.io/benchx/
+Issue tracker: https://github.com/benchx-dev/benchx/issues/
+A collection of worked examples: https://github.com/benchx-dev/benchx_examples
+
+
+# CLI API
+
+At a glance:
+
 
 ```
 # Execute benchmarks:
@@ -46,6 +66,9 @@ bx validate <file>… [--kind KIND]        # every problem in each document, by 
 bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
 bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
+
+# Technical details
+
 
 **One project file.** `benchx.conf.json` in the project root (found by walking up from the
 working directory; its directory is the root) says how the project is measured: the
@@ -205,37 +228,3 @@ profiles on a small Google Benchmark suite, with real CMake builds (it needs cma
 C++ compiler, and network access once). It prints every command before running it,
 as you would type it, so it doubles as a walkthrough.
 
-## Layout
-
-```
-benchx/
-  core/              reading and checking documents; problems are returned, not raised
-    loader.py        strict JSON: duplicate keys, non-finite and inexact numbers
-    catalog.py       the schemas, by kind and version
-    validation.py    which schema a document declares, and whether it fits
-    rules.py         what the result and work-order schemas cannot express
-    errors.py        every problem, with its schema §5.4 rejection code
-    hashing.py       canonical form, hashes, order reference
-  snapshot.py        what the runner records (benchmark-environments.md §3)
-  adapters/gbench.py Google Benchmark, driving and translating halves
-  adapters/pyperf.py pyperf, both halves, for Python functions
-  adapters/asv.py    asv's benchmark format, timed by pyperf (bx bench --adapter asv)
-  adapters/asv_runtime.py  asv's discovery and setup semantics, standalone, copied beside each driver
-  bench.py           bx bench: the MODULE.py and asv shorthands, and the results table
-  config.py          benchx.conf.json: finding it, validating it, picking a value, the template
-  runner.py          one work order in, results out
-  session.py         the session loop: alternate two targets over rounds, then compare
-  target.py          target descriptions: the provider call, the sidecar, the declared text
-  projection.py      projections: roles plus an axis, the identity policy the default one (schema §4.3)
-  identity.py        the identity policy and series points (schema §4.3, §4.5)
-  parquet.py         the store's row: #30's columns plus derived ones
-  store.py           the single-file Parquet store and the ingest contract (schema §5.4)
-  compare.py         run mode over a profile's projection, comparison document (comparator.md)
-  cli.py             bx (compare has a read mode and a measure mode)
-../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
-tests/               test_prototype.py: the success criteria and the runner and store
-                     rules, on a fake Google Benchmark binary; test_comparator.py: the
-                     comparator's invariants and method on hand-built results;
-                     test_loader, test_validation, test_rules, test_pipeline,
-                     test_validate: core and `bx validate`, on the schema's examples
-```
