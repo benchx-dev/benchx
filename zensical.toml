@@ -1,11 +1,11 @@
 # Documentation site, built with Zensical (https://zensical.org).
 #
-#   python tools/gen_docs.py        # generate docs/index.md, docs/benchx.md, docs/schemas/
+#   python tools/gen_docs.py        # generate docs/index.md and docs/schemas/
 #   zensical serve                  # preview at http://127.0.0.1:8000
 #   zensical build --strict --clean # what CI runs
 #
 # The generated pages are gitignored; run the generator again after changing
-# a schema, the README, or the benchx README.
+# a schema or the README.
 
 [project]
 site_name = "benchx"
@@ -48,8 +48,9 @@ nav = [
     { "Target provider request" = "schemas/target-provider-request.md" },
     { "Environment policy" = "schemas/environment-policy.md" },
     { "Environment identity" = "schemas/env-identity.md" },
-    { "Observed-context record" = "schemas/observed-context-record.md" },
+    { "Identity policy" = "schemas/identity-policy.md" },
     { "Comparison document" = "schemas/comparison-document.md" },
+    { "Project configuration" = "schemas/config.md" },
   ] },
   { "Use cases" = [
     { "Overview" = "use-cases/README.md" },

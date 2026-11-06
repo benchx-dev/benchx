@@ -1,28 +1,32 @@
-# benchx
+# BenchX
 
-An implementation of [`docs/design/prototype-design.md`](../docs/design/prototype-design.md):
-the slice in [`prototype-scope.md`](../docs/design/prototype-scope.md), from a
-work order to a comparison document.
+BenchX is a powerful and flexible benchmarking framework which aims to address multiple
+usage scenarios, from running one-off in-development benchmarks to tracking performance
+over history of large projects.
+
+The project is grounded in [user stories](https://benchx-dev.github.io/benchx/user_stories/)
+collected from experience of multiple projects. We aim to address various pain points
+we faced and worked around while working on Apache Arrow, NumPy, SciPy, Pandas
+and related projects, so that `benchx` becomes the go-to solution for performance benchmarking
+across the community.
+
+We welcome contributions of all sorts: add a user story, tell us about your use case, try
+`benchx` on your workflow/project, open an issue if you found a rough edge,
+implement a missing feature.
+
+- Documentation: <https://benchx-dev.github.io/benchx/>
+- Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
+- A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
+
+
+# CLI API
+
+At a glance:
+
 
 ```
-bx run <order.json> [--out DIR] [--no-ingest]
-                                         # runner + Google Benchmark adapter → result files → local store
-bx ingest <dir|file>                     # result files and work orders → the local store
-bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query); dirty ones are marked
-bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
-bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--json]
-                                         # read mode: compare results already measured
-bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
-bx compare BASELINE CONTENDER --profile revisions|environments
-           [--adapter pyperf|google-benchmark]                  # default pyperf
-           --suite NAME [--filter REGEX] [--quantity wall-time]
-           --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
-           [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
-                                         # measure mode: run both sides, then compare
-bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
+# Execute benchmarks:
+
 bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compare: one order, a table
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
@@ -33,9 +37,38 @@ bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
 bx bench PATH --adapter asv [CASE …] [--filter REGEX] [--tree DIR] [...]
                                           # shorthand: an asv benchmark suite, timed by pyperf
+
+# Comparisons:
+
+# measure mode: run both sides, then compare
+bx compare BASELINE CONTENDER --profile revisions|environments
+           [--adapter pyperf|google-benchmark]                  # default pyperf
+           --suite NAME [--filter REGEX] [--quantity wall-time]
+           --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
+           [--project P] [--label NAME=BASE,CONTENDER]
+           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
+
+# read mode: compare results already measured
+bx compare --run KEY --profile revisions|environments --baseline VALUE
+           [--label NAME] [--results DIR] [--k 3] [--json]
+
+# low-level command: run a handwritten work oreder
+bx run <order.json> [--out DIR] [--no-ingest]
+                                         # runner + Google Benchmark adapter → result files → local store
+
+bx ingest <dir|file>                     # result files and work orders → the local store
+bx series [--workload … --quantity …]    # list series
+bx history <series>                      # one series' points (a query); dirty ones are marked
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
+
+bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
+bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
 bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
 bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
 ```
+
+# Technical details
+
 
 **One project file.** `benchx.conf.json` in the project root (found by walking up from the
 working directory; its directory is the root) says how the project is measured: the
@@ -94,7 +127,7 @@ is a runnable walk-through.
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
 and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
---label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
+--label NAME --baseline VALUE` compares the sides ([UC-04](use-cases/UC-04-cross-env.md)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
 
@@ -184,9 +217,12 @@ every result is pyperf. Results also record the installed project's version
 ## Run it
 
 ```console
-$ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
+$ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
 $ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
 ```
+
+A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
+`pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.
 
 The end-to-end examples that build real software are in
 [benchx_examples](https://github.com/benchx-dev/benchx_examples), and the `e2e`
@@ -195,37 +231,3 @@ profiles on a small Google Benchmark suite, with real CMake builds (it needs cma
 C++ compiler, and network access once). It prints every command before running it,
 as you would type it, so it doubles as a walkthrough.
 
-## Layout
-
-```
-benchx/
-  core/              reading and checking documents; problems are returned, not raised
-    loader.py        strict JSON: duplicate keys, non-finite and inexact numbers
-    catalog.py       the schemas, by kind and version
-    validation.py    which schema a document declares, and whether it fits
-    rules.py         what the result and work-order schemas cannot express
-    errors.py        every problem, with its schema §5.4 rejection code
-    hashing.py       canonical form, hashes, order reference
-  snapshot.py        what the runner records (benchmark-environments.md §3)
-  adapters/gbench.py Google Benchmark, driving and translating halves
-  adapters/pyperf.py pyperf, both halves, for Python functions
-  adapters/asv.py    asv's benchmark format, timed by pyperf (bx bench --adapter asv)
-  adapters/asv_runtime.py  asv's discovery and setup semantics, standalone, copied beside each driver
-  bench.py           bx bench: the MODULE.py and asv shorthands, and the results table
-  config.py          benchx.conf.json: finding it, validating it, picking a value, the template
-  runner.py          one work order in, results out
-  session.py         the session loop: alternate two targets over rounds, then compare
-  target.py          target descriptions: the provider call, the sidecar, the declared text
-  projection.py      projections: roles plus an axis, the identity policy the default one (schema §4.3)
-  identity.py        the identity policy and series points (schema §4.3, §4.5)
-  parquet.py         the store's row: #30's columns plus derived ones
-  store.py           the single-file Parquet store and the ingest contract (schema §5.4)
-  compare.py         run mode over a profile's projection, comparison document (comparator.md)
-  cli.py             bx (compare has a read mode and a measure mode)
-../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
-tests/               test_prototype.py: the success criteria and the runner and store
-                     rules, on a fake Google Benchmark binary; test_comparator.py: the
-                     comparator's invariants and method on hand-built results;
-                     test_loader, test_validation, test_rules, test_pipeline,
-                     test_validate: core and `bx validate`, on the schema's examples
-```

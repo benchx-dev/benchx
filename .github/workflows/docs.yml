@@ -5,21 +5,19 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "schemas/**"
+      - "src/benchx/schemas/**"
       - "tools/gen_docs.py"
       - "zensical.toml"
       - "README.md"
-      - "benchx/README.md"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
     paths:
       - "docs/**"
-      - "schemas/**"
+      - "src/benchx/schemas/**"
       - "tools/gen_docs.py"
       - "zensical.toml"
       - "README.md"
-      - "benchx/README.md"
       - ".github/workflows/docs.yml"
 
 concurrency:

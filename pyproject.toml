@@ -1,0 +1,44 @@
+[project]
+name = "benchx"
+version = "0.1.0"
+description = "BenchX: a flexible and powerful benchmarking framework"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "pyarrow>=19",
+    # format-nongpl makes `format: uri` and `format: date-time` actually checked.
+    "jsonschema[format-nongpl]>=4.18",
+    "jsonpointer>=2.0",
+    "referencing",
+    "rfc8785",
+]
+readme = "docs/benchx.md"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python"
+]
+
+[project.urls]
+Documentation = "https://benchx-dev.github.io/benchx/benchx/"
+Repository = "https://github.com/benchx-dev/benchx"
+
+[project.optional-dependencies]
+test = ["pytest", "pyperf", "asv_runner"]
+
+[project.scripts]
+bx = "benchx.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/benchx"]
+
+# The test suite ships inside the package, as benchx/tests, so an installed benchx can test
+# itself: `python -m pytest --pyargs benchx`. Not as a top-level `tests` package, which would
+# collide with other projects' in site-packages. Editable installs do not get it: their
+# package is the source directory, and the checkout has tests/.
+[tool.hatch.build.targets.wheel.force-include]
+"tests" = "benchx/tests"

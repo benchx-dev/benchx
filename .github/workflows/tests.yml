@@ -4,14 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - "benchx/**"
-      - "schemas/**"
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/**"
   pull_request:
     branches: [main]
     paths:
-      - "benchx/**"
-      - "schemas/**"
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/**"
 
 concurrency:
@@ -30,16 +34,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.13"]
-    defaults:
-      run:
-        working-directory: benchx
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: benchx/uv.lock
+          cache-dependency-glob: uv.lock
 
       - name: Install Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -49,3 +50,28 @@ jobs:
 
       - name: Run tests
         run: uv run --extra test --python ${{ matrix.python-version }} python -m pytest tests -ra
+
+  # An editable install finds the schemas next to the source, so the matrix above cannot
+  # tell whether a wheel carries them. This installs the built wheel (not editable) into a
+  # clean environment, runs `bx` from outside the checkout, and runs the test suite that the
+  # wheel itself ships (benchx/tests), so it checks the wheel's contents as well as its code.
+  wheel:
+    name: wheel / py3.13
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build the wheel
+        run: uv build --wheel
+
+      - name: Install the wheel into a clean environment and test it
+        run: |
+          uv venv --python 3.13 "$RUNNER_TEMP/venv"
+          source "$RUNNER_TEMP/venv/bin/activate"
+          uv pip install "$(ls dist/*.whl)[test]"
+          # Away from the checkout, so that nothing can import it instead of the installed package.
+          cd "$RUNNER_TEMP"
+          bx --help
+          python -m pytest --pyargs benchx -ra
