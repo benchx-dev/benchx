@@ -6,7 +6,8 @@ name: release
 # The package is tested before anything is uploaded. Conda packages are not built here: they
 # come from the benchx feedstock on conda-forge, which follows the releases on PyPI.
 #
-# A pull request that changes the packaging runs the build job and uploads nothing.
+# Only a tag publishes. A pull request that changes the packaging or the version runs the build
+# job and uploads nothing.
 #
 # This needs, on GitHub, the pypi environment with its required reviewers, and on PyPI a trusted
 # publisher for this file and that environment. The actions are pinned to commits since they
@@ -20,6 +21,7 @@ on:
     paths:
       - ".github/workflows/release.yml"
       - "pyproject.toml"
+      - "src/benchx/__init__.py"
 
 permissions:
   contents: read

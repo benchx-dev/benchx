@@ -20,9 +20,10 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
     $ git push upstream v0.1.0
     ```
 
-4. **Approve the `publish-pypi` job** when the
-   [workflow run](https://github.com/benchx-dev/benchx/actions/workflows/release.yml) asks. Any
-   required reviewer of the `pypi` environment can approve it, including whoever pushed the tag.
+4. **Approve the `publish-pypi` job.** Once the tests pass, the
+   [workflow run](https://github.com/benchx-dev/benchx/actions/workflows/release.yml) waits and
+   shows a "Review deployments" button. A required reviewer of the `pypi` environment other than
+   whoever pushed the tag has to approve it, so a release takes two people.
 5. **Check the result.** The run should be green, with the version on
    [PyPI](https://pypi.org/project/benchx/) and in the
    [GitHub releases](https://github.com/benchx-dev/benchx/releases).
@@ -39,10 +40,13 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
 7. **Merge the conda-forge update.** Conda packages come from the benchx feedstock on
    conda-forge, not from this repository. Once that feedstock exists, conda-forge's bot opens a
    pull request on it after a new version reaches PyPI; review and merge that pull request.
+8. **Start the next development version.** In a pull request, set `__version__` to the next
+   version with a `.dev0` suffix: after `0.1.0`, that is `0.2.0.dev0`. Results record this version,
+   so without this step, results from `main` would claim to come from the release.
 
 ## Pre-releases
 
-A version such as `0.1.0rc1`, tagged `v0.1.0rc1`, follows the same steps. It is marked as a
+A version such as `0.1.0rc1`, tagged `v0.1.0rc1`, follows steps 1 to 6. It is marked as a
 pre-release on GitHub, and `pip install benchx` skips it unless the version is named or
 `--pre` is given.
 
