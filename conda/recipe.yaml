@@ -1,0 +1,63 @@
+# Built by .github/workflows/release.yml from the sdist, so that conda and PyPI ship the
+# same source. To build it by hand, after `uv build`:
+#
+#   BENCHX_VERSION=<version> BENCHX_SDIST=$PWD/dist/benchx-<version>.tar.gz \
+#     rattler-build build --recipe conda/recipe.yaml -c conda-forge
+
+context:
+  version: ${{ env.get("BENCHX_VERSION") }}
+  python_min: "3.11"
+
+package:
+  name: benchx
+  version: ${{ version }}
+
+source:
+  path: ${{ env.get("BENCHX_SDIST") }}
+
+build:
+  number: 0
+  noarch: python
+  script: python -m pip install . --no-deps --no-build-isolation -vv
+  python:
+    entry_points:
+      - bx = benchx.cli:main
+
+requirements:
+  host:
+    - python ${{ python_min }}.*
+    - pip
+    - hatchling >=1.26
+  run:
+    - python >=${{ python_min }}
+    - pyarrow >=19
+    # conda-forge's name for jsonschema[format-nongpl]
+    - jsonschema-with-format-nongpl >=4.18
+    - jsonpointer >=2.0
+    - referencing
+    - rfc8785
+
+tests:
+  - python:
+      imports:
+        - benchx
+        - benchx.cli
+      pip_check: true
+      python_version: ${{ python_min }}.*
+  - requirements:
+      run:
+        - python ${{ python_min }}.*
+        - pytest
+        - pyperf
+        - asv_runner
+    script:
+      - bx --help
+      - python -m pytest --pyargs benchx -ra
+
+about:
+  homepage: https://github.com/benchx-dev/benchx
+  repository: https://github.com/benchx-dev/benchx
+  documentation: https://benchx-dev.github.io/benchx/benchx/
+  summary: "BenchX: a flexible and powerful benchmarking framework"
+  license: Apache-2.0
+  license_file: LICENSE
