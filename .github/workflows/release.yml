@@ -1,19 +1,16 @@
 name: release
 
-# Publishes benchx to PyPI and anaconda.org, and creates the GitHub release. To release, set
-# __version__ in src/benchx/__init__.py, merge that, and push the tag v<version> from main:
+# Publishes benchx to PyPI and creates the GitHub release, when the tag v<version> is pushed.
+# docs/releasing.md is the checklist. A tag such as v0.1.0rc1 makes a pre-release.
 #
-#   v0.1.0     goes to PyPI and to the main label on anaconda.org
-#   v0.1.0rc1  goes to PyPI as a pre-release and to the rc label on anaconda.org
-#
-# Both packages are built and tested before anything is uploaded. PyPI versions cannot be
-# reused, so PyPI goes first; if the anaconda.org upload fails, re-run that job.
+# The conda job publishes nothing: it checks that the package still builds for conda, and tests
+# it on the oldest supported Python. Everything is tested before anything is uploaded.
 #
 # A pull request that changes the packaging runs the two build jobs and uploads nothing.
 #
-# This needs, on GitHub, the environments below with their required reviewers, the secret
-# ANACONDA_API_KEY in the anaconda environment, and on PyPI a trusted publisher for this file
-# and the pypi environment. The actions are pinned to commits since they handle the uploads.
+# This needs, on GitHub, the pypi environment with its required reviewers, and on PyPI a trusted
+# publisher for this file and that environment. The actions are pinned to commits since they
+# handle the uploads.
 
 on:
   push:
@@ -112,15 +109,9 @@ jobs:
           export BENCHX_SDIST="$PWD/dist/benchx-$BENCHX_VERSION.tar.gz"
           rattler-build build --recipe conda/recipe.yaml --output-dir conda-output -c conda-forge
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: conda
-          path: conda-output/noarch/*.conda
-          if-no-files-found: error
-
   publish-pypi:
     needs: [build, conda]
-    # Also what keeps the jobs after this one off pull requests and forks: they need this one.
+    # Also what keeps the job after this one off pull requests and forks: it needs this one.
     if: github.repository == 'benchx-dev/benchx' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     environment:
@@ -136,40 +127,16 @@ jobs:
 
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
-  publish-conda:
-    needs: [build, publish-pypi]
-    runs-on: ubuntu-latest
-    environment:
-      name: anaconda
-      url: https://anaconda.org/BenchX/benchx
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: conda
-          path: conda-packages
-
-      - uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
-        with:
-          environment-name: rattler-build
-          create-args: -c conda-forge rattler-build=0.80.0
-
-      - name: Upload to anaconda.org
-        shell: bash -el {0}
-        env:
-          ANACONDA_API_KEY: ${{ secrets.ANACONDA_API_KEY }}
-          LABEL: ${{ needs.build.outputs.prerelease == 'true' && 'rc' || 'main' }}
-        run: rattler-build upload anaconda --owner BenchX --channel "$LABEL" conda-packages/*.conda
-
   github-release:
-    needs: [build, publish-pypi, publish-conda]
+    needs: [build, publish-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: dist
           path: release-files
-          merge-multiple: true
 
       - name: Create the release
         env:

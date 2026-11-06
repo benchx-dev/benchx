@@ -1,5 +1,5 @@
-# Built by .github/workflows/release.yml from the sdist, so that conda and PyPI ship the
-# same source. To build it by hand, after `uv build`:
+# Built and tested from the sdist by .github/workflows/release.yml, which does not publish it.
+# To build it by hand, after `uv build`:
 #
 #   BENCHX_VERSION=<version> BENCHX_SDIST=$PWD/dist/benchx-<version>.tar.gz \
 #     rattler-build build --recipe conda/recipe.yaml -c conda-forge

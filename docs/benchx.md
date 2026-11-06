@@ -218,7 +218,6 @@ every result is pyperf. Results also record the installed project's version
 
 ```console
 $ pip install benchx
-$ conda install -c BenchX -c conda-forge benchx   # its dependencies are on conda-forge
 ```
 
 ## Run it
