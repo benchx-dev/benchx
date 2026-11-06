@@ -25,13 +25,25 @@ lost.
 
 ## Grounded in user stories
 
-To make sure the schema and the components serve real needs, we are collecting
-user stories from multiple projects — who benchmarks,
-what they do today, where it hurts, what must not break. We surveyed Apache Arrow's
+To make sure the schema and the components serve real needs, started by collecting
+[user stories](https://benchx-dev.github.io/benchx/user_stories/) from multiple projects
+-- who benchmarks, what they do today, where it hurts, what must not break.
+We surveyed Apache Arrow's
 continuous benchmarking setup, NumPy, SciPy, Pandas, and several related projects from
 the data science/numerical computing ecosystem.
 The stories drive which components exist and what each must do; the schema must
 allow all of them.
+
+## BenchX usage and development
+
+We welcome contributions of all sorts: add a user story, tell us about your use case, try
+`benchx` on your workflow/project, open an issue if you found a rough edge,
+implement a missing feature.
+
+- Documentation: <https://benchx-dev.github.io/benchx/>
+- Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
+- A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
+
 
 ## Contents
 

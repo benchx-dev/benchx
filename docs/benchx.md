@@ -14,9 +14,9 @@ We welcome contributions of all sorts: add a user story, tell us about your use 
 `benchx` on your workflow/project, open an issue if you found a rough edge,
 implement a missing feature.
 
-Documentation: https://benchx-dev.github.io/benchx/
-Issue tracker: https://github.com/benchx-dev/benchx/issues/
-A collection of worked examples: https://github.com/benchx-dev/benchx_examples
+- Documentation: <https://benchx-dev.github.io/benchx/>
+- Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
+- A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
 
 
 # CLI API
