@@ -19,6 +19,15 @@ implement a missing feature.
 - A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
 
 
+# Install
+
+Install from [PyPI](https://pypi.org/project/benchx/):
+
+```console
+$ pip install benchx
+```
+
+
 # CLI API
 
 At a glance:
@@ -213,12 +222,6 @@ every result is pyperf. Results also record the installed project's version
   `--label` gives. `--results` compares result files through a throwaway
   store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
-
-## Install
-
-```console
-$ pip install benchx
-```
 
 ## Run it
 

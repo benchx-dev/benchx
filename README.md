@@ -36,6 +36,8 @@ allow all of them.
 
 ## BenchX usage and development
 
+Install with `pip install benchx` ([PyPI](https://pypi.org/project/benchx/)).
+
 We welcome contributions of all sorts: add a user story, tell us about your use case, try
 `benchx` on your workflow/project, open an issue if you found a rough edge,
 implement a missing feature.
