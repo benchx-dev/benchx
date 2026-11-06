@@ -6,4 +6,4 @@ identity, parquet, store, compare, session (the workbench's loop over runner
 and comparator).
 """
 
-__version__ = "0.1.0"
+__version__ = "v0.1.0rc0"
