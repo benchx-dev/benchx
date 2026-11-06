@@ -48,9 +48,13 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--project P] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
 
+# measure mode, one target: alternate the two values of a benchmark parameter
+bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
+           [--vary NAME] [--baseline VALUE] [--filter REGEX] [...]  # the options above, except --label
+
 # read mode: compare results already measured
-bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--json]
+bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json]
 
 # low-level command: run a handwritten work oreder
 bx run <order.json> [--out DIR] [--no-ingest]
@@ -84,8 +88,8 @@ pyperf and for Google Benchmark. The store and the results directory are left ou
 measured tree's identity when they sit inside it. `.benchx/setup.json` (declared
 environment facts) is a separate file, written by whoever prepares an environment.
 
-Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
-select measure mode and `--run` selects read mode; mixing them is an error.
+Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets (one for
+`--profile variants`) select measure mode and `--run` selects read mode; mixing them is an error.
 
 `@CONFIG` asks the project's **target provider**, the command named by `provider.command`
 in `benchx.conf.json` (it runs with the project root as its working directory). The provider speaks the contract of
@@ -130,6 +134,39 @@ and `--slot K` place each call in the session, and `bx compare --run KEY --profi
 --label NAME --baseline VALUE` compares the sides ([UC-04](https://benchx-dev.github.io/benchx/use-cases/UC-04-cross-env/)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
+
+Two functions of one benchmark ([UC-02](https://benchx-dev.github.io/benchx/use-cases/UC-02-variants/)) are the two values of
+one parameter, declared as pyperf and asv benchmarks declare theirs. Build the data once, outside the
+function (at module level, or behind `functools.cache`), because pyperf times the whole body:
+
+```python
+IMPLS = {"baseline": pandas_native_truncate, "variant": pandas_via_narwhals_truncate}
+
+def bench_truncate(role):
+    IMPLS[role](data())
+
+bench_truncate.params = ["baseline", "variant"]
+bench_truncate.param_names = ["role"]
+```
+
+One command alternates the two values over the rounds and compares them (`adapter.name` in
+`benchx.conf.json` makes `--adapter` optional):
+
+```console
+$ bx compare . --profile variants --adapter pyperf --suite bench_suite.py --rounds 5
+```
+
+The values are recorded as `repr()` strings. The baseline is the first declared value, and
+`--baseline "'variant'"` swaps the sides (spelled as recorded, quotes included). `--vary NAME`
+names the parameter and is needed only when the selected benchmarks have more than one: every
+combination of the others is then its own unit (`bench_truncate [size=1000]`), and `--filter`
+narrows the benchmarks. A benchmark without the parameter runs on neither side, and a failed
+attempt on either side makes its unit indeterminate (`side-failed`). The verdict is the
+comparator's noise-aware one; there is no tolerance flag yet. As for UC-04, the loop can be the
+caller's: one `bx bench` call per value (a case name such as `"bench_truncate('baseline')"`, or
+`--filter "'baseline'"`) with `--run-key`, `--round` and `--slot`, then `bx compare --run KEY
+--profile variants --baseline "'baseline'"`. One `bx bench` call that runs both values is not an
+alternating run, and the comparison says so.
 
 `bx bench PATH --adapter asv` runs an [asv](https://asv.readthedocs.io) benchmark suite
 unchanged, reading asv's benchmark format as a language and timing it with pyperf;
@@ -199,9 +236,11 @@ every result is pyperf. Results also record the installed project's version
   are not clean), writes one order per side and
   round, alternates them over the rounds, delivers every result to the local
   store, and hands the run to the comparator. It builds nothing: both build
-  directories must already exist.
-- **The comparator** (`bx compare --run`) runs in run mode for the `revisions` and
-  `environments` profiles, each a projection built in code from the identity
+  directories must already exist. For `variants` it has one target: it lists
+  the cases once, splits them by the two values of one parameter, and writes
+  one order per value and round.
+- **The comparator** (`bx compare --run`) runs in run mode for the `revisions`,
+  `environments` and `variants` profiles, each a projection built in code from the identity
   policy (`benchx/compare.py`): the axis tells the sides apart, everything the
   policy matches must agree, and it checks the profile's invariants (`revisions` also
   requires one tree id per side and, for a benchmark recorded apart from the
@@ -210,7 +249,9 @@ every result is pyperf. Results also record the installed project's version
   sides by round, and applies `benchx/paired-relative/v1` (effect = mean
   relative paired difference, noise = its standard error, change when
   |effect| > *k* × noise). `environments` names its sides by the label
-  `--label` gives. `--results` compares result files through a throwaway
+  `--label` gives, and `variants` by the two values of one workload parameter
+  (`--vary`); under `variants` a failed attempt on either side fails its unit
+  (`side-failed`). `--results` compares result files through a throwaway
   store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
 
@@ -224,8 +265,17 @@ $ pip install benchx
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
-$ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
 ```
+
+`tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
+`spin` and compares two tags in one `bx compare`. It is skipped unless
+`BENCHX_E2E_NUMPY` (a numpy git checkout) and `BENCHX_E2E_EXAMPLE` (the
+`numpy-revisions` example directory) are set and `spin` is on the PATH; it also
+needs the project-file entries of PR #65 and PR #71. `BENCHX_E2E_WORKTREES`
+keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
+`BENCHX_E2E_SPIN_EXAMPLE` (the `numpy-spin` example directory) adds a single-run
+scenario, and the test's docstring has the rest.
 
 A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
 `pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.

@@ -56,6 +56,18 @@ def combination(values, index):
     return next(itertools.islice(itertools.product(*values), index, index + 1))
 
 
+def _search_text(name, combo) -> str:
+    """The text a case filter is searched in for one combination: `name(p0, p1)`."""
+    return f"{name}({', '.join(combo)})"
+
+
+def search_name(name, ids, index) -> str:
+    """The text a case filter is searched in: `name(p0, p1)` for the `index`-th combination of a
+    parametrized benchmark (`ids` are its value strings, one list per parameter), else the name.
+    Selecting a case by this text, exactly, is how a caller picks that one case (see `expand`)."""
+    return name if index is None else _search_text(name, combination(ids, index))
+
+
 def expand(name, ids, case_filter):
     """The cases of one benchmark that `case_filter` (a regex, or None for all) selects, as
     (case id, combination index) pairs; the index is None for a benchmark without parameters.
@@ -68,7 +80,7 @@ def expand(name, ids, case_filter):
     if not ids:
         return [(name, None)] if not case_filter or re.search(case_filter, name) else []
     return [(f"{name}-{i}", i) for i, combo in enumerate(itertools.product(*ids))
-            if not case_filter or re.search(case_filter, f"{name}({', '.join(combo)})")]
+            if not case_filter or re.search(case_filter, _search_text(name, combo))]
 
 
 def matches_name_only(name, ids, case_filter) -> bool:

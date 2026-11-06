@@ -1,5 +1,6 @@
 """benchx_params: asv's parameter conventions, shared by the adapters whose benchmarks take them."""
 
+import re
 from pathlib import Path
 
 from benchx.adapters import asv_runtime, base, benchx_params as params
@@ -86,3 +87,19 @@ def test_the_note_names_the_benchmarks_it_means():
     note = base.name_only_note(["a", "b", "c", "d"])
     assert "(a, b, c)" in note  # three at most
     assert "name(p0, p1)" in note
+
+
+def test_search_name_is_exactly_what_expand_searches():
+    """The session picks a case by this text, and the runner expands its filter against the same text."""
+    one = [["'a'", "'b'"]]
+    two = [["'a'", "'b'"], ["1", "2"]]
+    dupes = [["1 (0)", "1 (1)"], ["'x'"]]
+    assert params.search_name("f", one, 1) == "f('b')"
+    assert params.search_name("f", two, 3) == "f('b', 2)"
+    assert params.search_name("f", dupes, 1) == "f(1 (1), 'x')"
+    assert params.search_name("f", [], None) == "f"  # a benchmark without parameters
+    for ids in (one, two, dupes):
+        for case, index in params.expand("f", ids, None):
+            exactly = "^" + re.escape(params.search_name("f", ids, index)) + "$"
+            assert params.expand("f", ids, exactly) == [(case, index)]
+    assert params.expand("g", [], "^" + re.escape(params.search_name("g", [], None)) + "$") == [("g", None)]

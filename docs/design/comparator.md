@@ -111,6 +111,15 @@ Before computing a verdict, the comparator checks, in both modes, that:
 - the evidence is enough for the configured method, or the method declares a
   provisional rule that applies.
 
+In run mode the status rule belongs to the profile. Under `variants` it is
+strict (UC-02 §10): a unit with an attempt of status `partial`, `censored` or
+`error`, on either side, is indeterminate with reason `side-failed`, whatever
+the other rounds show. Otherwise a variant that times out in the slow rounds is
+judged on the fast ones. The other profiles drop the failed attempt's pair and
+keep the verdict from the rest, and a `skipped` attempt is dropped in every
+profile. The schema's §5.5 table is not touched, since this is a status rule,
+not an invariant.
+
 In history mode it additionally checks that:
 
 - the target and every reference point have the same series fingerprint;
@@ -124,9 +133,9 @@ In history mode it additionally checks that:
 In run mode it additionally checks the profile's invariants over the run (schema
 §5.5): the two sides differ only in the varying coordinate, attempt counts per
 side are equal, and sides alternate by `procedure.slot`; under `revisions`,
-that each side has exactly one tree id and the two differ, and that a
-separately recorded benchmark has one `benchmark_tree` across both sides and
-all rounds (`one-benchmark-tree`, schema §5.5). A side that is not clean does
+that each side has exactly one tree id and the two differ; under `revisions`
+and `variants`, that a separately recorded benchmark has one `benchmark_tree`
+across both sides and all rounds (`one-benchmark-tree`, schema §5.5). A side that is not clean does
 not fail the run; it makes the comparison local-only (UC-03 §10). A run that
 fails an invariant is not compared: the comparison document records the failed invariant
 and contains no verdicts for the units it affects.

@@ -93,7 +93,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "profile": { "enum": ["revisions", "environments"] },
+        "profile": { "enum": ["revisions", "environments", "variants"] },
         "rounds": { "type": "integer", "minimum": 1 },
         "k": { "type": "number", "exclusiveMinimum": 0 },
         "min_rounds": { "type": "integer", "minimum": 1 }
