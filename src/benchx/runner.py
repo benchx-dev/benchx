@@ -17,7 +17,7 @@ from . import target as target_mod
 from .adapters.base import Unsupported, no_cases
 from .core import Refusal, Rejected
 
-RUNNER = {"name": "benchx-prototype", "version": __version__}
+RUNNER = {"name": "benchx", "version": __version__}
 # The runner's own probe: one condition measurement per attempt (schema §4.4).
 PROBE_PRODUCER = {"name": "benchx/runner-probe", "version": __version__, "mapping_version": "benchx-probe/v1"}
 LOAD = {"name": "load-average", "unit": "1"}
