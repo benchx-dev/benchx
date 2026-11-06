@@ -1,6 +1,6 @@
 [project]
 name = "benchx"
-version = "0.1.0"
+dynamic = ["version"]
 description = "BenchX: a flexible and powerful benchmarking framework"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -32,6 +32,9 @@ bx = "benchx.cli:main"
 [build-system]
 requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/benchx/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/benchx"]
