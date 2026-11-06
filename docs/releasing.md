@@ -37,9 +37,21 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
     $ python -m pytest --pyargs benchx
     ```
 
-7. **Merge the conda-forge update.** Conda packages come from the benchx feedstock on
-   conda-forge, not from this repository. Once that feedstock exists, conda-forge's bot opens a
-   pull request on it after a new version reaches PyPI; review and merge that pull request.
+7. **Merge the conda-forge update.** Conda packages are built from
+   [benchx-feedstock](https://github.com/conda-forge/benchx-feedstock), not from this repository.
+   After a new version reaches PyPI, conda-forge's bot opens a pull request there, which can take
+   several hours. A maintainer of the feedstock then:
+    - Compares the recipe's dependencies with `dependencies` in `pyproject.toml`, and updates the
+      pull request if they changed. `jsonschema[format-nongpl]` is called
+      `jsonschema-with-format-nongpl` on conda-forge.
+    - Merges the pull request once its CI passes.
+    - Tests the install, once the package is available:
+
+    ```console
+    $ conda create -n benchx-test -c conda-forge benchx=0.1.0
+    $ conda run -n benchx-test bx --help
+    ```
+
 8. **Start the next development version.** In a pull request, set `__version__` to the next
    version with a `.dev0` suffix: after `0.1.0`, that is `0.2.0.dev0`. Results record this version,
    so without this step, results from `main` would claim to come from the release.
@@ -66,3 +78,10 @@ pre-release on GitHub, and `pip install benchx` skips it unless the version is n
 - **A published version is wrong:** PyPI does not allow a version to be uploaded again, even
   after it is deleted, so release a new version. Yanking the bad one on PyPI stops new installs
   from picking it up by default.
+- **In conda-forge's pull request:** the release on PyPI is not affected. Push the fix to the
+  bot's branch, or open a pull request from a fork of the feedstock.
+- **A conda-forge package is wrong, but the version is right:** fix the recipe in a pull request
+  on the feedstock and increase its build number by 1. A new version resets it to 0.
+- **The bot opens no pull request:** it stops once the feedstock has three open version updates,
+  so close or merge those. See conda-forge's
+  [guide to updating packages](https://conda-forge.org/docs/maintainer/updating_pkgs/).
