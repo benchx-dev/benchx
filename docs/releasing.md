@@ -36,6 +36,10 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
     $ python -m pytest --pyargs benchx
     ```
 
+7. **Merge the conda-forge update.** Conda packages come from the benchx feedstock on
+   conda-forge, not from this repository. Once that feedstock exists, conda-forge's bot opens a
+   pull request on it after a new version reaches PyPI; review and merge that pull request.
+
 ## Pre-releases
 
 A version such as `0.1.0rc1`, tagged `v0.1.0rc1`, follows the same steps. It is marked as a
