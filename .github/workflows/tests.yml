@@ -49,24 +49,3 @@ jobs:
 
       - name: Run tests
         run: uv run --extra test --python ${{ matrix.python-version }} python -m pytest tests -ra
-
-      - name: Run the pyperf-bench example
-        shell: bash
-        run: uv run --extra test --python ${{ matrix.python-version }} bash examples/pyperf-bench/run.sh
-
-      # Needs cmake and a C++ compiler (preinstalled on the Linux and macOS
-      # runners) and fetches Google Benchmark; the example is bash and CMake
-      # with Unix paths, so it is not run on Windows.
-      - name: Run the archery-local example
-        if: runner.os != 'Windows'
-        shell: bash
-        run: uv run --extra test --python ${{ matrix.python-version }} bash examples/archery-local/run.sh
-
-      # Makes two venvs of its own with uv (Python 3.12, the newest with numpy 1.26.4 wheels), so
-      # the matrix Python only runs the outer script and one cell is enough. Needs network access.
-      - name: Run the numpy-venvs example
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
-        shell: bash
-        run: >-
-          uv run --extra test --python ${{ matrix.python-version }}
-          bash examples/numpy-venvs/run.sh

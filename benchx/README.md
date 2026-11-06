@@ -65,7 +65,8 @@ declare `how_built` and `activation` text, which are copied into the work order
 and into every result's `provenance.info`, shown in the comparison, and never
 executed or checked: you activate the environment yourself, and the runner
 records the allowlisted variables it inherited beside your declaration.
-`examples/archery-local` is a complete walk-through.
+`examples/arrow/archery-local` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
+is a complete walk-through.
 
 `bx bench` is the single-target form of `bx compare`: the same way of naming a target
 (`@CONFIG[=SOURCE_REF]`, or a path), the same options, the same code; it writes one
@@ -87,13 +88,15 @@ pyperf.
 functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
-`examples/pyperf-bench` is a runnable walk-through.
+`examples/pyperf-suite` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
+is a runnable walk-through.
 
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
 and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
 --label NAME --baseline VALUE` compares the sides ([UC-04](../docs/use-cases/UC-04-cross-env.md)).
-`examples/numpy-venvs` is the worked example, with a shell script that drives it.
+`examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
+is the worked example, with a shell script that drives it.
 
 `bx bench PATH --adapter asv` runs an [asv](https://asv.readthedocs.io) benchmark suite
 unchanged, reading asv's benchmark format as a language and timing it with pyperf;
@@ -182,49 +185,15 @@ every result is pyperf. Results also record the installed project's version
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
-$ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
+$ .venv/bin/python -m pytest tests     # 344 tests, fake Google Benchmark binary, no compiler
 ```
 
-`tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
-`spin` and compares two tags in one `bx compare`. It is skipped unless
-`BENCHX_E2E_NUMPY` (a numpy git checkout) and `BENCHX_E2E_EXAMPLE` (the
-`numpy-revisions` example directory) are set and `spin` is on the PATH; it also
-needs the project-file entries of PR #65 and PR #71. `BENCHX_E2E_WORKTREES`
-keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
-`BENCHX_E2E_SPIN_EXAMPLE` (the `numpy-spin` example directory) adds a single-run
-scenario, and the test's docstring has the rest.
-
-`demo.sh` prints every command before running it, as you would type it
-(`bx` for `.venv/bin/python -m benchx.cli`, `$WORK` for its scratch
-directory), so it doubles as a walkthrough. It prepares a git source with two
-commits and three CMake build directories of `examples/demo-suite` (base,
-head, and head with `DEMO_HARDENED=ON`), shows the first work order of each
-part, then:
-
-1. **revisions, ad hoc:** `bx compare` in measure mode alternates base and head
-   over five rounds with orders that name no project, then read mode compares
-   the same run key through a throwaway store;
-2. **environments, tracked:** `bx compare` alternates plain and hardened, labeled
-   `build: plain|hardened`, compares from the local store, re-ingests
-   (no-op), and rejects a unit conflict;
-3. checks that the throwaway store gives the same comparison document as the
-   persistent one, lists series and history, and ends with `bx head`.
-
-Every `bx run` and every measure-mode `bx compare` delivers to the local store, so each demo run adds its
-results, ad hoc and tracked, to `examples/demo/store.parquet` (the demo's project root, set
-in its `benchx.conf.json`). Run keys carry a
-timestamp, so runs accumulate and each series' history grows. Look at it any
-time:
-
-```console
-$ (cd examples/demo && ../../.venv/bin/python -m benchx.cli head -n 20)
-$ rm examples/demo/store.parquet    # start over
-```
-
-Both changes add two to three percent of work. The quiet benchmark flags them
-as regressed; the noisy one, with about ten percent spread between
-repetitions, does not.
+The end-to-end examples that build real software are in
+[benchx_examples](https://github.com/benchx-dev/benchx_examples), and the `e2e`
+workflow runs them. `examples/arrow/demo/run.sh` there is a walkthrough of both comparison
+profiles on a small Google Benchmark suite, with real CMake builds (it needs cmake, a
+C++ compiler, and network access once). It prints every command before running it,
+as you would type it, so it doubles as a walkthrough.
 
 ## Layout
 
@@ -254,11 +223,6 @@ benchx/
   compare.py         run mode over a profile's projection, comparison document (comparator.md)
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
-examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
-examples/demo        the demo's project root: its benchx.conf.json, and its persistent store
-examples/pyperf-bench  Python functions under `bx bench` (own README)
-examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
-examples/numpy-venvs  UC-04 with two venvs and two numpy versions, driven by run.sh (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
                      comparator's invariants and method on hand-built results;

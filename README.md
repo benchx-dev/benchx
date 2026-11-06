@@ -59,7 +59,7 @@ configures the site, and `.github/workflows/docs.yml` builds and deploys it.
 
 ## Status
 
-Pre-alpha. The main goal at this stage is to get the schema and the component
+Beta. The main goal at this stage is to get the schema and the component
 boundaries right. The project is under active development, and we expect to be able to
 start offering API stability guarantees in the near future.
 
