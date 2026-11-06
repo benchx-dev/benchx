@@ -73,6 +73,7 @@ nav = [
     { "One-off benchmarking" = "user_stories/one-off.md" },
   ] },
   { "benchx" = "benchx.md" },
+  { "Releasing" = "releasing.md" },
 ]
 
 [project.validation]
