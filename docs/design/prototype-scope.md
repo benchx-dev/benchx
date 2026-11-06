@@ -68,8 +68,9 @@ proto-workbench).
    `(producer, ingest_key)` of the results it consumed.
 7. The ad hoc shape works end to end with no project, configuration file, or
    store path. A single run on a dirty tree is accepted and recorded as dirty.
-   A `revisions` comparison with a dirty side is refused (UC-03 §10), and an
-   `environments` comparison with one is labeled local-only (schema §5.5).
+   A comparison with a dirty side, under `revisions` or `environments`, is
+   labeled local-only and names the dirty side (UC-03 §10, schema §5.5); a
+   `revisions` side with no working-tree id is refused.
 8. The same comparison computed from a throwaway store and from a persistent
    store yields the same document.
 

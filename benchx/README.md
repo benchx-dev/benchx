@@ -9,8 +9,8 @@ bx run <order.json> [--out DIR] [--no-ingest]
                                          # runner + Google Benchmark adapter → result files → local store
 bx ingest <dir|file>                     # result files and work orders → the local store
 bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
+bx history <series>                      # one series' points (a query); dirty ones are marked
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
                                          # read mode: compare results already measured
@@ -162,7 +162,8 @@ every result is pyperf. Results also record the installed project's version
   Every accepting ingest rewrites the file atomically.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
-  trees are clean, before running anything), writes one order per side and
+  trees have a working-tree id, before running anything; it says which sides
+  are not clean), writes one order per side and
   round, alternates them over the rounds, delivers every result to the local
   store, and hands the run to the comparator. It builds nothing: both build
   directories must already exist.
@@ -170,8 +171,9 @@ every result is pyperf. Results also record the installed project's version
   `environments` profiles, each a projection built in code from the identity
   policy (`benchx/compare.py`): the axis tells the sides apart, everything the
   policy matches must agree, and it checks the profile's invariants (`revisions` also
-  requires clean trees, UC-03 §10; `environments` labels a dirty side
-  local-only), pairs the
+  requires one tree id per side and, for a benchmark recorded apart from the
+  subject, one benchmark file throughout, UC-03 §10; a dirty side makes any
+  profile's comparison local-only), pairs the
   sides by round, and applies `benchx/paired-relative/v1` (effect = mean
   relative paired difference, noise = its standard error, change when
   |effect| > *k* × noise). `environments` names its sides by the label

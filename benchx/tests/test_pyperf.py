@@ -20,7 +20,7 @@ pytest.importorskip("pyperf")
 
 from benchx import core, runner, snapshot
 from benchx.adapters import pyperf as adapter
-from conftest import SOURCE_URI, order
+from conftest import SOURCE_URI, order, warnings_of
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PRECISION = {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
@@ -101,7 +101,7 @@ def test_end_to_end_result(tmp, tree):
     assert doc["coordinates"]["environment"]["system"]["runtime"]["python"]
     kinds = {a["kind"] for a in doc["provenance"]["artifacts"]}
     assert {"native-output", "stdout", "stderr", "driver", "worker-environment"} <= kinds
-    assert "quality" not in doc  # the workers had the environment the manager passed
+    assert warnings_of(doc) == []  # the workers had the environment the manager passed
     assert "summaries" not in measurement  # pyperf's file stores none
 
 
@@ -238,7 +238,7 @@ def test_environment_passes_through_to_the_workers(tmp, tree):
     artifact = next(a for a in doc["provenance"]["artifacts"] if a["kind"] == "worker-environment")
     captured = json.loads(Path(artifact["uri"].removeprefix("file://")).read_text())
     assert captured["OPENBLAS_NUM_THREADS"] == "1"
-    assert "quality" not in doc
+    assert warnings_of(doc) == []
 
 
 NAMES = snapshot.env_allowlist({}, adapter.ENV_ALLOWLIST)
