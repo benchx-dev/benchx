@@ -11,14 +11,12 @@ coordinate it varies as the axis. Only the identity policy is data; other
 projections are built in code. Nothing here reads a store.
 """
 
-import re
 import statistics
-import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path
 
 from .core import sha256_hex
 from .core.hashing import canonical
+from .key import Key, axis_order, canonical_uri, escape, get, normalize_remote  # noqa: F401
 
 # The reported coordinates (schema §4.3), which every role applies to, and the
 # facts outside them a projection may name: considered only when it does.
@@ -34,47 +32,6 @@ class ProjectionError(Exception):
 
 def _hash(prefix: str, *parts: bytes) -> str:
     return sha256_hex(prefix.encode() + b"\0" + b"\0".join(parts))
-
-
-# -- source URIs (the canonical-uri rule) --------------------------------------
-
-_WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
-_SCP_REMOTE = re.compile(r"^(?:(?P<user>[^@/:\s\[\]]+)@)?(?P<host>\[[0-9A-Fa-f:.]+\]|[^@/:\s\[\]]+):(?P<path>.+)$")
-
-
-def normalize_remote(remote: str, base: str | None = None) -> str:
-    """A git remote as a URI, whatever form it was given in; idempotent.
-
-    A `scheme://` remote is unchanged. A Windows drive path or a local path
-    (resolved against `base`, default the current directory) becomes a
-    `file://` URI. git's SCP-style `[user@]host:path` becomes `ssh://`: an
-    absolute path stays absolute, and a relative one (relative to the login
-    directory) is kept relative as `ssh://host/~/path`, since `ssh://host/path`
-    would name a different repository."""
-    if not remote or "://" in remote:
-        return remote
-    if _WINDOWS_PATH.match(remote):
-        return "file:///" + urllib.parse.quote(remote.replace("\\", "/"), safe="/:")
-    match = _SCP_REMOTE.match(remote)
-    if match:
-        user = f"{match['user']}@" if match["user"] else ""
-        path = match["path"] if match["path"].startswith("/") else "/~/" + match["path"]
-        return f"ssh://{user}{match['host']}{path}"
-    return Path(base or ".", remote).resolve().as_uri()
-
-
-def canonical_uri(uri: str) -> str:
-    parts = urllib.parse.urlsplit(normalize_remote(uri))
-    path = parts.path.rstrip("/").removesuffix(".git")
-    return urllib.parse.urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
-
-
-def _normalize(rule: dict, value):
-    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
-        return value  # rules are defined on scalars; anything else matches as is
-    if rule["rule"] == "canonical-uri":
-        return canonical_uri(str(value))
-    return rule["map"].get(str(value), value)  # map: unlisted values are kept
 
 
 # -- estimators ----------------------------------------------------------------
@@ -96,21 +53,7 @@ def values(doc: dict) -> list[float]:
     return [o["value"] if isinstance(o, dict) else o for o in doc["measurement"].get("observations", [])]
 
 
-# -- pointers ------------------------------------------------------------------
-
-def _escape(key: str) -> str:
-    return key.replace("~", "~0").replace("/", "~1")
-
-
-def get(doc: dict, pointer: str):
-    """The value at a JSON Pointer, or None when any step is missing."""
-    for part in pointer.split("/")[1:]:
-        part = part.replace("~1", "/").replace("~0", "~")
-        if not isinstance(doc, dict) or part not in doc:
-            return None
-        doc = doc[part]
-    return doc
-
+# -- projections ---------------------------------------------------------------
 
 def _has_null(value) -> bool:
     if value is None:
@@ -121,8 +64,6 @@ def _has_null(value) -> bool:
         return any(_has_null(v) for v in value)
     return False
 
-
-# -- projections ---------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Projected:
@@ -148,7 +89,8 @@ class Projection:
         self.policy, self.profile, self.extra = policy, profile, dict(paths or {})
         self.identity_schema = (f"{profile}+{policy['identity_schema']}" if profile
                                 else policy["identity_schema"])
-        self.axis = list(axis)
+        self.axis_keys = tuple(Key(path) for path in axis)
+        self.axis = [key.pointer for key in self.axis_keys]
         self.default = policy["default"]
         self.paths = {**policy.get("paths", {}), **self.extra}
         self.invariants = list(invariants)
@@ -176,6 +118,13 @@ class Projection:
             return self.paths[path]
         return self.default
 
+    def key(self, pointer: str) -> Key | None:
+        """How a fact enters the identity: its role as a key, None when it is ignored."""
+        role = self.role(pointer)
+        if role == "ignore":
+            return None
+        return Key(pointer) if role == "match" else Key(pointer, normalize=role["normalize"])
+
     def apply(self, doc: dict, project: str | None = None) -> Projected:
         """`doc` under this projection. `project` stands in for the project of a
         thin result (schema §4.1), so local results of different hosts stay apart."""
@@ -184,21 +133,21 @@ class Projection:
         identity, ignored = {}, {}
 
         def place(pointer, value):
-            role = self.role(pointer)
-            if role == "ignore":
+            key = self.key(pointer)
+            if key is None:
                 ignored[pointer] = value
             elif _has_null(value):
                 # A null fact never equals anything (§4.3): this result shares no series.
                 identity[pointer] = {"unmatchable": [doc["producer"]["name"], doc["ingest_key"]]}
             else:
-                identity[pointer] = value if role == "match" else _normalize(role["normalize"], value)
+                identity[pointer] = key.normalized(value)
 
         def walk(node, pointer):
             if pointer in axis_paths:
                 return
             if isinstance(node, dict) and any(n.startswith(pointer + "/") for n in named):
                 for key, value in node.items():
-                    walk(value, f"{pointer}/{_escape(key)}")
+                    walk(value, f"{pointer}/{escape(key)}")
             else:
                 place(pointer, node)
 
@@ -210,7 +159,7 @@ class Projection:
         for pointer in NAMED_ONLY:
             if pointer in self.paths and pointer not in axis_paths:
                 place(pointer, get(doc, pointer))
-        return Projected(tuple(get(doc, path) for path in axis_paths), identity, ignored)
+        return Projected(tuple(key.read(doc) for key in self.axis_keys), identity, ignored)
 
     # -- fingerprints (§4.3) --
 
@@ -225,31 +174,8 @@ class Projection:
         """A sort key for a point: none for a revision axis, which the
         implementation orders by time since it has no revision graph (schema §4.1);
         otherwise the axis values in natural order (`axis_order`)."""
-        return () if self.axis == ["/revision/key"] else tuple(axis_order(value) for value in point_axis)
-
-
-_DIGITS = re.compile(r"(\d+)")
-
-
-def axis_order(value) -> tuple:
-    """A sort key for one axis value: numbers by value, strings in natural
-    order so that versions and sizes sort as people read them (`6.8` before
-    `6.10`, `size-20` before `size-100`), then anything else by its canonical
-    form, and a missing value last. Every key starts with a rank for its kind,
-    so values of different kinds never compare directly."""
-    if value is None:
-        return (4,)
-    if isinstance(value, bool):
-        return (0, value)
-    if isinstance(value, (int, float)):
-        return (1, value)
-    if isinstance(value, str):
-        # re.split with a group alternates text and digits, so equal positions
-        # always hold the same type; the string itself breaks ties such as `07`
-        # against `7`.
-        parts = _DIGITS.split(value)
-        return (2, tuple(int(p) if i % 2 else p for i, p in enumerate(parts)), value)
-    return (3, canonical(value).decode())
+        return () if self.axis == ["/revision/key"] else tuple(
+            key.sort_key(value) for key, value in zip(self.axis_keys, point_axis))
 
 
 def reported_coordinates(doc: dict) -> dict:

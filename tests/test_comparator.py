@@ -73,7 +73,7 @@ def test_pairs_by_round_not_by_arrival():
         d["procedure"]["round"] = r
         d["measurement"]["observations"] = [(r + 1) * 1.1]
     unit = evaluate(docs)["units"][0]
-    assert unit["effect"] == pytest.approx(0.1) and unit["noise"] == pytest.approx(0, abs=1e-12)
+    assert unit["effect"]["value"] == pytest.approx(0.1) and unit["details"]["noise"] == pytest.approx(0, abs=1e-12)
 
 
 def test_equal_attempts():
@@ -120,7 +120,7 @@ def test_exclusions():
     doc = evaluate(docs)
     result = {"producer": "benchx/gbench-adapter", "ingest_key": docs[2]["ingest_key"]}
     assert doc["exclusions"] == [{"result": result, "reason": "error: harness.error"}]
-    assert doc["units"][0]["rounds"] == 3
+    assert doc["units"][0]["details"]["rounds"] == 3
 
 
 def test_min_rounds():
@@ -136,7 +136,7 @@ def test_one_pair_has_no_noise_whatever_min_rounds_says(min_rounds):
     of them: with one pair the unit is indeterminate, not a StatisticsError."""
     unit = evaluate(run(rounds=1), min_rounds=min_rounds)["units"][0]
     assert (unit["verdict"], unit["reason"]) == ("indeterminate", "insufficient-rounds")
-    assert unit["rounds"] == 1 and "noise" not in unit
+    assert unit["details"]["rounds"] == 1 and "noise" not in unit["details"]
 
 
 def test_no_pair_at_all_is_indeterminate_too():
@@ -145,7 +145,7 @@ def test_no_pair_at_all_is_indeterminate_too():
     for d in docs[1::2]:
         d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
     unit = evaluate(docs, min_rounds=0)["units"][0]
-    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "insufficient-rounds", 0)
+    assert (unit["verdict"], unit["reason"], unit["details"]["rounds"]) == ("indeterminate", "insufficient-rounds", 0)
 
 
 def test_two_pairs_are_enough_when_min_rounds_allows():
@@ -210,7 +210,7 @@ def labeled(docs, configurations=("plain", "hardened")):
 def test_environments_sides_are_named_by_label():
     doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build")
     assert core.check(doc, "comparison-document") == []
-    assert (doc["varying"], doc["baseline"], doc["contender"]) == ("provenance.labels.build", "plain", "hardened")
+    assert (doc["sides"]["varying"], doc["sides"]["baseline"], doc["sides"]["contender"]) == ("provenance.labels.build", "plain", "hardened")
     assert doc["failed_invariants"] == [] and doc["units"][0]["verdict"] == "regressed"
     assert doc["units"][0]["unmatched_differences"] == ["/coordinates/subject/configuration/hardening"]
 
