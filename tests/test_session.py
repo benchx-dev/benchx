@@ -45,7 +45,7 @@ def test_session_environments(repo, tmp):
                                   profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=6,
                                   label=("build", "plain", "hardened"), project="demo",
                                   store=Store(tmp / "store.parquet"), run_key="e1", out=tmp / "out")
-    assert doc["varying"] == "provenance.labels.build" and doc["failed_invariants"] == []
+    assert doc["sides"]["varying"] == "provenance.labels.build" and doc["failed_invariants"] == []
     assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
 
@@ -127,7 +127,7 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     measured = json.loads(capsys.readouterr().out)
     assert cli.main(["compare", "--run", "cli-1", *common, "--baseline", repo["base"][:10], "--json"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out) == measured
-    assert measured["mode"] == "run" and verdicts(measured)[QUIET] == "regressed"
+    assert measured["selector"]["name"] == "benchx/run-profile" and verdicts(measured)[QUIET] == "regressed"
     # criterion 8: the output directory, orders subdirectory and all, compares to the same document
     assert cli.main(["compare", "--run", "cli-1", *common, "--baseline", repo["base"][:10], "--json",
                      "--results", str(tmp / "o")]) == cli.EXIT_OK

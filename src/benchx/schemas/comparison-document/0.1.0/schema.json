@@ -2,19 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:benchx:schema:comparison-document:0.1.0",
   "title": "BenchX comparison document",
-  "description": "The comparator's output: verdicts for target results against their references, in history mode or run mode, with the evidence behind each. See docs/design/comparator.md section 5. Derived and recomputed on demand; the store keeps its inputs, not the document.",
-  "$comment": "Rules the schema cannot express and the comparator enforces: inputs lists every result the document refers to; local_only is true when any input is not clean in subject_dirty or benchmark_dirty (benchmark-result-schema.md section 5.5); a unit affected by a failed invariant has no verdict and appears in no units entry; in history mode every reference result precedes the target under the recorded ordering.",
+  "description": "The comparator's output: verdicts for target results against their references, with the selector that formed the evidence and the method that assessed it. See docs/design/comparator.md section 5. Derived and recomputed on demand; the store keeps its inputs, not the document.",
+  "$comment": "Rules the schema cannot express and the comparator enforces: inputs lists every result the document refers to; local_only is true when any input is not clean in subject_dirty or benchmark_dirty (benchmark-result-schema.md section 5.5); a unit affected by a failed invariant has no verdict and appears in no units entry; every result of a unit is in exactly one of its used and excluded; details conforms to the schema of the method that wrote it, which the framework checks when it produces the document; under the preceding-window selector every reference result precedes the target under the recorded ordering.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "mode",
+    "selector",
     "method",
     "estimator",
     "identity_schema",
     "local_only",
     "units",
     "missing",
+    "failed_invariants",
     "exclusions",
     "inputs"
   ],
@@ -23,14 +24,11 @@
       "description": "Message contract version this object conforms to.",
       "const": "benchx/comparison-document/0.1.0"
     },
-    "mode": {
-      "description": "History mode compares a target series point against preceding points of its series; run mode compares two sides measured in one run, as a profile defines them.",
-      "enum": [
-        "history",
-        "run"
-      ]
+    "selector": {
+      "$ref": "#/$defs/selector"
     },
     "method": {
+      "description": "The method requested and its complete configuration, recorded even when a failed invariant left no units.",
       "$ref": "#/$defs/method"
     },
     "estimator": {
@@ -45,60 +43,55 @@
       "description": "True when any input is not clean; such a comparison never promotes into tracked history.",
       "type": "boolean"
     },
-    "run_key": {
-      "description": "Run mode: the run both sides were measured in.",
-      "$ref": "#/$defs/token"
-    },
-    "profile": {
-      "description": "Run mode: the comparison profile the run was checked against (benchmark-result-schema.md section 5.5).",
-      "enum": [
-        "single-run",
-        "variants",
-        "revisions",
-        "environments",
-        "cross-machine"
-      ]
-    },
-    "varying": {
-      "description": "Run mode: path of the coordinate whose value distinguishes the sides, such as provenance.subject_tree or coordinates.workload.parameters.role.",
-      "$ref": "#/$defs/token"
-    },
-    "baseline": {
-      "description": "Run mode: the reference side, as its value of the varying coordinate.",
-      "$ref": "#/$defs/side"
-    },
-    "contender": {
-      "description": "Run mode: the target side. Absent when a failed invariant prevented identifying it.",
-      "$ref": "#/$defs/side"
-    },
     "sides": {
-      "description": "Run mode: what each side declared about how it was built and entered, recorded as given and never judged, beside the environment the runner observed for it.",
+      "description": "The sides the selector named, when it names them. Absent from a selector whose sides are its own, such as reference and target.",
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "varying",
+        "baseline"
+      ],
       "properties": {
+        "varying": {
+          "description": "Path of the coordinate whose value distinguishes the sides, such as provenance.subject_tree or coordinates.workload.parameters.role.",
+          "$ref": "#/$defs/token"
+        },
         "baseline": {
-          "$ref": "#/$defs/declared"
+          "description": "The reference side, as its value of the varying coordinate.",
+          "$ref": "#/$defs/side"
         },
         "contender": {
-          "$ref": "#/$defs/declared"
+          "description": "The target side. Absent when a failed invariant prevented identifying it.",
+          "$ref": "#/$defs/side"
+        },
+        "declared": {
+          "description": "What each side declared about how it was built and entered, recorded as given and never judged, beside the environment the runner observed for it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "baseline": {
+              "$ref": "#/$defs/declared"
+            },
+            "contender": {
+              "$ref": "#/$defs/declared"
+            }
+          }
         }
       }
     },
-    "pairing": {
-      "description": "Run mode: how the two sides' attempts are paired.",
-      "$comment": "Only paired comparison is defined; comparator.md open question 2 asks whether an unpaired method should be allowed.",
-      "const": "procedure.round"
-    },
     "failed_invariants": {
-      "description": "Run mode: profile invariants the run did not satisfy.",
+      "description": "Invariants the evidence did not satisfy, whether the selector's or the method's (comparator.md section 3).",
       "type": "array",
       "items": {
         "$ref": "#/$defs/failedInvariant"
       }
     },
     "units": {
-      "description": "One evaluation each: a series point in history mode, a workload variant and quantity in run mode.",
-      "type": "array"
+      "description": "One evaluation each: one series and its assessment.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unit"
+      }
     },
     "missing": {
       "description": "Expected targets with no result, such as a side absent from a run or a series with no result from a batch request's target.",
@@ -108,7 +101,7 @@
       }
     },
     "exclusions": {
-      "description": "Results left out of the evidence, with the reason.",
+      "description": "Results left out of the evidence of any evaluated unit because they have no usable estimate, with the reason. Each also appears in its unit's excluded.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/exclusion"
@@ -123,60 +116,14 @@
       }
     }
   },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "mode": {
-            "const": "run"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "run_key",
-          "profile",
-          "varying",
-          "baseline",
-          "pairing",
-          "failed_invariants"
-        ],
-        "properties": {
-          "units": {
-            "items": {
-              "$ref": "#/$defs/runUnit"
-            }
-          }
-        }
-      },
-      "else": {
-        "properties": {
-          "run_key": false,
-          "profile": false,
-          "varying": false,
-          "baseline": false,
-          "contender": false,
-          "sides": false,
-          "pairing": false,
-          "failed_invariants": false,
-          "units": {
-            "items": {
-              "$ref": "#/$defs/historyUnit"
-            }
-          }
-        }
-      }
-    }
-  ],
   "$defs": {
     "method": {
-      "description": "Comparison method: a stable name and version, the effect measure it reports, and its complete configuration, such as k and minimum evidence.",
+      "description": "Comparison method: a stable name and version and its complete configuration, such as k and minimum evidence.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "name",
         "version",
-        "effect_measure",
         "configuration"
       ],
       "properties": {
@@ -186,182 +133,8 @@
         "version": {
           "$ref": "#/$defs/token"
         },
-        "effect_measure": {
-          "description": "How effect is measured from the reference estimate, such as relative, absolute, ratio, or log-ratio.",
-          "$ref": "#/$defs/token"
-        },
         "configuration": {
           "type": "object"
-        }
-      }
-    },
-    "outcome": {
-      "description": "What one evaluation found. Shared by both unit kinds.",
-      "type": "object",
-      "required": [
-        "workload",
-        "quantity",
-        "verdict"
-      ],
-      "properties": {
-        "workload": {
-          "$ref": "#/$defs/workload"
-        },
-        "quantity": {
-          "$ref": "#/$defs/token"
-        },
-        "reference_estimate": {
-          "description": "Expected value from the reference points or the baseline side.",
-          "type": "number"
-        },
-        "effect": {
-          "description": "Change from the reference estimate, in the method's effect measure.",
-          "type": "number"
-        },
-        "noise": {
-          "description": "Variation on the effect's scale. Absent for a deterministic quantity.",
-          "type": "number",
-          "minimum": 0
-        },
-        "noise_source": {
-          "description": "Where the noise came from, such as reference-points or paired-rounds.",
-          "$ref": "#/$defs/token"
-        },
-        "provisional": {
-          "description": "True when the noise came from a provisional rule rather than evidence.",
-          "type": "boolean"
-        },
-        "threshold": {
-          "description": "The effect magnitude the method required to indicate a change.",
-          "type": "number",
-          "minimum": 0
-        },
-        "verdict": {
-          "enum": [
-            "improved",
-            "regressed",
-            "changed",
-            "no-change-detected",
-            "indeterminate"
-          ]
-        },
-        "reason": {
-          "description": "Why the verdict is indeterminate, such as insufficient-history or duplicate-points.",
-          "$ref": "#/$defs/token"
-        },
-        "unmatched_differences": {
-          "description": "Coordinates the projection does not match, by JSON Pointer, whose values differ between target and reference.",
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/token"
-          }
-        },
-        "caveats": {
-          "description": "Quality caveats the reader should see.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/nonEmptyString"
-          }
-        }
-      },
-      "if": {
-        "properties": {
-          "verdict": {
-            "const": "indeterminate"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "reason"
-        ]
-      },
-      "else": {
-        "required": [
-          "reference_estimate",
-          "effect"
-        ]
-      }
-    },
-    "runUnit": {
-      "description": "One workload variant and quantity, its two sides paired by round.",
-      "allOf": [
-        {
-          "$ref": "#/$defs/outcome"
-        }
-      ],
-      "unevaluatedProperties": false,
-      "required": [
-        "rounds"
-      ],
-      "properties": {
-        "rounds": {
-          "description": "Paired rounds used as evidence.",
-          "type": "integer",
-          "minimum": 0
-        },
-        "series": {
-          "description": "The series each side's results belong to, when the store assigns them one. Run mode reads no history from them.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "baseline",
-            "contender"
-          ],
-          "properties": {
-            "baseline": {
-              "$ref": "#/$defs/sha256"
-            },
-            "contender": {
-              "$ref": "#/$defs/sha256"
-            }
-          }
-        }
-      }
-    },
-    "historyUnit": {
-      "description": "One target series point against preceding points of its series.",
-      "allOf": [
-        {
-          "$ref": "#/$defs/outcome"
-        }
-      ],
-      "unevaluatedProperties": false,
-      "required": [
-        "series",
-        "target",
-        "reference"
-      ],
-      "properties": {
-        "series": {
-          "description": "Series fingerprint of the target and every reference point.",
-          "$ref": "#/$defs/sha256"
-        },
-        "target": {
-          "$ref": "#/$defs/resultRef"
-        },
-        "reference": {
-          "description": "The reference points the reference estimate was formed from, oldest first.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/resultRef"
-          }
-        },
-        "ordering": {
-          "description": "How the reference points were ordered before the target. Absent when no order was available.",
-          "enum": [
-            "ancestry",
-            "native-order",
-            "native-time"
-          ]
-        },
-        "boundaries": {
-          "description": "Resets, change points, and continuity joins that truncated or joined the reference.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/boundary"
-          }
         }
       }
     },
@@ -470,14 +243,11 @@
           "$ref": "#/$defs/token"
         },
         "side": {
-          "description": "Run mode: the side with no result.",
-          "enum": [
-            "baseline",
-            "contender"
-          ]
+          "description": "The side with no result, as the selector names it, such as baseline or target.",
+          "$ref": "#/$defs/token"
         },
         "series": {
-          "description": "History mode: the expected series.",
+          "description": "The expected series, when the request named it.",
           "$ref": "#/$defs/sha256"
         }
       }
@@ -615,6 +385,191 @@
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
+    },
+    "selector": {
+      "description": "How the evidence was formed: a versioned selector and the parameters it was given, with anything the caller abbreviated resolved, so one comparison has one document however it was asked for.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/token"
+        },
+        "version": {
+          "$ref": "#/$defs/token"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "methodRef": {
+      "description": "The method that wrote an outcome. Its configuration is in the document's method.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/token"
+        },
+        "version": {
+          "$ref": "#/$defs/token"
+        }
+      }
+    },
+    "evidence": {
+      "description": "What a history verdict rests on: the target, the reference it was compared with, how the reference was ordered, and what truncated or joined it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "description": "The results being evaluated, when the selector distinguishes them from a reference.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/resultRef"
+          }
+        },
+        "reference": {
+          "description": "The reference points the reference estimate was formed from, oldest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resultRef"
+          }
+        },
+        "ordering": {
+          "description": "How the reference points were ordered before the target. Absent when no order was available.",
+          "enum": [
+            "ancestry",
+            "native-order",
+            "native-time"
+          ]
+        },
+        "boundaries": {
+          "description": "Resets, change points, and continuity joins that truncated or joined the reference.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/boundary"
+          }
+        }
+      }
+    },
+    "unit": {
+      "description": "One series and the method's assessment of it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload",
+        "quantity",
+        "series",
+        "method",
+        "verdict",
+        "used",
+        "excluded",
+        "details"
+      ],
+      "properties": {
+        "workload": {
+          "$ref": "#/$defs/workload"
+        },
+        "quantity": {
+          "$ref": "#/$defs/token"
+        },
+        "series": {
+          "description": "Series fingerprint under the projection the selector grouped by.",
+          "$ref": "#/$defs/sha256"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "method": {
+          "$ref": "#/$defs/methodRef"
+        },
+        "verdict": {
+          "enum": [
+            "improved",
+            "regressed",
+            "changed",
+            "no-change-detected",
+            "equivalent",
+            "indeterminate"
+          ]
+        },
+        "reason": {
+          "description": "Why the verdict is indeterminate, such as insufficient-rounds or insufficient-history.",
+          "$ref": "#/$defs/token"
+        },
+        "effect": {
+          "description": "The headline change, when the method reports one.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "measure",
+            "value"
+          ],
+          "properties": {
+            "measure": {
+              "description": "The method's effect measure, such as relative, difference, or log-ratio.",
+              "$ref": "#/$defs/token"
+            },
+            "value": {
+              "type": "number"
+            }
+          }
+        },
+        "used": {
+          "description": "The results the verdict rests on.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resultRef"
+          }
+        },
+        "excluded": {
+          "description": "The unit's other results, each with the reason.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exclusion"
+          }
+        },
+        "details": {
+          "description": "Whatever else the method reports, such as what it computed as noise; validated by the method's own schema.",
+          "type": "object"
+        },
+        "unmatched_differences": {
+          "description": "Coordinates the projection does not match, by JSON Pointer, whose values differ between target and reference.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/token"
+          }
+        },
+        "caveats": {
+          "description": "Quality caveats the reader should see.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "indeterminate"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      }
     }
   }
 }

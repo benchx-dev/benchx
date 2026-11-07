@@ -1,440 +1,175 @@
-"""Comparator, run mode only (comparator.md §2.3; prototype-design.md §5).
+"""The comparator's framework (comparator.md §2): a selector forms the evidence, a
+method assesses it, and this module checks what the method asked for and writes
+the comparison document. It holds no statistics. The document depends only on the
+inputs, so the same results give the same document from any store.
 
-Two sides of one run, as a profile defines them, paired by round and compared
-with the method benchx/paired-relative/v1. A profile is a projection built
-here from the identity policy: its axis says what tells the sides apart, the
-policy's roles what must match for two results to be compared, and its
-invariants what the run must satisfy (schema §5.5). The document depends only
-on the input results, so the same results give the same document from any
-store.
+Only run mode is reachable from the CLI. History mode and detectors are specified
+in comparator.md; a selector for them would call `evaluate` as run mode does.
 """
 
 import json
-import math
-import re
-import statistics
 
-from . import identity
-from .core import canonical, catalog
-from .projection import Projection, axis_order, get, workload_label
-from .snapshot import DIRTY_WARNINGS
-from .store import store_project
+from jsonschema import Draft202012Validator
 
-METHOD = {"name": "benchx/paired-relative", "version": "v1", "effect_measure": "relative"}
-PROFILES = {
-    # UC-03: two subject trees from one run.
-    "revisions": Projection(identity.POLICY_DATA, ["/provenance/subject_tree"],
-                            profile="benchx/profile/revisions/v1",
-                            invariants=["one-run", "two-sides", "one-tree-per-side", "equal-attempts",
-                                        "alternating-slots", "one-benchmark-tree"]),
-    # UC-04: one revision measured two ways. A side is what its subject
-    # configuration, pinned components, and system are; the caller's label,
-    # put in front of the axis per comparison, only names it.
-    "environments": Projection(identity.POLICY_DATA, ["/coordinates/subject/configuration",
-                                                      "/coordinates/subject/components",
-                                                      "/coordinates/environment/system"],
-                               profile="benchx/profile/environments/v1",
-                               paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
-                               invariants=["one-run", "two-sides", "sides-differ", "equal-attempts",
-                                           "alternating-slots"]),
-    # UC-02: one revision, one environment, two values of one workload parameter. Everything else
-    # must agree, so the axis (the parameter) is added per comparison: see `profile_projection`.
-    "variants": Projection(identity.POLICY_DATA, [],
-                           profile="benchx/profile/variants/v1",
-                           paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
-                           invariants=["one-run", "two-sides", "equal-attempts", "alternating-slots",
-                                       "one-benchmark-tree"]),
-}
-# Profiles for which a failed attempt on either side fails its unit (UC-02 §10): a variant that
-# times out in the slow rounds must not be judged on the fast ones. The other profiles drop the
-# attempt's pair and keep the verdict from the rest.
-STRICT_STATUS = {"variants"}
-FAILED_STATUSES = ("partial", "censored", "error")  # `skipped` is not a failure
-WORKLOAD = "/coordinates/workload"
-PARAMETERS = WORKLOAD + "/parameters/"
-_PARAMETER_NAME = re.compile(r"[A-Za-z0-9_-]+")
-# The noise is the standard error of the per-round differences, so a verdict needs
-# at least two pairs, whatever `min_rounds` a caller asks for.
-MIN_PAIRS = 2
+from . import methods
+from .core import catalog
+from .evidence import SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, pivot
+from .projection import workload_label
+from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
 
-class CompareError(Exception):
-    """The request itself cannot be answered, such as an unknown baseline."""
+def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, method=methods.DEFAULT,
+            **config) -> dict:
+    """Two sides of one run under a method. `label` names the sides of `environments`, and
+    `parameter` those of `variants`. Any other keyword is the method's configuration, such
+    as `k` and `min_rounds` for the default."""
+    chosen = methods.get(method)
+    configuration = _configure(chosen, config)
+    selection = RUN_PROFILE.select(documents, run_key=run_key, profile=profile, baseline=baseline, label=label,
+                                   parameter=parameter)
+    return evaluate(selection, chosen, configuration)
 
 
-def _c(value) -> str:
-    return canonical(value).decode()
+def _configure(method: Method, config: dict) -> dict:
+    configuration = {**method.defaults, **config}
+    errors = [e.message for e in Draft202012Validator(method.config_schema).iter_errors(configuration)]
+    if errors:
+        raise CompareError(f"{method.id}: {'; '.join(errors)}")
+    return configuration
 
 
-def profile_projection(profile: str, label: str | None = None, parameter: str | None = None) -> Projection:
-    """The profile's projection; for environments, with the label that names
-    the sides at the front of its axis, and for variants, with the workload
-    parameter whose two values are the sides."""
-    if profile not in PROFILES:
-        raise CompareError(f"profile {profile!r} is not in the implementation ({', '.join(PROFILES)})")
-    projection = PROFILES[profile]
-    if profile == "environments":
-        if not label:
-            raise CompareError("the environments profile needs the label that names the sides")
-        projection = projection.with_axis_first(f"/provenance/labels/{label}")
-    if profile == "variants":
-        if not parameter:
-            raise CompareError("the variants profile needs the workload parameter whose values are the sides")
-        if not _PARAMETER_NAME.fullmatch(parameter):  # keeps the document's `varying` a token
-            raise CompareError(f"workload parameter {parameter!r}: use letters, digits, '_' and '-' only")
-        projection = projection.with_axis_first(PARAMETERS + parameter)
-    return projection
-
-
-def _dotted(pointer: str) -> str:
-    return pointer[1:].replace("/", ".")
-
-
-def _measurand(doc) -> bool:
-    """Whether the result is what its attempt set out to measure. A condition
-    measurement (`measurement.kind: condition`, schema §4.4), such as the
-    runner's load average, is kept beside the measurands and never compared."""
-    return doc["measurement"].get("kind", "measurand") == "measurand"
-
-
-def _estimate(doc):
-    """The attempt's median observation; the method's estimator (METHOD)."""
-    values = [o["value"] if isinstance(o, dict) else o for o in doc["measurement"].get("observations", [])]
-    return statistics.median(values) if values else None
-
-
-def _verdict(effect, noise, k, direction):
-    if abs(effect) <= k * noise:
-        return "no-change-detected"
-    if direction == "lower-is-better":
-        return "regressed" if effect > 0 else "improved"
-    if direction == "higher-is-better":
-        return "improved" if effect > 0 else "regressed"
-    return "changed"
-
-
-def _run_documents(documents, run_key) -> list[dict]:
-    """The measurands of one run, in a fixed order, so the same results give the same document."""
-    found = sorted((d for d in documents if d["provenance"].get("run_key") == run_key and _measurand(d)),
-                   key=lambda d: (d["producer"]["name"], d["ingest_key"]))
-    if not found:
-        raise CompareError(f"no results for run {run_key!r}")
-    return found
-
-
-def infer_parameter(documents, run_key) -> str:
-    """The workload parameter a variants comparison of this run varies, when the caller names none:
-    the only parameter the run's results carry. An `-e` variable counts, since the runner records
-    it as a workload parameter. Read mode only; measure mode asks before running (session)."""
-    names = sorted({name for d in _run_documents(documents, run_key)
-                    for name in (d["coordinates"]["workload"].get("parameters") or {})})
-    if not names:
-        raise CompareError("nothing to vary: no workload parameter in the results "
-                           "(declare one in `params`/`param_names`)")
-    if len(names) > 1:
-        raise CompareError(f"several workload parameters ({', '.join(names)}): give --vary NAME")
-    return names[0]
-
-
-def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, k=3.0, min_rounds=3) -> dict:
-    """The run-mode comparison document. `label` names the sides of `environments`, and `parameter`
-    those of `variants`."""
-    projection = profile_projection(profile, label, parameter)
-    documents = _run_documents(documents, run_key)
-    naming = projection.axis[0]
-    varying = _dotted(naming)
-    doc = {"schema_version": catalog.COMPARISON_DOCUMENT, "mode": "run", "run_key": run_key, "profile": profile,
-           "varying": varying, "baseline": baseline, "pairing": "procedure.round",
-           "method": {**METHOD, "configuration": {"k": k, "min_rounds": min_rounds}},
-           "estimator": dict(identity.MEDIAN), "identity_schema": projection.identity_schema,
-           "local_only": any(d["provenance"][f] != "clean" for d in documents
-                             for f in ("subject_dirty", "benchmark_dirty")),
-           "units": [], "missing": [], "failed_invariants": [], "exclusions": [],
-           "inputs": [{"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]} for d in documents]}
+def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
+    """The comparison document for what a selector selected, under a method."""
+    doc = {"schema_version": catalog.COMPARISON_DOCUMENT, "selector": selection.selector,
+           "method": {"name": method.name, "version": method.version, "configuration": configuration},
+           "estimator": selection.estimator, "identity_schema": selection.identity_schema,
+           "local_only": selection.local_only,
+           **({"sides": selection.sides} if selection.sides else {}),
+           "units": [], "missing": [], "failed_invariants": list(selection.failed), "exclusions": [],
+           "inputs": selection.inputs}
     failed = doc["failed_invariants"]
-    projected = [projection.apply(d, store_project(d)) for d in documents]
-    if any(p.axis[0] is None for p in projected):
-        if profile == "revisions":
-            # UC-03 §10: a side with no working-tree id (its dirty state is `unknown`) cannot be named.
-            detail = (f"a result has no {varying}: its tree's dirty state is unknown, so the side cannot be told "
-                      "apart from the other or checked for a change during the run. Make every file in the "
-                      "tree readable, or git-ignore it")
-        elif profile == "variants":
-            detail = (f"a result has no workload parameter {parameter}: declare it in the benchmark's "
-                      "`params`/`param_names`")
-        else:
-            detail = f"a result has no {varying}: give every bx bench call --label NAME=VALUE, and name that label here"
-        failed.append({"invariant": "sides", "detail": detail})
+    if selection.stopped:
         return doc
-
-    # A side is a distinct axis value, named by its first part (a tree, a label).
-    sides = [_c(p.axis) for p in projected]
-    names = {side: p.axis[0] for side, p in zip(sides, projected)}
-    if profile == "revisions":
-        matches = {side for side, d in zip(sides, documents)
-                   if names[side].startswith(baseline) or d["revision"]["key"].startswith(baseline)}
-    else:
-        matches = {side for side in names if names[side] == baseline}
-    if len({_c(names[side]) for side in matches}) != 1:
-        raise CompareError(f"baseline {baseline!r} matches {len(matches)} sides of {sorted(map(str, names.values()))}")
-    base = sorted(matches)[0]  # several sides of one name fail two-sides below
-    doc["baseline"] = names[base]
-    if len(names) != 2:
-        failed.append({"invariant": "two-sides",
-                       "detail": f"{len(names)} sides: {sorted(_c(n) for n in names.values())}"})
-        return doc
-    contender = next(side for side in names if side != base)
-    doc["contender"] = names[contender]
-    doc["sides"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == side))
-                    for role, side in (("baseline", base), ("contender", contender))}
-
-    # Run-level invariants (schema §5.5, comparator.md §3), as the profile names them.
-    check = set(projection.invariants)
-    if "sides-differ" in check:
-        a, b = (json.loads(side) for side in (base, contender))
-        if all(x == y for path, x, y in zip(projection.axis, a, b) if not path.startswith("/provenance/")):
-            failed.append({"invariant": "sides-differ",
-                           "detail": f"the sides differ only in their label ({varying}): nothing recorded about the "
-                                     "environment differs. Describe what differs with a context collector "
-                                     "(collectors in benchx.conf.json) or a setup file for each environment"})
-    if "one-tree-per-side" in check:
-        trees = {side: {d["provenance"].get("subject_tree") for d, x in zip(documents, sides) if x == side}
-                 for side in (base, contender)}
-        if any(len(t) != 1 or None in t for t in trees.values()) or trees[base] == trees[contender]:
-            failed.append({"invariant": "one-tree-per-side", "detail": "each side must have one tree id, and "
-                                                                      "the two must differ"})
-    if "one-benchmark-tree" in check:
-        failed.extend(_benchmark_file(documents, names, sides))
-    if "alternating-slots" in check:
-        # Variants are usually measured by one command, so say how to get an alternating run.
-        how = ("; make one bx bench call per value, each with --run-key, --round and --slot, "
-               "or run bx compare TARGET --profile variants" if profile == "variants" else "")
-        slots = {}
-        for d, s in zip(documents, sides):
-            slot = d.get("procedure", {}).get("slot")
-            if slot is None:
-                failed.append({"invariant": "alternating-slots",
-                               "detail": "a result has no slot: give every bx bench call --slot" + how})
-                break
-            slots.setdefault(slot, set()).add(s)
-        else:
-            order = [slots[slot] for slot in sorted(slots)]
-            if any(len(o) != 1 for o in order) or any(a == b for a, b in zip(order, order[1:])):
-                failed.append({"invariant": "alternating-slots",
-                               "detail": "sides do not alternate by procedure.slot: run the sides in the same "
-                                         "order every round (a, b, a, b, ...)" + how})
-
-    # Units: one workload variant and quantity each. Everything else the
-    # projection matches must agree across both sides (schema §5.5).
-    units = {}
-    for d, p, s in zip(documents, projected, sides):
-        variant = {ptr: v for ptr, v in p.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
-        key = (_c(variant), d["measurement"]["quantity"]["name"])
-        units.setdefault(key, {"docs": {base: [], contender: []}, "identities": []})
-        units[key]["docs"][s].append(d)
-        units[key]["identities"].append(p.identity)
-    for (_, quantity), unit in units.items():
-        differing = _differing(unit["identities"])
-        if differing:
-            failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"], projection.axis),
-                           "quantity": quantity, "detail": f"{', '.join(differing)} differ"})
+    if "alternating-slots" in method.requires:
+        failed.extend(_alternation(selection.slots, selection.advice.get("alternating-slots", "")))
+    failed.extend(selection.disagreements)
     if failed:
         return doc
 
-    for (_, quantity), unit in sorted(
-            units.items(),
-            key=lambda item: _unit_order(_workload(item[1]["docs"], projection.axis), item[0][1])):
-        by_side = unit["docs"]
-        where = {"workload": _workload(by_side, projection.axis), "quantity": quantity}
-        absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
-        if absent:
-            doc["missing"].extend({**where, "side": role} for role in absent)
+    for evidence in selection.units:
+        where = {"workload": evidence.workload, "quantity": evidence.quantity["name"]}
+        if evidence.missing:
+            doc["missing"].extend({**where, "side": side} for side in evidence.missing)
             continue
-        if "equal-attempts" in check and len(by_side[base]) != len(by_side[contender]):
-            failed.append({"invariant": "equal-attempts", **where,
-                           "detail": f"{len(by_side[base])} against {len(by_side[contender])}: run the same "
-                                     "number of rounds on both sides"})
+        layout, problem = _lay_out(evidence, method)
+        if problem:
+            failed.append({"invariant": problem[0], **where, "detail": problem[1]})
             continue
-        rounds, side_failed = {}, False
-        for s in (base, contender):
-            for d in by_side[s]:
-                if d["measurement"]["status"] != "success":
-                    status, reason = d["measurement"]["status"], d["measurement"].get("reason")
-                    result = {"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]}
-                    doc["exclusions"].append({"result": result, "reason": f"{status}: {reason}" if reason else status})
-                    side_failed = side_failed or (profile in STRICT_STATUS and status in FAILED_STATUSES)
-                    continue
-                rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
-        pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
-                 if base in r and contender in r]
-        unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed)
-        unit_doc["unmatched_differences"] = _differences(projection, by_side[base], by_side[contender])
-        if caveats := _caveats(by_side, base, contender):
-            unit_doc["caveats"] = caveats
-        doc["units"].append(unit_doc)
+        doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}
+                                 for row in evidence.rows if row.exclusion)
+        doc["units"].append(_unit(selection, evidence, layout, method, configuration, where))
     return doc
 
 
-def _benchmark_file(documents, names, sides) -> list[dict]:
-    """The `one-benchmark-tree` invariant (schema §5.5, UC-03 §10, UC-02 §5). A benchmark recorded apart from
-    the subject has its own `benchmark_tree`, which differs from `subject_tree`; it must be one file
-    on both sides and in every round. A benchmark in the subject's checkout has `benchmark_tree`
-    equal to `subject_tree` and differs between the sides as the subject does, so it is not
-    checked. A result without a `benchmark_tree` (a thin result) is outside the rule.
-
-    An in-tree record must also name the subject's source as its benchmark's: one that does not is
-    malformed. The reverse is not required, since a suite in another checkout of the same
-    repository has the subject's source URI but its own file id."""
-    found, malformed = [], []
-    for d, side in zip(documents, sides):
-        provenance = d["provenance"]
-        tree = provenance.get("benchmark_tree")
-        if tree is None:
-            continue
-        separate = tree != provenance.get("subject_tree")
-        found.append((side, tree, separate))
-        recorded = d.get("benchmark")
-        if recorded is not None and not separate and _c(recorded.get("source")) != _c(d["source"]):
-            malformed.append(str(names[side]))
-    failed = []
-    if malformed:
-        failed.append({"invariant": "one-benchmark-tree",
-                       "detail": "malformed record: the benchmark is in the subject's tree but names another "
-                                 f"source (sides {sorted(set(malformed))})"})
-    if any(separate for _, _, separate in found):
-        trees = {tree for _, tree, _ in found}
-        if len(trees) != 1 or not all(separate for _, _, separate in found):
-            failed.append({"invariant": "one-benchmark-tree",
-                           "detail": f"a benchmark recorded apart from the subject must be one file on both sides "
-                                     f"and in every round: {len(trees)} benchmark trees "
-                                     f"({', '.join(sorted(t[:12] for t in trees))})"})
-    return failed
+def _alternation(slots: str | None, advice: str) -> list[dict]:
+    if slots == "absent":
+        detail = "a result has no slot: give every bx bench call --slot"
+    elif slots == "not-alternating":
+        detail = ("sides do not alternate by procedure.slot: run the sides in the same order every round "
+                  "(a, b, a, b, ...)")
+    else:
+        return []
+    return [{"invariant": "alternating-slots", "detail": detail + advice}]
 
 
-def _workload(by_side, axis=()) -> dict:
-    """The unit's workload variant, as the comparison document names it: what both sides share,
-    so the parameters on the profile's axis (the ones that tell the sides apart) are left out."""
-    workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
-    varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
-    parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
-    return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
+def _lay_out(evidence: Evidence, method: Method) -> tuple[Layout | None, tuple[str, str] | None]:
+    """This unit in the shape the method asked for; or, when it cannot go to this
+    method, the invariant that says so and why."""
+    if "equal-attempts" in method.requires:
+        counts = [sum(1 for row in evidence.rows if row.side == side) for side in evidence.sides]
+        if len(set(counts)) > 1:
+            return None, ("equal-attempts", (f"{' against '.join(map(str, counts))}: run the same number of rounds "
+                                             "on both sides"))
+    try:
+        layout = pivot(evidence, method.dims)
+    except NotApplicable as e:
+        return None, ("layout", f"{method.id} does not apply: {e}")
+    if "duplicate-points" in method.requires and any(len(leaf) > 1 for leaf in layout.leaves()):
+        return None, ("duplicate-points", (f"more than one usable result at the same {', '.join(method.dims)}: "
+                                           "the comparator never picks one implicitly"))
+    return layout, None
 
 
-def _unit_order(workload: dict, quantity: str) -> tuple:
-    """The order units are listed in: by workload name, then by parameter name and value, then by
-    quantity, with numbers inside names and values in natural order (`axis_order`), so that `n=50`
-    comes before `n=100` and `bench_2` before `bench_10`, as people read them."""
-    parameters = sorted((workload.get("parameters") or {}).items())
-    return (axis_order(workload["name"]), tuple((name, axis_order(value)) for name, value in parameters), quantity)
-
-
-_ABSENT = object()
-
-
-def _diff(pointer: str, values: list) -> list[str]:
-    """The deepest pointers at which `values` are not all the same."""
-    if all(isinstance(v, dict) for v in values):
-        keys = sorted(set().union(*values))
-        return [p for key in keys for p in _diff(f"{pointer}/{key.replace('~', '~0').replace('/', '~1')}",
-                                                 [v.get(key, _ABSENT) for v in values])]
-    distinct = {"<absent>" if v is _ABSENT else _c(v) for v in values}
-    return [pointer] if len(distinct) > 1 else []
-
-
-def _differing(facts: list[dict]) -> list[str]:
-    """Pointers whose value is not the same in every one of `facts` (pointer -> value)."""
-    return sorted(p for key in set().union(*facts) for p in _diff(key, [f.get(key, _ABSENT) for f in facts]))
-
-
-def _declared(document) -> dict:
-    """What a side says about how it was built and entered, beside what the
-    runner saw: the declarations are recorded as given and never judged."""
-    info = document["provenance"].get("info", {})
-    side = {k: info[k] for k in ("how_built", "activation", "shell", "target_provider") if k in info}
-    if isinstance(side.get("how_built"), dict):  # facts, shown as the JSON text they are
-        side["how_built"] = json.dumps(side["how_built"], sort_keys=True, separators=(",", ":"))
-    system = document["coordinates"]["environment"].get("system") or {}
-    if env := (system.get("process") or {}).get("environment"):
-        side["observed_env"] = env
-    return side
-
-
-def _caveats(by_side, base, contender) -> list[str]:
-    """The warnings a side's results carry (quality.warnings), by side, for the reader."""
-    found = set()
-    for role, side in (("baseline", base), ("contender", contender)):
-        for d in by_side[side]:
-            for w in d.get("quality", {}).get("warnings", []):
-                found.add(f"{role}: {w.get('code', w) if isinstance(w, dict) else w}")
-            # A side that is not clean is named whether or not its producer warned (UC-03 §10).
-            for flag, code in DIRTY_WARNINGS:
-                if d["provenance"].get(flag) == "dirty":
-                    found.add(f"{role}: {code}")
-    return sorted(found)
-
-
-def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False):
-    first = {s: by_side[s][0] for s in (base, contender)}
-    quantity = first[base]["measurement"]["quantity"]
-    unit = {**where, "series": {name: identity.series_fingerprint(first[s], store_project(first[s]), identity.MEDIAN)
-                                for name, s in (("baseline", base), ("contender", contender))},
-            "rounds": len(pairs), "noise_source": "paired-rounds", "verdict": "indeterminate"}
-    if side_failed:
-        # UC-02 §10: if either side fails to run, the benchmark has failed; no effect is reported.
-        unit["reason"] = "side-failed"
-        return unit
-    estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
-    estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
-    if estimates:
-        unit["reference_estimate"] = statistics.median(b for b, _ in estimates)
-    if quantity.get("deterministic"):
-        # Deferred: no quantity of the implementation is deterministic (prototype-design.md §5).
-        unit["reason"] = "deterministic-deferred"
-        return unit
-    if len(estimates) < max(min_rounds, MIN_PAIRS):
-        unit["reason"] = "insufficient-rounds"
-        return unit
-    if any(b == 0 for b, _ in estimates):
-        unit["reason"] = "zero-baseline"
-        return unit
-    d = [c / b - 1 for b, c in estimates]
-    effect = statistics.fmean(d)
-    noise = statistics.stdev(d) / math.sqrt(len(d))
-    unit.update(effect=effect, noise=noise, verdict=_verdict(effect, noise, k, quantity.get("direction")))
+def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Method, configuration: dict,
+          where: dict) -> dict:
+    assessment = method.assess(layout, evidence, configuration)
+    Draft202012Validator(method.details_schema).validate(assessment.details)
+    if evidence.no_verdict and (assessment.verdict, assessment.reason, assessment.effect) != (
+            "indeterminate", evidence.no_verdict, None):
+        raise AssertionError(f"{method.id} gave a verdict on a unit its selector says has none "
+                             f"({evidence.no_verdict}); comparator.md §3")
+    summary = {**({"target": list(evidence.target)} if evidence.target else {}),
+               **({"reference": list(evidence.reference)} if evidence.reference else {}),
+               **({"ordering": evidence.ordering} if evidence.ordering else {}),
+               **({"boundaries": list(evidence.boundaries)} if evidence.boundaries else {})}
+    caveats = list(evidence.caveats)
+    if selection.slots == "not-alternating" and "alternating-slots" not in method.requires:
+        caveats = sorted({*caveats, "sides-did-not-alternate"})
+    unit = {**where, "series": evidence.series, **({"evidence": summary} if summary else {}),
+            "method": {"name": method.name, "version": method.version}, "verdict": assessment.verdict,
+            **_partition(evidence, assessment, method.dims), "details": assessment.details}
+    if assessment.reason:
+        unit["reason"] = assessment.reason
+    if assessment.effect:
+        unit["effect"] = assessment.effect
+    if evidence.unmatched_differences is not None:
+        unit["unmatched_differences"] = list(evidence.unmatched_differences)
+    if caveats:
+        unit["caveats"] = caveats
     return unit
 
 
-def _differences(projection: Projection, a_docs, b_docs) -> list[str]:
-    """What the projection does not match that differs between the sides: its
-    ignored facts, and the parts of its axis after the first, which name what
-    the sides differ in (schema §4.3)."""
-    def facts(docs):
-        found = []
-        for d in docs:
-            projected = projection.apply(d, store_project(d))
-            found.append({**projected.ignored, **dict(list(zip(projection.axis, projected.axis))[1:])})
-        return found
+def _partition(evidence: Evidence, assessment, dims: tuple) -> dict:
+    """Every result of the unit in exactly one of used and excluded, in table order."""
+    def ref(row):
+        return row.result["producer"], row.result["ingest_key"]
 
-    def at(fact, pointer):
-        for key, value in fact.items():
-            if pointer == key or pointer.startswith(key + "/"):
-                return get(value, pointer[len(key):]) if pointer != key else value
-        return None
+    def unused(row):
+        lacking = [dim for dim in dims if dim != SIDE and row.columns.get(dim) is None]
+        return f"no {lacking[0]}" if lacking else "not-used"
 
-    def seen(found, pointer):
-        return {_c(at(fact, pointer)) for fact in found}
+    used = {ref(row) for row in assessment.used}
+    reasons = {ref(row): reason for row, reason in assessment.excluded}
+    found = {"used": [], "excluded": []}
+    for row in evidence.rows:
+        if ref(row) in used:
+            found["used"].append(row.result)
+        else:
+            found["excluded"].append({"result": row.result,
+                                      "reason": row.exclusion or reasons.get(ref(row)) or unused(row)})
+    return found
 
-    a, b = facts(a_docs), facts(b_docs)
-    return [p for p in _differing(a + b) if seen(a, p) != seen(b, p)]
+
+def _described(unit: dict) -> str:
+    """A unit's numbers as its method words them, or plainly when the method is not in this implementation."""
+    name = f"{unit['method']['name']}/{unit['method']['version']}"
+    if name in methods.METHODS:
+        return methods.METHODS[name].describe(unit.get("effect"), unit["details"])
+    effect = f"{unit['effect']['value']:+.4g}" if "effect" in unit else "?"
+    return f"effect {effect}  {json.dumps(unit['details'], sort_keys=True)}"
 
 
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
-    lines = [f"run {doc['run_key']}  profile {doc['profile']}  "
-             f"baseline {str(doc['baseline'])[:12]}  contender {str(doc.get('contender'))[:12]}"
-             + ("  [local-only]" if doc["local_only"] else "")]
-    for role, side in doc.get("sides", {}).items():
-        name = doc[role]
+    params, sides = doc["selector"]["params"], doc.get("sides", {})
+    if sides:
+        header = (f"run {params['run_key']}  profile {params['profile']}  "
+                  f"baseline {str(sides['baseline'])[:12]}  contender {str(sides.get('contender'))[:12]}")
+    else:  # a selector with sides of its own, such as reference and target
+        header = "  ".join([doc["selector"]["name"], *(f"{k} {v}" for k, v in params.items())])
+    lines = [header + ("  [local-only]" if doc["local_only"] else "")]
+    for role, side in sides.get("declared", {}).items():
+        name = sides[role]
         for key in ("how_built", "activation", "observed_env"):
             if key in side:
                 shown = side[key] if key != "observed_env" else ", ".join(f"{k}={v}" for k, v in side[key].items())
@@ -442,22 +177,19 @@ def render(doc: dict) -> str:
                 lines.append(f"  {name}: {key.replace('_', ' ')}: {first}" + (f" (+{len(rest)} lines)" if rest else ""))
     differs = sorted({p for u in doc["units"] for p in u.get("unmatched_differences", [])})
     if differs:
-        shown = ", ".join(_dotted(p) for p in differs[:6])
+        shown = ", ".join(dotted(p) for p in differs[:6])
         lines.append(f"  differs: {shown}" + (f" (+{len(differs) - 6} more)" if len(differs) > 6 else ""))
     caveats = sorted({c for u in doc["units"] for c in u.get("caveats", [])})
     if caveats:
         lines.append(f"  caveats: {', '.join(caveats)}")
-    for section in ("regressed", "improved", "changed", "no-change-detected", "indeterminate"):
+    for section in ("regressed", "improved", "changed", "no-change-detected", "equivalent", "indeterminate"):
         rows = [u for u in doc["units"] if u["verdict"] == section]
         if not rows:
             continue
         lines.append(f"\n{section.replace('-', ' ').upper()} ({len(rows)})")
         for u in rows:
-            effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
-            noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
             reason = f"  ({u['reason']})" if "reason" in u else ""
-            lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} effect {effect}  noise {noise}"
-                         f"  rounds={u['rounds']}{reason}")
+            lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} {_described(u)}{reason}")
     for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
                        ("exclusions", "excluded")):
         if doc[key]:

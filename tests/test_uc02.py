@@ -88,10 +88,10 @@ def test_the_loop_compares_the_two_values(tree, capsys):
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
     assert core.check(doc, "comparison-document") == []
     assert "varying: role (the only parameter)" in err  # inferred, and said so
-    assert doc["varying"] == "coordinates.workload.parameters.role"
-    assert (doc["baseline"], doc["contender"]) == (BASELINE, VARIANT)
+    assert doc["sides"]["varying"] == "coordinates.workload.parameters.role"
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (BASELINE, VARIANT)
     [unit] = doc["units"]
-    assert unit["workload"] == {"name": "bench_truncate"} and unit["rounds"] == 3 and unit["effect"] > 0
+    assert unit["workload"] == {"name": "bench_truncate"} and unit["details"]["rounds"] == 3 and unit["effect"]["value"] > 0
     assert doc["local_only"] is False  # a clean tree: the store and the results are not part of it
 
 
@@ -99,8 +99,8 @@ def test_the_baseline_can_be_the_other_value(tree, capsys):
     loop(["mod.py"], by_case([BASELINE, VARIANT]), PYPERF)
     code, doc, _ = compare(capsys, baseline=VARIANT)
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
-    assert (doc["baseline"], doc["contender"]) == (VARIANT, BASELINE)
-    assert doc["units"][0]["effect"] < 0
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (VARIANT, BASELINE)
+    assert doc["units"][0]["effect"]["value"] < 0
 
 
 def test_an_unquoted_baseline_is_refused_with_the_recorded_values(tree, capsys):
@@ -121,7 +121,7 @@ def test_a_second_parameter_makes_one_unit_per_value_of_it(tmp, monkeypatch, cap
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "bench_truncate", "parameters": {"size": "10"}},
         {"name": "bench_truncate", "parameters": {"size": "100"}}]
-    assert all(u["effect"] > 0 for u in doc["units"])
+    assert all(u["effect"]["value"] > 0 for u in doc["units"])
     cli.main(["compare", "--run", RUN, "--profile", "variants", "--baseline", BASELINE, "--vary", "role"])
     shown = capsys.readouterr().out
     assert "bench_truncate [size=10]" in shown and "bench_truncate [size=100]" in shown
@@ -199,7 +199,7 @@ def test_the_loop_with_an_asv_suite_names_cases_by_module(tmp, monkeypatch, caps
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
     assert "varying: role (the only parameter)" in err
     [unit] = doc["units"]
-    assert unit["workload"] == {"name": "trunc.time_truncate"} and unit["effect"] > 0
+    assert unit["workload"] == {"name": "trunc.time_truncate"} and unit["effect"]["value"] > 0
 
 
 def test_the_loop_with_an_asv_suite_and_a_second_parameter(tmp, monkeypatch, capsys):
@@ -226,9 +226,9 @@ def test_measure_mode_runs_the_loop_in_one_command_and_equals_read_mode(tree, ca
     code, doc, err = measure(capsys)
     assert code == cli.EXIT_OK and doc["failed_invariants"] == [] and core.check(doc, "comparison-document") == []
     assert "varying: role (the only parameter)" in err and "round 3/3 role='variant'" in err
-    assert (doc["baseline"], doc["contender"]) == (BASELINE, VARIANT) and doc["local_only"] is False
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (BASELINE, VARIANT) and doc["local_only"] is False
     [unit] = doc["units"]
-    assert unit["workload"] == {"name": "bench_truncate"} and unit["rounds"] == 3 and unit["effect"] > 0
+    assert unit["workload"] == {"name": "bench_truncate"} and unit["details"]["rounds"] == 3 and unit["effect"]["value"] > 0
     # What the session stored compares to the same document when read back (criterion 8).
     code, again, _ = compare(capsys)
     assert code == cli.EXIT_OK and again == doc
@@ -237,7 +237,7 @@ def test_measure_mode_runs_the_loop_in_one_command_and_equals_read_mode(tree, ca
 def test_measure_mode_takes_the_baseline_value(tree, capsys):
     code, doc, _ = measure(capsys, "--baseline", VARIANT)
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
-    assert (doc["baseline"], doc["contender"]) == (VARIANT, BASELINE) and doc["units"][0]["effect"] < 0
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (VARIANT, BASELINE) and doc["units"][0]["effect"]["value"] < 0
 
 
 def test_measure_mode_refuses_a_baseline_that_is_not_a_value_before_running(tree, capsys):

@@ -91,7 +91,7 @@ def test_the_build_root_imports_nothing(tmp, toy, monkeypatch):
     monkeypatch.delenv("PYTHONPATH", raising=False)
     doc = compare(tmp, toy, monkeypatch, reported="build")
     unit = doc["units"][0]
-    assert unit["rounds"] == 0
+    assert unit["details"]["rounds"] == 0
     assert unit["verdict"] == "indeterminate"
     assert doc["exclusions"] and {e["reason"] for e in doc["exclusions"]} == {"error: harness.error"}
 
@@ -106,8 +106,8 @@ def test_one_pythonpath_measures_one_build_on_both_sides(tmp, toy, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(toy["sides"]["base"]["package"]))
     doc = compare(tmp, toy, monkeypatch, reported="build")
     unit = doc["units"][0]
-    assert unit["rounds"] == 3
-    assert abs(unit["effect"]) < 1  # a real 100-fold difference is an effect of about 100
+    assert unit["details"]["rounds"] == 3
+    assert abs(unit["effect"]["value"]) < 1  # a real 100-fold difference is an effect of about 100
 
 
 def test_the_package_directory_as_target_imports_each_build(tmp, toy, monkeypatch):
@@ -117,6 +117,6 @@ def test_the_package_directory_as_target_imports_each_build(tmp, toy, monkeypatc
     monkeypatch.delenv("PYTHONPATH", raising=False)
     doc = compare(tmp, toy, monkeypatch, reported="package")
     unit = doc["units"][0]
-    assert unit["rounds"] == 3
+    assert unit["details"]["rounds"] == 3
     assert unit["verdict"] == "regressed"
-    assert unit["effect"] > 10
+    assert unit["effect"]["value"] > 10
