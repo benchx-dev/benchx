@@ -293,7 +293,7 @@ def test_a_result_a_method_does_not_mention_is_still_accounted_for():
 
 
 def test_the_default_method_is_registered():
-    assert methods.DEFAULT in methods.METHODS and catalog.COMPARISON_DOCUMENT.endswith("/0.2.0")
+    assert methods.DEFAULT in methods.METHODS and catalog.COMPARISON_DOCUMENT.endswith("/0.1.0")
 
 
 # --- a selector's no-verdict rule (UC-02 §10) holds for every method ----------------------------

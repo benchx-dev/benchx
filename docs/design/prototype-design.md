@@ -240,7 +240,7 @@ criterion 1 holds by construction.
 
 ```json
 {
-  "schema_version": "benchx/comparison-document/0.2.0",
+  "schema_version": "benchx/comparison-document/0.1.0",
   "selector": {"name": "benchx/run-profile", "version": "v1",
                "params": {"run_key": "urn:uuid:9b2e4f1a-…", "profile": "environments",
                           "baseline": "plain", "label": "build"}},

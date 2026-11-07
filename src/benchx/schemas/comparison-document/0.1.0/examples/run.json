@@ -1,10 +1,18 @@
 {
   "schema_version": "benchx/comparison-document/0.1.0",
-  "mode": "run",
+  "selector": {
+    "name": "benchx/run-profile",
+    "version": "v1",
+    "params": {
+      "run_key": "urn:uuid:9b2e4f1a-6c3d-4e8b-a1f0-2d7c5b9e3a41",
+      "profile": "environments",
+      "baseline": "plain",
+      "label": "build"
+    }
+  },
   "method": {
     "name": "benchx/paired-relative",
     "version": "v1",
-    "effect_measure": "relative",
     "configuration": {
       "k": 3.0,
       "min_rounds": 3
@@ -17,12 +25,11 @@
   },
   "identity_schema": "benchx/profile/environments/v1+benchx/benchx-identity/v1",
   "local_only": true,
-  "run_key": "urn:uuid:9b2e4f1a-6c3d-4e8b-a1f0-2d7c5b9e3a41",
-  "profile": "environments",
-  "varying": "provenance.labels.build",
-  "baseline": "plain",
-  "contender": "hardened",
-  "pairing": "procedure.round",
+  "sides": {
+    "varying": "provenance.labels.build",
+    "baseline": "plain",
+    "contender": "hardened"
+  },
   "failed_invariants": [],
   "units": [
     {
@@ -30,17 +37,70 @@
         "name": "TakeChunked/4194304/2"
       },
       "quantity": "wall-time",
-      "series": {
+      "series": "c4a8e21f6b0d3975e1f8a2c6d4b07e3915fa8c2d6e0b4a7193d5c8f2e6a1b047",
+      "side_series": {
         "baseline": "3f1c9a0b7d2e4f6a8b1c3d5e7f9a0b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a",
         "contender": "8e2d4c6b0a9f1e3d5c7b9a0f2e4d6c8b0a1f3e5d7c9b0a2f4e6d8c0b1a3f5e7d"
       },
-      "rounds": 3,
-      "reference_estimate": 0.0455,
-      "effect": 0.024,
-      "noise": 0.0021,
-      "noise_source": "paired-rounds",
-      "threshold": 0.0063,
+      "evidence": {
+        "keys": [
+          {
+            "name": "round",
+            "key": {
+              "pointer": "/procedure/round",
+              "order": "natural"
+            },
+            "relation": "crossed",
+            "complete": true
+          }
+        ],
+        "slots": "alternating"
+      },
+      "method": {
+        "name": "benchx/paired-relative",
+        "version": "v1"
+      },
       "verdict": "regressed",
+      "effect": {
+        "measure": "relative",
+        "value": 0.024
+      },
+      "used": [
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-1:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-2:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-3:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-4:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-5:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-6:wall-time"
+        }
+      ],
+      "excluded": [],
+      "details": {
+        "rounds": 3,
+        "reference_estimate": 0.0455,
+        "noise": 0.0021,
+        "noise_kind": "standard-error",
+        "noise_source": "paired-rounds",
+        "degrees_of_freedom": 2,
+        "threshold": 0.0063
+      },
       "unmatched_differences": []
     },
     {
@@ -48,10 +108,52 @@
         "name": "TakeChunked/65536/2"
       },
       "quantity": "wall-time",
-      "rounds": 2,
-      "noise_source": "paired-rounds",
+      "series": "7d13f0b9c2e64a8815d7ca30e9f2b6417ac8d05e3b1f96c2704ea8d1c3b5f692",
+      "evidence": {
+        "keys": [
+          {
+            "name": "round",
+            "key": {
+              "pointer": "/procedure/round",
+              "order": "natural"
+            },
+            "relation": "crossed",
+            "complete": true
+          }
+        ],
+        "slots": "alternating"
+      },
+      "method": {
+        "name": "benchx/paired-relative",
+        "version": "v1"
+      },
       "verdict": "indeterminate",
-      "reason": "insufficient-rounds"
+      "reason": "insufficient-rounds",
+      "used": [
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-7:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-8:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-9:wall-time"
+        },
+        {
+          "producer": "benchx/gbench-adapter",
+          "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-10:wall-time"
+        }
+      ],
+      "excluded": [],
+      "details": {
+        "rounds": 2,
+        "noise_kind": "standard-error",
+        "noise_source": "paired-rounds"
+      },
+      "unmatched_differences": []
     }
   ],
   "missing": [

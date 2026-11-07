@@ -358,7 +358,7 @@ review or policy, not part of the detector.
 
 ## 5. Output
 
-A **comparison document** (`schemas/comparison-document/0.2.0`) is machine-readable
+A **comparison document** (`schemas/comparison-document/0.1.0`) is machine-readable
 and self-describing. It records:
 
 - the `selector` as `{name, version, params}`, and the `method` requested with its

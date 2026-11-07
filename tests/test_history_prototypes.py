@@ -1,7 +1,7 @@
 """History mode and detectors, as test-only prototypes (comparator.md §2.2, §2.5, §4.6, §8).
 
 PROTOTYPES, NOT A FEATURE. The selectors, methods, and detector here exist to check
-that the types in benchx.evidence and comparison-document/0.2.0 can express history
+that the types in benchx.evidence and comparison-document/0.1.0 can express history
 mode. Nothing here is reachable from the CLI or from configuration, and the
 change-point detector is deliberately trivial.
 

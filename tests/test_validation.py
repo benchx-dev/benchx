@@ -16,7 +16,6 @@ def check(data: dict) -> list[StructureError]:
 
 
 COMPARISONS = catalog.SCHEMAS / "comparison-document" / "0.1.0" / "examples"
-COMPARISONS_NOW = catalog.SCHEMAS / "comparison-document" / "0.2.0" / "examples"
 SCHEMA_FILES = sorted(
     (kind.name, version.name, version / "schema.json")
     for kind in catalog.SCHEMAS.iterdir()
@@ -47,8 +46,8 @@ def test_lookup_of_missing_schema_is_none():
 
 @pytest.mark.parametrize(
     "file",
-    sorted(COMPARISONS.glob("*.json")) + sorted(COMPARISONS_NOW.glob("*.json")),
-    ids=lambda path: f"{path.parent.parent.name}-{path.stem}",
+    sorted(COMPARISONS.glob("*.json")),
+    ids=lambda path: path.stem,
 )
 def test_comparison_examples_fit(file):
     data = json.loads(file.read_text())
@@ -56,18 +55,9 @@ def test_comparison_examples_fit(file):
     assert errors == [] and list(validation.check(data, validator)) == []
 
 
-def test_history_comparison_takes_no_run_fields():
-    data = json.loads((COMPARISONS / "history.json").read_text())
-    data["run_key"] = "rev-1"
-    validator, _ = validation.find_schema(data, "comparison-document")
-    [issue] = validation.check(data, validator)
-    # jsonschema reports a `false` subschema without its path or keyword.
-    assert issue.message == "False schema does not allow 'rev-1'"
-
-
 @pytest.mark.parametrize("field", ["mode", "run_key", "profile", "baseline", "pairing"])
 def test_comparison_has_no_mode_specific_fields(field):
-    data = json.loads((COMPARISONS_NOW / "run.json").read_text())
+    data = json.loads((COMPARISONS / "run.json").read_text())
     data[field] = "x"
     validator, _ = validation.find_schema(data, "comparison-document")
     [issue] = validation.check(data, validator)
@@ -75,14 +65,14 @@ def test_comparison_has_no_mode_specific_fields(field):
 
 
 def test_comparison_details_are_open_since_a_new_method_must_not_change_the_schema():
-    data = json.loads((COMPARISONS_NOW / "run.json").read_text())
+    data = json.loads((COMPARISONS / "run.json").read_text())
     data["units"][0]["details"] = {"anything": {"a": "method"}, "may": "say"}
     validator, _ = validation.find_schema(data, "comparison-document")
     assert list(validation.check(data, validator)) == []
 
 
 def test_an_indeterminate_comparison_needs_its_reason():
-    data = json.loads((COMPARISONS_NOW / "run.json").read_text())
+    data = json.loads((COMPARISONS / "run.json").read_text())
     del data["units"][1]["reason"]
     validator, _ = validation.find_schema(data, "comparison-document")
     [issue] = validation.check(data, validator)

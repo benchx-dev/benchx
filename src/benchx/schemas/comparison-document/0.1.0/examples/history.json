@@ -1,10 +1,19 @@
 {
   "schema_version": "benchx/comparison-document/0.1.0",
-  "mode": "history",
+  "selector": {
+    "name": "benchx/preceding-window",
+    "version": "v1",
+    "params": {
+      "target": {
+        "producer": "example.org/arrow-adapter",
+        "ingest_key": "ci-1240:parquet-read/snappy:wall-time"
+      },
+      "window": 20
+    }
+  },
   "method": {
     "name": "benchx/dispersion-scaled",
     "version": "v1",
-    "effect_measure": "relative",
     "configuration": {
       "k": 3.0,
       "window": 20,
@@ -18,6 +27,7 @@
   },
   "identity_schema": "arrow/identity/v2",
   "local_only": false,
+  "failed_invariants": [],
   "units": [
     {
       "workload": {
@@ -28,11 +38,54 @@
       },
       "quantity": "wall-time",
       "series": "5b7d9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d",
-      "target": {
-        "producer": "example.org/arrow-adapter",
-        "ingest_key": "ci-1240:parquet-read/snappy:wall-time"
+      "evidence": {
+        "keys": [],
+        "target": [
+          {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1240:parquet-read/snappy:wall-time"
+          }
+        ],
+        "reference": [
+          {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1236:parquet-read/snappy:wall-time"
+          },
+          {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1237:parquet-read/snappy:wall-time"
+          },
+          {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1238:parquet-read/snappy:wall-time"
+          },
+          {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1239:parquet-read/snappy:wall-time"
+          }
+        ],
+        "ordering": "ancestry",
+        "boundaries": [
+          {
+            "kind": "distribution-reset",
+            "at": {
+              "producer": "example.org/arrow-adapter",
+              "ingest_key": "ci-1236:parquet-read/snappy:wall-time"
+            },
+            "detail": "runner kernel upgraded"
+          }
+        ]
       },
-      "reference": [
+      "method": {
+        "name": "benchx/dispersion-scaled",
+        "version": "v1"
+      },
+      "verdict": "no-change-detected",
+      "effect": {
+        "measure": "relative",
+        "value": -0.008
+      },
+      "used": [
         {
           "producer": "example.org/arrow-adapter",
           "ingest_key": "ci-1236:parquet-read/snappy:wall-time"
@@ -48,25 +101,28 @@
         {
           "producer": "example.org/arrow-adapter",
           "ingest_key": "ci-1239:parquet-read/snappy:wall-time"
-        }
-      ],
-      "ordering": "ancestry",
-      "boundaries": [
+        },
         {
-          "kind": "distribution-reset",
-          "at": {
-            "producer": "example.org/arrow-adapter",
-            "ingest_key": "ci-1236:parquet-read/snappy:wall-time"
-          },
-          "detail": "runner kernel upgraded"
+          "producer": "example.org/arrow-adapter",
+          "ingest_key": "ci-1240:parquet-read/snappy:wall-time"
         }
       ],
-      "reference_estimate": 0.0102,
-      "effect": -0.008,
-      "noise": 0.004,
-      "noise_source": "reference-points",
-      "threshold": 0.012,
-      "verdict": "no-change-detected",
+      "excluded": [
+        {
+          "result": {
+            "producer": "example.org/arrow-adapter",
+            "ingest_key": "ci-1235:parquet-read/snappy:wall-time"
+          },
+          "reason": "status error"
+        }
+      ],
+      "details": {
+        "reference_estimate": 0.0102,
+        "noise": 0.004,
+        "noise_kind": "standard-deviation",
+        "noise_source": "reference-points",
+        "threshold": 0.012
+      },
       "unmatched_differences": [
         "/coordinates/environment/system/os/kernel"
       ]
