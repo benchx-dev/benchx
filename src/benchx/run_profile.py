@@ -109,7 +109,7 @@ def _measurand(doc) -> bool:
 
 
 def _failed(invariant: str, detail: str, **where) -> dict:
-    return {"invariant": invariant, "owner": "selector", **where, "detail": detail}
+    return {"invariant": invariant, **where, "detail": detail}
 
 
 class RunProfile(Selector):
@@ -243,8 +243,6 @@ class RunProfile(Selector):
         first = {side: by_side[side][0] for side in (base, contender)}
         return Evidence(
             group["series"], workload, first[base]["measurement"]["quantity"], ROLES, rows,
-            side_series={role: identity.series_fingerprint(first[side], store_project(first[side]), identity.MEDIAN)
-                         for role, side in zip(ROLES, (base, contender))},
             unmatched_differences=tuple(_differences(projection, by_side[base], by_side[contender])),
             caveats=tuple(_caveats(by_side, base, contender)),
             no_verdict="side-failed" if strict and any(d["measurement"]["status"] in FAILED_STATUSES

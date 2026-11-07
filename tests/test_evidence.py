@@ -8,7 +8,7 @@ import pytest
 
 from benchx import compare, core, methods
 from benchx.core import catalog
-from benchx.evidence import Assessment, Evidence, Method, NotApplicable, Row, is_complete, pivot, relation, slot_schedule
+from benchx.evidence import Assessment, Evidence, Method, NotApplicable, Row, pivot, relation, slot_schedule
 from benchx.key import Key
 from test_comparator import BASE, HEAD, evaluate, invariants, labeled, result, run
 
@@ -23,12 +23,6 @@ def evidence(*rows):
 
 
 # --- keys ---------------------------------------------------------------------
-
-@pytest.mark.parametrize("key", [Key("/procedure/round"),
-                                 Key("/source/uri", normalize={"rule": "canonical-uri"})])
-def test_a_key_round_trips_through_json(key):
-    assert Key.from_json(json.loads(json.dumps(key.to_json()))) == key
-
 
 def test_a_key_reads_normalizes_and_orders():
     key = Key("/source/uri", normalize={"rule": "canonical-uri"})
@@ -51,12 +45,6 @@ def test_a_failed_attempt_still_shows_the_design():
     rows = [row("baseline", 0), row("contender", 0, estimate=None, exclusion="error")]
     assert relation(rows, "round") == "crossed"
     assert pivot(evidence(*rows), ("round", "side")).cells == [[(rows[0],), ()]]
-
-
-def test_completeness():
-    assert is_complete([row("baseline", 0), row("contender", 0)], "round", ("baseline", "contender"))
-    assert not is_complete([row("baseline", 0), row("contender", 0), row("baseline", 1)], "round",
-                           ("baseline", "contender"))
 
 
 @pytest.mark.parametrize("schedule, expected", [
@@ -105,7 +93,6 @@ def test_sides_that_disagree_are_two_series_and_refused():
         d["coordinates"]["subject"]["configuration"] = {"build_type": "Debug"}
     doc = evaluate(docs)
     assert invariants(doc) == ["sides-agree"] and doc["missing"] == [] and doc["units"] == []
-    assert doc["failed_invariants"][0]["owner"] == "selector"
 
 
 def test_a_variant_on_one_side_is_one_series_and_merely_missing():
@@ -120,9 +107,9 @@ def test_a_variant_on_one_side_is_one_series_and_merely_missing():
                                                                             ("BM_only_7", "baseline")}
 
 
-def test_one_unit_has_one_series_and_keeps_each_sides_policy_series():
+def test_one_unit_has_one_series():
     unit = evaluate(run())["units"][0]
-    assert set(unit["side_series"]) == {"baseline", "contender"} and len(unit["series"]) == 64
+    assert len(unit["series"]) == 64
 
 
 # --- who owns which check (decision 6) ----------------------------------------
@@ -131,7 +118,7 @@ def test_a_method_owns_what_its_statistics_assume():
     docs = run()
     docs[1]["procedure"]["slot"], docs[2]["procedure"]["slot"] = 2, 1  # a, a, b, b, a, b
     doc = evaluate(docs)
-    assert invariants(doc) == ["alternating-slots"] and doc["failed_invariants"][0]["owner"] == "method"
+    assert invariants(doc) == ["alternating-slots"]
 
 
 def test_alternation_is_judged_over_the_run_not_the_unit():
@@ -146,7 +133,6 @@ def test_alternation_is_judged_over_the_run_not_the_unit():
             slot += 1
     doc = evaluate(docs)
     assert invariants(doc) == [] and {u["workload"]["name"] for u in doc["units"]} == {"BM_W", "BM_Partial"}
-    assert {u["evidence"]["slots"] for u in doc["units"]} == {"alternating"}
 
 
 def test_two_usable_results_in_a_cell_are_refused_not_overwritten():
@@ -212,13 +198,6 @@ def test_the_noise_says_what_it_is_and_records_its_degrees_of_freedom():
     details = evaluate(run(rounds=5, base_values=(1.0, 2.0, 3.0, 4.0, 5.0)))["units"][0]["details"]
     assert details["noise_kind"] == "standard-error" and details["degrees_of_freedom"] == 4
     assert details["threshold"] == pytest.approx(3.0 * details["noise"])
-
-
-def test_the_evidence_summary_says_how_each_key_relates_to_the_side():
-    unit = evaluate(run())["units"][0]
-    assert unit["evidence"]["keys"] == [{"name": "round", "key": {"pointer": "/procedure/round", "order": "natural"},
-                                         "relation": "crossed", "complete": True}]
-    assert unit["method"] == {"name": "benchx/paired-relative", "version": "v1"}
 
 
 def test_the_method_and_selector_are_recorded_even_with_no_units():
@@ -335,3 +314,15 @@ def test_the_varied_parameter_is_recorded_with_the_selector():
     doc = compare.compare(variants_run(), run_key="run", profile="variants", baseline="'baseline'", parameter="role")
     assert doc["selector"]["params"] == {"run_key": "run", "profile": "variants", "baseline": "'baseline'",
                                          "parameter": "role"}
+
+
+def test_a_document_whose_selector_names_no_sides_renders():
+    """History mode's sides are its own (reference and target), so its document has no `sides`."""
+    import dataclasses
+
+    from benchx.run_profile import RUN_PROFILE
+    selection = RUN_PROFILE.select(run(), run_key="run", profile="revisions", baseline=BASE)
+    doc = compare.evaluate(dataclasses.replace(selection, sides=None), methods.get(methods.DEFAULT),
+                           {"k": 3.0, "min_rounds": 3})
+    assert core.check(doc, "comparison-document") == [] and "sides" not in doc
+    assert compare.render(doc).splitlines()[0].startswith("benchx/run-profile  run_key run  profile revisions")

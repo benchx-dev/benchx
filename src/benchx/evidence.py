@@ -5,8 +5,8 @@
 Selectors and methods are modular and versioned; what passes between them is
 defined here, so that neither knows about the other. Evidence is a flat table,
 and the only structure the framework reads from it is what counting can show:
-whether a key is crossed with the side or nested in it, whether blocks are
-complete, whether the slots alternated. Statistics belong to methods.
+whether a key is crossed with the side or nested in it, and whether the slots
+alternated. Statistics belong to methods.
 """
 
 from dataclasses import dataclass, field
@@ -57,7 +57,6 @@ class Evidence:
     sides: tuple                 # in order: the reference side first
     rows: tuple
     missing: tuple = ()          # sides with no result, which the selector expected
-    side_series: dict | None = None
     unmatched_differences: tuple | None = None
     caveats: tuple = ()
     # History evidence (comparator.md §2.2): `target` and `reference` are result
@@ -155,10 +154,6 @@ def relation(rows, column) -> str:
     return "crossed" if any(len(sides) > 1 for sides in found.values()) else "nested"
 
 
-def is_complete(rows, column, sides) -> bool:
-    return all(len(present) == len(sides) for present in _sides_by_value(rows, column).values())
-
-
 def slot_schedule(slots_and_sides) -> str:
     """Whether the sides alternate, from (slot, side) over a whole run. A slot
     is a position in the run's realized order, so a single unit cannot show it:
@@ -228,20 +223,6 @@ def pivot(evidence: Evidence, dims: tuple) -> Layout:
         return [nest([r for r in rows if _value(r, dim) == value], rest) for value in coords[dim]]
 
     return Layout(tuple(dims), coords, nest([r for r in rows if r.exclusion is None], dims))
-
-
-def key_summary(evidence: Evidence, dims: tuple) -> list[dict]:
-    """The keys a method used, as the comparison document records them."""
-    summary = []
-    for dim in dims:
-        if dim == SIDE:
-            continue
-        found = relation(evidence.rows, dim)
-        entry = {"name": dim, "key": COLUMNS[dim].to_json(), "relation": found}
-        if found == "crossed":
-            entry["complete"] = is_complete(evidence.rows, dim, evidence.sides)
-        summary.append(entry)
-    return summary
 
 
 def change_label(signed: float, direction: str | None) -> str:

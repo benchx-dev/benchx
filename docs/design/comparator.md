@@ -33,7 +33,7 @@ decides whether a verdict should block or alert.
 
 **Implemented today:** run mode (`run-profile`), and the framework it runs on.
 History mode and detectors are specified here and exercised by test-only
-prototypes (`tests/test_history_prototypes.py`); they have no CLI and no
+prototypes, whose tests follow in a separate change; they have no CLI and no
 configuration.
 
 ## 2. Input
@@ -105,9 +105,7 @@ varies, for example the subject tree id for `revisions` or `parameters.role` for
 **Units are series.** Results are grouped by their series fingerprint under the
 profile's projection, whose axis is the varying coordinate, so everything else
 the projection matches must agree for two results to share a unit. Each unit is
-evaluated independently. A result that belongs to a series under the identity
-policy still records that series (`side_series`), but run mode reads no history
-outside the run.
+evaluated independently. Run mode reads no history outside the run.
 
 Sides that disagree on a matched fact therefore fall into separate series. That
 is the same shape as a workload measured on one side only, which is merely
@@ -168,7 +166,7 @@ rustc-perf does.
 ## 3. Eligibility guard
 
 Checks belong to whoever needs them to be true. A failure is recorded in
-`failed_invariants` with its `owner`, and the affected units get no verdict.
+`failed_invariants`, and the affected units get no verdict.
 
 **The framework** checks that a result has a usable estimate. Anything else is
 excluded with its reason, and a target without one is indeterminate, never
@@ -320,9 +318,10 @@ Exact equality would be the natural rule for a deterministic quantity (schema
 §4.4), which needs no noise estimate. No quantity of the implementation is
 deterministic, so that is deferred.
 
-### 4.5 `benchx/mann-whitney/v1`
+### 4.5 `benchx/mann-whitney/v1` (prototype)
 
-Requires nothing of the run's schedule or pairing: `dims = ("side",)`. It tests
+A prototype in `tests/mann_whitney_prototype.py`, not in the package: it shows that
+a second method is one module, which the framework runs unchanged. It requires nothing of the run's schedule or pairing: `dims = ("side",)`. It tests
 whether one side's attempt estimates tend to exceed the other's, and is the
 unpaired method for a run that did not alternate.
 
@@ -330,8 +329,8 @@ unpaired method for a run that did not alternate.
   `relative-median`, absent when the baseline median is zero.
 - **Decision:** a change when the two-sided p-value is at most `alpha`, labeled by
   the direction of the rank shift. The p-value is exact, with ties handled by
-  permuting midranks, up to 40 attempts in total; beyond that it is a tie-corrected
-  normal approximation.
+  permuting midranks; a method for the package would add a normal approximation
+  for large samples.
 - **Indeterminate:** `insufficient-attempts` when the design cannot reach `alpha`
   at all. The smallest two-sided p-value is 2 / C(n + m, n), which is 0.1 for 3
   attempts per side and 0.029 for 4. A run too small to detect anything does not
@@ -366,14 +365,13 @@ and self-describing. It records:
 - `sides`, for a selector that has named ones: the varying coordinate, the two
   values, and what each side declared about how it was built;
 - the identity-policy schema, the estimator, and `local_only`;
-- `units`, and for each: the workload, quantity, and series fingerprint; an
-  `evidence` summary; the outcome; and the caveats;
-- exclusions, failed invariants with their owners, missing targets, and every input.
+- `units`, and for each: the workload, quantity, and series fingerprint; in history
+  mode an `evidence` record; the outcome; and the caveats;
+- exclusions, failed invariants, missing targets, and every input.
 
-A unit's **evidence summary** replaces mode-specific fields. It holds the keys the
-method used, each with its relation to the side (`crossed`, `nested`, or `absent`)
-and whether it is complete; the slot schedule; and in history mode the target,
-reference, ordering, and boundaries.
+A history unit's **evidence** records what the verdict rests on: the target, the
+reference in order, the ordering used, and the boundaries that truncated or joined
+it. Run mode needs none, since its inputs are the run.
 
 A unit's **outcome** is the Assessment: `method`, `verdict`, `reason`, `effect` as
 `{measure, value}`, `used`, `excluded`, and `details`. The framework validates
@@ -410,9 +408,9 @@ document even after newer points arrive.
 1. **Which method does a project configure?** Earlier drafts asked which single
    method run mode and history mode should start from, and whether an unplanned
    run that did not alternate should be refused. Both are now this question.
-   Methods can coexist, so the choice is per project: `paired-relative` for a
-   planned run and `mann-whitney` for an unplanned one are both available in the
-   library, and `bx compare` uses `paired-relative`. UC-03's sketch reports a ratio
+   Methods can coexist, so the choice is per project: `bx compare` uses
+   `paired-relative`, and the `mann-whitney` prototype (§4.5) shows an unpaired
+   method for an unplanned run. UC-03's sketch reports a ratio
    with a 95% confidence interval over paired rounds, which would be a third method.
    UC-02 asks for each side's minimum against a fixed margin (§7 of the use case),
    which would be another; `variants` uses `paired-relative` until one is written.
@@ -426,8 +424,8 @@ document even after newer points arrive.
 ## 8. Worked examples
 
 One series throughout: NumPy `sort`, float64, 10⁶ elements, wall time. **The values
-are constructed to show the mechanism, not measured.** The tests in
-`tests/test_history_prototypes.py` compute every number below from these values.
+are constructed to show the mechanism, not measured.** Every number below was
+computed from these values by test code that returns in a follow-up change.
 All three use *k* = 3.
 
 ### 8.1 Run mode: paired by round

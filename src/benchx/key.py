@@ -1,9 +1,8 @@
 """Keys: how one column is read from a result (comparator.md §2.6).
 
-A key is a JSON Pointer, an optional normalization rule, and an ordering. It is
-plain data and serializes to JSON, so a view could be stored as data later
-without changing what a key is. Projections read their axis and roles through
-keys, and the comparator's evidence reads its columns through them.
+A key is a JSON Pointer, an optional normalization rule, and an ordering: one
+definition of how a fact is read and ordered. Projections read their axis and
+roles through keys, and the comparator's evidence reads its columns through them.
 """
 
 import re
@@ -116,11 +115,3 @@ class Key:
 
     def sort_key(self, value) -> tuple:
         return _ORDERINGS[self.order](value)
-
-    def to_json(self) -> dict:
-        return {"pointer": self.pointer, **({"normalize": self.normalize} if self.normalize else {}),
-                "order": self.order}
-
-    @classmethod
-    def from_json(cls, data: dict) -> "Key":
-        return cls(data["pointer"], normalize=data.get("normalize"), order=data["order"])

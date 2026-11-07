@@ -2,9 +2,9 @@
 module and a line here."""
 
 from ..evidence import CompareError, Method
-from . import mann_whitney, paired_relative
+from . import paired_relative
 
-METHODS = {method.id: method for method in (paired_relative.METHOD, mann_whitney.METHOD)}
+METHODS = {method.id: method for method in (paired_relative.METHOD,)}
 DEFAULT = paired_relative.METHOD.id
 
 

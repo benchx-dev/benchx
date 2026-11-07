@@ -4,8 +4,7 @@ the comparison document. It holds no statistics. The document depends only on th
 inputs, so the same results give the same document from any store.
 
 Only run mode is reachable from the CLI. History mode and detectors are specified
-in comparator.md and exercised by tests/test_history_prototypes.py through
-`evaluate`.
+in comparator.md; a selector for them would call `evaluate` as run mode does.
 """
 
 import json
@@ -14,7 +13,7 @@ from jsonschema import Draft202012Validator
 
 from . import methods
 from .core import catalog
-from .evidence import SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, key_summary, pivot
+from .evidence import SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, pivot
 from .projection import workload_label
 from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
@@ -64,7 +63,7 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
             continue
         layout, problem = _lay_out(evidence, method)
         if problem:
-            failed.append({"invariant": problem[0], "owner": "method", **where, "detail": problem[1]})
+            failed.append({"invariant": problem[0], **where, "detail": problem[1]})
             continue
         doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}
                                  for row in evidence.rows if row.exclusion)
@@ -80,7 +79,7 @@ def _alternation(slots: str | None, advice: str) -> list[dict]:
                   "(a, b, a, b, ...)")
     else:
         return []
-    return [{"invariant": "alternating-slots", "owner": "method", "detail": detail + advice}]
+    return [{"invariant": "alternating-slots", "detail": detail + advice}]
 
 
 def _lay_out(evidence: Evidence, method: Method) -> tuple[Layout | None, tuple[str, str] | None]:
@@ -109,20 +108,16 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
             "indeterminate", evidence.no_verdict, None):
         raise AssertionError(f"{method.id} gave a verdict on a unit its selector says has none "
                              f"({evidence.no_verdict}); comparator.md §3")
-    summary = {"keys": key_summary(evidence, method.dims),
-               **({"slots": selection.slots} if selection.slots else {}),
-               **({"target": list(evidence.target)} if evidence.target else {}),
+    summary = {**({"target": list(evidence.target)} if evidence.target else {}),
                **({"reference": list(evidence.reference)} if evidence.reference else {}),
                **({"ordering": evidence.ordering} if evidence.ordering else {}),
                **({"boundaries": list(evidence.boundaries)} if evidence.boundaries else {})}
     caveats = list(evidence.caveats)
     if selection.slots == "not-alternating" and "alternating-slots" not in method.requires:
         caveats = sorted({*caveats, "sides-did-not-alternate"})
-    unit = {**where, "series": evidence.series, "evidence": summary,
+    unit = {**where, "series": evidence.series, **({"evidence": summary} if summary else {}),
             "method": {"name": method.name, "version": method.version}, "verdict": assessment.verdict,
             **_partition(evidence, assessment, method.dims), "details": assessment.details}
-    if evidence.side_series:
-        unit["side_series"] = evidence.side_series
     if assessment.reason:
         unit["reason"] = assessment.reason
     if assessment.effect:
@@ -166,10 +161,13 @@ def _described(unit: dict) -> str:
 
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
-    params, sides = doc["selector"]["params"], doc["sides"]
-    lines = [f"run {params['run_key']}  profile {params['profile']}  "
-             f"baseline {str(sides['baseline'])[:12]}  contender {str(sides.get('contender'))[:12]}"
-             + ("  [local-only]" if doc["local_only"] else "")]
+    params, sides = doc["selector"]["params"], doc.get("sides", {})
+    if sides:
+        header = (f"run {params['run_key']}  profile {params['profile']}  "
+                  f"baseline {str(sides['baseline'])[:12]}  contender {str(sides.get('contender'))[:12]}")
+    else:  # a selector with sides of its own, such as reference and target
+        header = "  ".join([doc["selector"]["name"], *(f"{k} {v}" for k, v in params.items())])
+    lines = [header + ("  [local-only]" if doc["local_only"] else "")]
     for role, side in sides.get("declared", {}).items():
         name = sides[role]
         for key in ("how_built", "activation", "observed_env"):

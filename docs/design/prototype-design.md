@@ -254,10 +254,6 @@ criterion 1 holds by construction.
     {"workload": {"name": "TakeChunked…/4194304/2"},
      "quantity": "wall-time",
      "series": "…",
-     "side_series": {"baseline": "…", "contender": "…"},
-     "evidence": {"keys": [{"name": "round", "key": {"pointer": "/procedure/round", "order": "natural"},
-                            "relation": "crossed", "complete": true}],
-                  "slots": "alternating"},
      "method": {"name": "benchx/paired-relative", "version": "v1"},
      "verdict": "regressed",
      "effect": {"measure": "relative", "value": 0.024},
@@ -564,9 +560,8 @@ one, so a unit whose quantity is declared deterministic is indeterminate with
 reason `deterministic-deferred` rather than compared exactly (comparator §4).
 Default
 *k* = 3 and `min_rounds` = 3, overridable per invocation; per-project
-configuration is deferred. `bx compare` uses this method; the library also has
-`benchx/mann-whitney/v1` for a run that did not alternate (`comparator.md` §4.5), and which
-method a project configures is `comparator.md` §7 question 1, open until reviewed.
+configuration is deferred. `bx compare` uses this method; which method a project
+configures is `comparator.md` §7 question 1, open until reviewed.
 
 Comparison documents are recomputed on demand and not stored
 (`comparator.md` §5); the store keeps their inputs.

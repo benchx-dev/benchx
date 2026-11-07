@@ -80,7 +80,7 @@
       }
     },
     "failed_invariants": {
-      "description": "Invariants the evidence did not satisfy, whether the selector's or the method's.",
+      "description": "Invariants the evidence did not satisfy, whether the selector's or the method's (comparator.md section 3).",
       "type": "array",
       "items": {
         "$ref": "#/$defs/failedInvariant"
@@ -209,20 +209,12 @@
       "additionalProperties": false,
       "required": [
         "invariant",
-        "owner",
         "detail"
       ],
       "properties": {
         "invariant": {
           "description": "Name of the invariant, such as alternating-slots or equal-attempts.",
           "$ref": "#/$defs/token"
-        },
-        "owner": {
-          "description": "Who needs it to hold: the selector or profile, for what makes the sides meaningful; the method, for what its statistics assume.",
-          "enum": [
-            "selector",
-            "method"
-          ]
         },
         "detail": {
           "$ref": "#/$defs/nonEmptyString"
@@ -432,81 +424,11 @@
         }
       }
     },
-    "key": {
-      "description": "How a column is read from a result: a JSON Pointer, an optional normalization rule, and an ordering.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "pointer",
-        "order"
-      ],
-      "properties": {
-        "pointer": {
-          "type": "string",
-          "pattern": "^/"
-        },
-        "normalize": {
-          "type": "object"
-        },
-        "order": {
-          "enum": [
-            "natural"
-          ]
-        }
-      }
-    },
-    "evidenceKey": {
-      "description": "A key the method used, and what counting the unit's results found about it.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "key",
-        "relation"
-      ],
-      "properties": {
-        "name": {
-          "$ref": "#/$defs/token"
-        },
-        "key": {
-          "$ref": "#/$defs/key"
-        },
-        "relation": {
-          "description": "Crossed: some value appears on more than one side, a block. Nested: every value appears on one side only, a replicate. Absent: no result has it.",
-          "enum": [
-            "crossed",
-            "nested",
-            "absent"
-          ]
-        },
-        "complete": {
-          "description": "For a crossed key: every value appears on every side.",
-          "type": "boolean"
-        }
-      }
-    },
     "evidence": {
-      "description": "What the verdict rests on, in terms of the design rather than the mode.",
+      "description": "What a history verdict rests on: the target, the reference it was compared with, how the reference was ordered, and what truncated or joined it.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "keys"
-      ],
       "properties": {
-        "keys": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/evidenceKey"
-          }
-        },
-        "slots": {
-          "description": "Whether the sides alternated by procedure.slot over the whole run, or whether a result has no slot.",
-          "enum": [
-            "alternating",
-            "not-alternating",
-            "absent"
-          ]
-        },
         "target": {
           "description": "The results being evaluated, when the selector distinguishes them from a reference.",
           "type": "array",
@@ -547,7 +469,6 @@
         "workload",
         "quantity",
         "series",
-        "evidence",
         "method",
         "verdict",
         "used",
@@ -564,13 +485,6 @@
         "series": {
           "description": "Series fingerprint under the projection the selector grouped by.",
           "$ref": "#/$defs/sha256"
-        },
-        "side_series": {
-          "description": "The series each side's results belong to under the identity policy, when the selector names sides. Run mode reads no history from them.",
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/sha256"
-          }
         },
         "evidence": {
           "$ref": "#/$defs/evidence"

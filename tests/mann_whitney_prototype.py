@@ -1,17 +1,15 @@
-"""benchx/mann-whitney/v1 (comparator.md §4.5): unpaired rank test on attempt estimates.
+"""PROTOTYPE, not in the package: benchx/mann-whitney/v1 (comparator.md §4.5).
 
-Asks nothing of the run's schedule or pairing, so it applies to a run that did not
-alternate; it ignores any blocking the run has, which is the cost of asking less.
+An unpaired rank test on attempt estimates. It asks nothing of the run's schedule
+or pairing, and is kept here to show that a second method is one module: the
+framework runs it through `compare.evaluate` without knowing it exists. Exact
+p-values only, so it is for small samples.
 """
 
-import math
 import statistics
 from math import comb
 
-from ..evidence import Assessment, Method, change_label
-
-# Attempts in total, up to which the p-value is exact.
-EXACT_LIMIT = 40
+from benchx.evidence import Assessment, Method, change_label
 
 
 def _doubled_midranks(pooled: list[float]) -> list[int]:
@@ -44,27 +42,12 @@ def _exact_p(ranks: list[int], observed: int, m: int) -> float:
     return extreme / comb(len(ranks), m)
 
 
-def _normal_p(pooled: list[float], u: float, n: int, m: int) -> float:
-    """The tie-corrected normal approximation, with continuity correction."""
-    total = n + m
-    ties = sum(t ** 3 - t for t in (pooled.count(value) for value in set(pooled)))
-    variance = n * m / 12 * (total + 1 - ties / (total * (total - 1)))
-    if variance == 0:
-        return 1.0
-    z = max(abs(u - n * m / 2) - 0.5, 0) / math.sqrt(variance)
-    return math.erfc(z / math.sqrt(2))
-
-
 def rank_test(reference: list[float], target: list[float]) -> tuple[float, float, str]:
-    """(U of the target, two-sided p-value, how the p-value was computed)."""
+    """(U of the target, exact two-sided p-value)."""
     n, m = len(reference), len(target)
-    pooled = [*reference, *target]
-    ranks = _doubled_midranks(pooled)
+    ranks = _doubled_midranks([*reference, *target])
     observed = sum(ranks[n:])
-    u = (observed - m * (m + 1)) / 2
-    if n + m <= EXACT_LIMIT:
-        return u, _exact_p(ranks, observed, m), "exact-permutation"
-    return u, _normal_p(pooled, u, n, m), "normal-approximation"
+    return (observed - m * (m + 1)) / 2, _exact_p(ranks, observed, m)
 
 
 class MannWhitney(Method):
@@ -91,7 +74,6 @@ class MannWhitney(Method):
             "reference_estimate": {"description": "Median of the reference side's estimates", "type": "number"},
             "u": {"description": "Mann-Whitney U of the target side", "type": "number", "minimum": 0},
             "p_value": {"type": "number", "minimum": 0, "maximum": 1},
-            "p_method": {"enum": ["exact-permutation", "normal-approximation"]},
         },
     }
 
@@ -119,8 +101,8 @@ class MannWhitney(Method):
         # A design that cannot reach alpha would report no change whatever it measured.
         if details["smallest_p"] > config["alpha"]:
             return indeterminate("insufficient-attempts")
-        u, p, how = rank_test(before, after)
-        details.update(u=u, p_value=p, p_method=how)
+        u, p = rank_test(before, after)
+        details.update(u=u, p_value=p)
         verdict = (change_label(u - n * m / 2, evidence.quantity.get("direction")) if p <= config["alpha"]
                    else "no-change-detected")
         effect = None if center == 0 else {"measure": "relative-median", "value": statistics.median(after) / center - 1}

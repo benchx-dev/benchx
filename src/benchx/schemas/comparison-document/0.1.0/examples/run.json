@@ -38,24 +38,6 @@
       },
       "quantity": "wall-time",
       "series": "c4a8e21f6b0d3975e1f8a2c6d4b07e3915fa8c2d6e0b4a7193d5c8f2e6a1b047",
-      "side_series": {
-        "baseline": "3f1c9a0b7d2e4f6a8b1c3d5e7f9a0b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a",
-        "contender": "8e2d4c6b0a9f1e3d5c7b9a0f2e4d6c8b0a1f3e5d7c9b0a2f4e6d8c0b1a3f5e7d"
-      },
-      "evidence": {
-        "keys": [
-          {
-            "name": "round",
-            "key": {
-              "pointer": "/procedure/round",
-              "order": "natural"
-            },
-            "relation": "crossed",
-            "complete": true
-          }
-        ],
-        "slots": "alternating"
-      },
       "method": {
         "name": "benchx/paired-relative",
         "version": "v1"
@@ -109,20 +91,6 @@
       },
       "quantity": "wall-time",
       "series": "7d13f0b9c2e64a8815d7ca30e9f2b6417ac8d05e3b1f96c2704ea8d1c3b5f692",
-      "evidence": {
-        "keys": [
-          {
-            "name": "round",
-            "key": {
-              "pointer": "/procedure/round",
-              "order": "natural"
-            },
-            "relation": "crossed",
-            "complete": true
-          }
-        ],
-        "slots": "alternating"
-      },
       "method": {
         "name": "benchx/paired-relative",
         "version": "v1"
