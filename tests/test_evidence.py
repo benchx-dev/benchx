@@ -294,3 +294,44 @@ def test_a_result_a_method_does_not_mention_is_still_accounted_for():
 
 def test_the_default_method_is_registered():
     assert methods.DEFAULT in methods.METHODS and catalog.COMPARISON_DOCUMENT.endswith("/0.2.0")
+
+
+# --- a selector's no-verdict rule (UC-02 §10) holds for every method ----------------------------
+
+def _variants_with_a_failed_attempt():
+    from test_comparator import fail, variants_run
+    docs = variants_run(rounds=5, base_values=(1.0, 2.0, 3.0, 4.0, 5.0), ratio=1.5)
+    fail(docs[2], "error")
+    return docs
+
+
+@pytest.mark.parametrize("method", sorted(methods.METHODS))
+def test_a_failed_attempt_under_variants_leaves_no_verdict_whatever_the_method(method):
+    doc = compare.compare(_variants_with_a_failed_attempt(), run_key="run", profile="variants",
+                          baseline="'baseline'", parameter="role", method=method)
+    assert core.check(doc, "comparison-document") == []
+    [unit] = doc["units"]
+    assert (unit["verdict"], unit["reason"]) == ("indeterminate", "side-failed") and "effect" not in unit
+
+
+class Ignores(Method):
+    """Gives a verdict whatever the selector says."""
+    name, version, dims = "test/ignores", "v1", ("side",)
+
+    def assess(self, layout, evidence, config):
+        return Assessment("regressed", effect={"measure": "relative", "value": 0.5})
+
+
+def test_a_method_that_ignores_the_selectors_rule_is_a_bug_not_a_verdict():
+    from benchx.run_profile import RUN_PROFILE
+    selection = RUN_PROFILE.select(_variants_with_a_failed_attempt(), run_key="run", profile="variants",
+                                   baseline="'baseline'", parameter="role")
+    with pytest.raises(AssertionError, match="side-failed"):
+        compare.evaluate(selection, Ignores(), {})
+
+
+def test_the_varied_parameter_is_recorded_with_the_selector():
+    from test_comparator import variants_run
+    doc = compare.compare(variants_run(), run_key="run", profile="variants", baseline="'baseline'", parameter="role")
+    assert doc["selector"]["params"] == {"run_key": "run", "profile": "variants", "baseline": "'baseline'",
+                                         "parameter": "role"}

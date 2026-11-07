@@ -110,6 +110,19 @@ def merge(base: dict, facts: dict) -> dict:
 # Bytecode caches are written by running the suite, so they must not change the tree id.
 _PYCACHE_EXCLUDE = ":(exclude,glob)**/__pycache__/**"
 
+# So is `out/`, where a script gives each `bx bench` call its own results directory:
+# call 2 would otherwise see call 1's directory as an untracked file and record another
+# tree id. Left out only when the repository tracks nothing under an `out/`; with a
+# tracked `out/x.txt` a blanket exclusion would give a clean checkout a tree id that
+# differs from HEAD's, and an edit to that file would leave the tree `clean`.
+_OUT_GLOB = ":(glob)**/out/**"
+_OUT_EXCLUDE = ":(exclude,glob)**/out/**"
+
+
+def _out_is_untracked(top) -> bool:
+    """Whether nothing under an `out/` directory is tracked (False when git cannot say)."""
+    return _run(["git", "ls-files", "--", _OUT_GLOB], cwd=top) == ""
+
 
 _IGNORED: tuple[Path, ...] = ()
 
@@ -142,8 +155,8 @@ def git_identity(path) -> dict | None:
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in _ignored_in(top)
-                                    if not _git_ignores(top, rel))]
+    excludes = [_PYCACHE_EXCLUDE, *([_OUT_EXCLUDE] if _out_is_untracked(top) else []),
+                *(f":(top,exclude){rel}" for rel in _ignored_in(top) if not _git_ignores(top, rel))]
     status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
@@ -208,7 +221,7 @@ def benchmark_identity(suite_file, subject_source) -> dict | None:
     return {"uri": suite.parent.as_uri(), "type": "directory", "tree": tree, "dirty": "dirty"}
 
 
-_SKIPPED_DIRS = {".git", ".benchx", "__pycache__"}
+_SKIPPED_DIRS = {".git", ".benchx", "__pycache__", "out"}
 
 
 def directory_identity(path) -> dict | None:

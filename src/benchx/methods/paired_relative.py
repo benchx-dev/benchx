@@ -47,12 +47,15 @@ class PairedRelative(Method):
         used = tuple(row for pair in pairs for row in pair)
         details = {"rounds": sum(1 for baseline, contender in layout.cells if baseline and contender),
                    "noise_kind": "standard-error", "noise_source": "paired-rounds"}
-        estimates = [(b.estimate, c.estimate) for b, c in pairs]
-        if estimates:
-            details["reference_estimate"] = statistics.median(b for b, _ in estimates)
 
         def indeterminate(reason):
             return Assessment("indeterminate", reason=reason, used=used, excluded=tuple(excluded), details=details)
+
+        if evidence.no_verdict:
+            return indeterminate(evidence.no_verdict)
+        estimates = [(b.estimate, c.estimate) for b, c in pairs]
+        if estimates:
+            details["reference_estimate"] = statistics.median(b for b, _ in estimates)
 
         if evidence.quantity.get("deterministic"):
             # Deferred: no quantity of the implementation is deterministic (comparator.md §4.4).

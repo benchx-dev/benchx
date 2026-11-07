@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from benchx import adapters, core, snapshot
+from benchx import adapters, compare, core, session, snapshot
 from benchx.core import catalog
 from conftest import git
 
@@ -41,6 +41,16 @@ def test_recommended_settings_are_ones_the_adapter_applies(path):
 def test_schema_refuses(config, message):
     errors = core.check({"schema_version": "benchx/config/0.1.0", **config}, "config")
     assert errors and message in " ".join(str(e) for e in errors)
+
+
+def test_every_comparison_profile_is_one_the_config_can_name():
+    """`compare.profile` takes exactly the profiles the comparator has, variants included."""
+    schema = json.loads((catalog.SCHEMAS / "config" / "0.1.0" / "schema.json").read_text())
+    enum = schema["properties"]["compare"]["properties"]["profile"]["enum"]
+    assert sorted(enum) == sorted(compare.PROFILES) == sorted(session.PROFILES)
+    assert "variants" in enum
+    for profile in compare.PROFILES:
+        assert core.check({"schema_version": "benchx/config/0.1.0", "compare": {"profile": profile}}, "config") == []
 
 
 # --- paths benchx writes inside a measured tree -----------------------------------

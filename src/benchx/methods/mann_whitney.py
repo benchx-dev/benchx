@@ -105,6 +105,8 @@ class MannWhitney(Method):
         def indeterminate(reason):
             return Assessment("indeterminate", reason=reason, used=used, excluded=excluded, details=details)
 
+        if evidence.no_verdict:
+            return indeterminate(evidence.no_verdict)
         if evidence.quantity.get("deterministic"):
             return indeterminate("deterministic-deferred")
         if not n or not m:

@@ -67,6 +67,10 @@ class Evidence:
     ordering: str | None = None
     boundaries: tuple = ()
     calibration: tuple = ()      # past comparisons in the series, for a method's threshold
+    # Why no verdict may be given though the unit has evidence, such as side-failed
+    # (UC-02 §10). A selector's rule, not a statistic: every method returns
+    # indeterminate with this reason, and the framework checks that it did.
+    no_verdict: str | None = None
 
 
 @dataclass
@@ -83,6 +87,7 @@ class Selection:
     slots: str | None = None     # alternating, not-alternating, or absent, over the whole run
     failed: list = field(default_factory=list)         # selector invariants
     disagreements: list = field(default_factory=list)  # selector invariants found after the method's run-level ones
+    advice: dict = field(default_factory=dict)  # invariant -> what the selector adds to a method requirement's detail
     stopped: bool = False        # a failure so basic that nothing else can be checked
 
 

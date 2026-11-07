@@ -184,13 +184,24 @@ stops the whole run:
 | `two-sides` | all | exactly two sides |
 | `sides-agree` | all | one workload variant and quantity is one series (§2.3) |
 | `one-tree-per-side` | `revisions` | each side has one tree id, and the two differ |
-| `one-benchmark-tree` | `revisions` | a separately recorded benchmark is one file on both sides and in every round (schema §5.5) |
+| `one-benchmark-tree` | `revisions`, `variants` | a separately recorded benchmark is one file on both sides and in every round (schema §5.5) |
 | `sides-differ` | `environments` | the sides differ in more than their label |
 
 A side that is not clean does not fail the run; it makes the comparison
 local-only (UC-03 §10). In history mode the selector checks that the target and
 every reference point have the same series fingerprint and that every reference
 point precedes the target under the selected ancestry or native order.
+
+The selector also owns the **status rule**, which is not an invariant: it leaves
+one unit without a verdict and fails nothing else. Under `variants` it is strict
+(UC-02 §10): a unit with an attempt of status `partial`, `censored` or `error`, on
+either side, is indeterminate with reason `side-failed`, whatever the other rounds
+show; otherwise a variant that times out in the slow rounds is judged on the fast
+ones. The selector records this in the evidence (`no_verdict`), every method must
+return `indeterminate` with that reason, and the framework refuses a method that
+does not, so the rule holds whichever method a project configures. The other
+profiles leave the remaining attempts to the method, and a `skipped` attempt is
+only excluded under every profile. The schema's §5.5 table is not touched.
 
 **The method** declares what its statistics assume, and the framework checks
 what it declared:
@@ -403,6 +414,8 @@ document even after newer points arrive.
    planned run and `mann-whitney` for an unplanned one are both available in the
    library, and `bx compare` uses `paired-relative`. UC-03's sketch reports a ratio
    with a 95% confidence interval over paired rounds, which would be a third method.
+   UC-02 asks for each side's minimum against a fixed margin (§7 of the use case),
+   which would be another; `variants` uses `paired-relative` until one is written.
 2. **Multiple comparisons across units.** The framework calls a method once per
    unit, so no method can see the other units' results, and multiple-comparison
    control cannot be a method. It would be a step over the Assessments of a whole

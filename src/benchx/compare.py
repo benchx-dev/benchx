@@ -15,15 +15,19 @@ from jsonschema import Draft202012Validator
 from . import methods
 from .core import catalog
 from .evidence import SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, key_summary, pivot
-from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, profile_projection  # noqa: F401
+from .projection import workload_label
+from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
 
-def compare(documents, *, run_key, profile, baseline, label=None, method=methods.DEFAULT, **config) -> dict:
-    """Two sides of one run under a method. Any other keyword is the method's
-    configuration, such as `k` and `min_rounds` for the default."""
+def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, method=methods.DEFAULT,
+            **config) -> dict:
+    """Two sides of one run under a method. `label` names the sides of `environments`, and
+    `parameter` those of `variants`. Any other keyword is the method's configuration, such
+    as `k` and `min_rounds` for the default."""
     chosen = methods.get(method)
     configuration = _configure(chosen, config)
-    selection = RUN_PROFILE.select(documents, run_key=run_key, profile=profile, baseline=baseline, label=label)
+    selection = RUN_PROFILE.select(documents, run_key=run_key, profile=profile, baseline=baseline, label=label,
+                                   parameter=parameter)
     return evaluate(selection, chosen, configuration)
 
 
@@ -48,7 +52,7 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
     if selection.stopped:
         return doc
     if "alternating-slots" in method.requires:
-        failed.extend(_alternation(selection.slots))
+        failed.extend(_alternation(selection.slots, selection.advice.get("alternating-slots", "")))
     failed.extend(selection.disagreements)
     if failed:
         return doc
@@ -68,7 +72,7 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
     return doc
 
 
-def _alternation(slots: str | None) -> list[dict]:
+def _alternation(slots: str | None, advice: str) -> list[dict]:
     if slots == "absent":
         detail = "a result has no slot: give every bx bench call --slot"
     elif slots == "not-alternating":
@@ -76,7 +80,7 @@ def _alternation(slots: str | None) -> list[dict]:
                   "(a, b, a, b, ...)")
     else:
         return []
-    return [{"invariant": "alternating-slots", "owner": "method", "detail": detail}]
+    return [{"invariant": "alternating-slots", "owner": "method", "detail": detail + advice}]
 
 
 def _lay_out(evidence: Evidence, method: Method) -> tuple[Layout | None, tuple[str, str] | None]:
@@ -101,6 +105,10 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
           where: dict) -> dict:
     assessment = method.assess(layout, evidence, configuration)
     Draft202012Validator(method.details_schema).validate(assessment.details)
+    if evidence.no_verdict and (assessment.verdict, assessment.reason, assessment.effect) != (
+            "indeterminate", evidence.no_verdict, None):
+        raise AssertionError(f"{method.id} gave a verdict on a unit its selector says has none "
+                             f"({evidence.no_verdict}); comparator.md §3")
     summary = {"keys": key_summary(evidence, method.dims),
                **({"slots": selection.slots} if selection.slots else {}),
                **({"target": list(evidence.target)} if evidence.target else {}),
@@ -183,7 +191,7 @@ def render(doc: dict) -> str:
         lines.append(f"\n{section.replace('-', ' ').upper()} ({len(rows)})")
         for u in rows:
             reason = f"  ({u['reason']})" if "reason" in u else ""
-            lines.append(f"  {u['workload']['name']:<32} {u['quantity']:<10} {_described(u)}{reason}")
+            lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} {_described(u)}{reason}")
     for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
                        ("exclusions", "excluded")):
         if doc[key]:

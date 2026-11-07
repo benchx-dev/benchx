@@ -667,3 +667,48 @@ def test_git_identity_ignores_pycache_folders(tmp_path):
         (folder / "mod.cpython-312.pyc").write_bytes(b"\0")
     assert runner.snapshot.git_identity(src) == before
     assert before["dirty"] == "clean"
+
+
+def test_git_identity_ignores_out_folders(tmp_path):
+    """A script that gives each `bx bench` call its own `--out out/NAME` must not change the tree."""
+    src = tmp_path / "src"
+    src.mkdir()
+    git(src, "init", "-q")
+    (src / "mod.py").write_text("x = 1\n")
+    git(src, "add", "-A")
+    git(src, "commit", "-qm", "one")
+    before = runner.snapshot.git_identity(src)
+    for folder in (src / "out" / "call-1", src / "pkg" / "out"):
+        folder.mkdir(parents=True)
+        (folder / "result.json").write_text("{}\n")
+    assert runner.snapshot.git_identity(src) == before
+    assert before["dirty"] == "clean"
+
+
+def test_directory_identity_ignores_out_folders(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "mod.py").write_text("x = 1\n")
+    before = runner.snapshot.directory_identity(plain)
+    for folder in (plain / "out" / "call-1", plain / "pkg" / "out"):
+        folder.mkdir(parents=True)
+        (folder / "result.json").write_text("{}\n")
+    assert runner.snapshot.directory_identity(plain) == before
+
+
+def test_git_identity_keeps_a_tracked_out_folder(tmp_path):
+    """With a file under `out/` tracked, the folder is not excluded: editing it makes the tree dirty."""
+    src = tmp_path / "src"
+    (src / "out").mkdir(parents=True)
+    git(src, "init", "-q")
+    (src / "mod.py").write_text("x = 1\n")
+    (src / "out" / "x.txt").write_text("one\n")
+    git(src, "add", "-A")
+    git(src, "commit", "-qm", "one")
+    clean = runner.snapshot.git_identity(src)
+    assert clean["dirty"] == "clean"
+    assert clean["tree"] == git(src, "rev-parse", "HEAD^{tree}")
+    (src / "out" / "x.txt").write_text("two\n")
+    edited = runner.snapshot.git_identity(src)
+    assert edited["dirty"] == "dirty"
+    assert edited["tree"] != clean["tree"]

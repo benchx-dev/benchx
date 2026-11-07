@@ -357,3 +357,265 @@ def test_a_result_without_a_benchmark_tree_is_outside_the_rule():
     docs = run()
     assert all("benchmark_tree" not in d["provenance"] for d in docs)
     assert invariants(evaluate(docs)) == []
+
+
+# --- variants (UC-02, schema §5.5): the sides are two values of one workload parameter ---------
+
+VALUES = ("'baseline'", "'variant'")
+
+
+def variants_run(rounds=3, sizes=(None,), ratio=1.1, base_values=(1.0, 2.0, 3.0), name="role", values=VALUES):
+    """Alternating attempts of the two values of the parameter `name`, one slot each; the second
+    value is `ratio` times the first in each round. With `sizes`, a slot holds one result per
+    size, and `size` is a second workload parameter. Every result is one revision and one tree."""
+    docs, slot = [], 0
+    for r in range(rounds):
+        for value, scale in zip(values, (1, ratio)):
+            for size in sizes:
+                parameters = {name: value, **({"size": size} if size is not None else {})}
+                docs.append(result(HEAD, r, slot, base_values[r] * scale, ingest_key=f"run:{slot}:{size}",
+                                   coordinates__workload={"name": "bench_truncate", "parameters": parameters}))
+            slot += 1
+    return docs
+
+
+def vevaluate(docs, parameter="role", baseline="'baseline'", **kwargs):
+    doc = compare.compare(docs, run_key="run", profile="variants", baseline=baseline, parameter=parameter, **kwargs)
+    assert core.check(doc, "comparison-document") == []
+    return doc
+
+
+def test_variants_a_clean_run_has_one_unit_per_benchmark():
+    doc = vevaluate(variants_run())
+    assert invariants(doc) == [] and doc["selector"]["params"]["profile"] == "variants"
+    assert doc["sides"]["varying"] == "coordinates.workload.parameters.role"
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == VALUES
+    [unit] = doc["units"]
+    assert unit["workload"] == {"name": "bench_truncate"}  # the varied parameter is not part of the unit
+    assert unit["verdict"] == "regressed" and unit["effect"]["value"] == pytest.approx(0.1)
+    assert doc["local_only"] is False
+
+
+def test_variants_the_baseline_can_be_either_value():
+    doc = vevaluate(variants_run(), baseline="'variant'")
+    assert invariants(doc) == [] and (doc["sides"]["baseline"], doc["sides"]["contender"]) == VALUES[::-1]
+    assert doc["units"][0]["verdict"] == "improved"
+
+
+def test_variants_another_parameter_makes_one_unit_per_value_of_it():
+    doc = vevaluate(variants_run(sizes=("1000", "100000")))
+    assert invariants(doc) == []
+    assert [u["workload"] for u in doc["units"]] == [
+        {"name": "bench_truncate", "parameters": {"size": "1000"}},
+        {"name": "bench_truncate", "parameters": {"size": "100000"}}]  # no `role` in either
+    shown = compare.render(doc)
+    assert "bench_truncate [size=1000]" in shown and "bench_truncate [size=100000]" in shown
+    assert "role" not in shown.split("\n", 1)[1]
+
+
+def test_variants_no_parameter_name_is_special():
+    doc = vevaluate(variants_run(name="impl"), parameter="impl")
+    assert invariants(doc) == [] and doc["sides"]["varying"] == "coordinates.workload.parameters.impl"
+
+
+def test_variants_a_third_value_is_a_third_side():
+    docs = variants_run()
+    docs.append(result(HEAD, 3, 6, 1.0, ingest_key="run:6", coordinates__workload={
+        "name": "bench_truncate", "parameters": {"role": "'other'"}}))
+    doc = vevaluate(docs)
+    assert invariants(doc) == ["two-sides"] and doc["units"] == []
+
+
+@pytest.mark.parametrize("slotless", [False, True])
+def test_variants_a_run_that_does_not_alternate_names_the_ways_to_get_one(slotless):
+    """One `bx bench` call runs both values in one order, with no round and no slot."""
+    docs = variants_run()
+    for d in docs:
+        if slotless:
+            del d["procedure"]
+        else:
+            d["procedure"]["slot"] = d["procedure"]["round"]  # both values in one slot
+    doc = vevaluate(docs)
+    assert invariants(doc) == ["alternating-slots"]
+    detail = doc["failed_invariants"][0]["detail"]
+    assert "--round and --slot" in detail and "bx compare TARGET --profile variants" in detail
+
+
+def test_the_other_profiles_do_not_name_variants_in_the_alternation_detail():
+    docs = run()
+    for d in docs:
+        del d["procedure"]
+    assert "variants" not in evaluate(docs)["failed_invariants"][0]["detail"]
+
+
+def test_variants_unequal_attempts():
+    docs = variants_run()
+    docs.append(result(HEAD, 3, 6, 4.0, ingest_key="run:6", coordinates__workload={
+        "name": "bench_truncate", "parameters": {"role": VALUES[0]}}))
+    doc = vevaluate(docs)
+    assert invariants(doc) == ["equal-attempts"] and doc["units"] == []
+
+
+def fail(doc, status):
+    doc["measurement"] = {"quantity": doc["measurement"]["quantity"], "status": status,
+                          **({"reason": "timeout"} if status != "partial" else {"reason": "timeout", "observations": [1.0]})}
+    return doc
+
+
+@pytest.mark.parametrize("status", ["error", "censored", "partial"])
+@pytest.mark.parametrize("which", [0, 1])
+def test_variants_a_failed_attempt_on_either_side_fails_the_unit(status, which):
+    """UC-02 §10: a value that times out in the slow rounds is not judged on the fast ones."""
+    docs = variants_run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
+    failing = docs[2 + which]  # round 1: the baseline's result, then the variant's
+    fail(failing, status)
+    doc = vevaluate(docs)
+    [unit] = doc["units"]
+    assert invariants(doc) == [] and unit["verdict"] == "indeterminate" and unit["reason"] == "side-failed"
+    assert "effect" not in unit and "noise" not in unit["details"] and unit["details"]["rounds"] == 3
+    [excluded] = doc["exclusions"]
+    assert excluded["result"]["ingest_key"] == failing["ingest_key"] and excluded["reason"].startswith(status)
+    assert "(side-failed)" in compare.render(doc)
+
+
+def test_variants_only_the_unit_with_the_failed_attempt_is_indeterminate():
+    docs = variants_run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0), sizes=("1000", "100000"))
+    fail(docs[4], "error")  # round 1, baseline, size 1000
+    verdicts = {u["workload"]["parameters"]["size"]: u["verdict"] for u in vevaluate(docs)["units"]}
+    assert verdicts == {"1000": "indeterminate", "100000": "regressed"}
+
+
+def test_variants_a_skipped_attempt_is_an_ordinary_exclusion():
+    docs = variants_run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
+    docs[2]["measurement"] = {"quantity": docs[2]["measurement"]["quantity"], "status": "skipped", "reason": "n/a"}
+    doc = vevaluate(docs)
+    [unit] = doc["units"]
+    assert unit["verdict"] == "regressed" and unit["details"]["rounds"] == 3 and "reason" not in unit
+    assert len(doc["exclusions"]) == 1
+
+
+def test_a_failed_attempt_under_revisions_still_gives_a_verdict_from_the_remaining_pairs():
+    docs = run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
+    fail(docs[2], "error")
+    unit = evaluate(docs)["units"][0]
+    assert unit["verdict"] == "regressed" and unit["details"]["rounds"] == 3 and "reason" not in unit
+
+
+def test_variants_the_sides_must_share_the_subject_tree():
+    docs = variants_run()
+    for d in docs:
+        if d["coordinates"]["workload"]["parameters"]["role"] == VALUES[1]:
+            d["provenance"]["subject_tree"] = "c" * 40
+    doc = vevaluate(docs)
+    assert invariants(doc) == ["sides-agree"]
+    assert doc["failed_invariants"][0]["detail"] == "/provenance/subject_tree differ"
+
+
+def test_variants_a_suite_that_changes_between_rounds_fails():
+    docs = benchmark_trees(variants_run(), lambda d: "c" * 40)
+    assert invariants(vevaluate(docs)) == []
+    docs[-1]["provenance"]["benchmark_tree"] = "d" * 40  # the suite is edited before the last result
+    assert invariants(vevaluate(docs)) == ["one-benchmark-tree"]
+
+
+def test_variants_a_dirty_tree_is_compared_and_named():
+    doc = vevaluate(dirty(variants_run(), HEAD))
+    assert invariants(doc) == [] and doc["local_only"] is True
+    assert doc["units"][0]["caveats"] == ["baseline: dirty-subject-tree", "contender: dirty-subject-tree"]
+    assert "[local-only]" in compare.render(doc)
+
+
+def test_variants_a_result_without_the_parameter_cannot_be_placed():
+    docs = variants_run()
+    docs[0]["coordinates"]["workload"]["parameters"] = {"other": "1"}
+    doc = vevaluate(docs)
+    assert invariants(doc) == ["sides"] and doc["units"] == []
+    assert "no workload parameter role" in doc["failed_invariants"][0]["detail"]
+    assert "params" in doc["failed_invariants"][0]["detail"]
+
+
+def test_variants_the_baseline_is_matched_exactly_as_recorded():
+    with pytest.raises(compare.CompareError) as error:
+        vevaluate(variants_run(), baseline="baseline")  # the recorded value has its quotes
+    assert "'baseline'" in str(error.value) and "'variant'" in str(error.value)
+
+
+@pytest.mark.parametrize("parameter", [None, "", "a b", "a.b", "a/b", "role]"])
+def test_variants_needs_a_parameter_that_is_a_token(parameter):
+    with pytest.raises(compare.CompareError):
+        compare.compare(variants_run(), run_key="run", profile="variants", baseline=VALUES[0], parameter=parameter)
+
+
+# --- which parameter to vary, in read mode ------------------------------------------------------
+
+def test_infer_parameter_takes_the_only_one():
+    assert compare.infer_parameter(variants_run(), "run") == "role"
+    assert compare.infer_parameter(variants_run(name="impl"), "run") == "impl"  # no name is special
+
+
+def test_infer_parameter_refuses_several_and_names_them():
+    with pytest.raises(compare.CompareError, match=r"several workload parameters \(role, size\): give --vary NAME"):
+        compare.infer_parameter(variants_run(sizes=("1000",)), "run")
+
+
+def test_infer_parameter_counts_an_environment_variable():
+    """The runner records an `-e` variable as a workload parameter of every result."""
+    docs = variants_run()
+    for d in docs:
+        d["coordinates"]["workload"]["parameters"]["OMP_NUM_THREADS"] = "1"
+    with pytest.raises(compare.CompareError, match="OMP_NUM_THREADS, role"):
+        compare.infer_parameter(docs, "run")
+
+
+def test_infer_parameter_refuses_a_run_with_no_parameter():
+    docs = variants_run()
+    for d in docs:
+        del d["coordinates"]["workload"]["parameters"]
+    with pytest.raises(compare.CompareError, match="nothing to vary"):
+        compare.infer_parameter(docs, "run")
+
+
+def test_infer_parameter_reads_only_the_run_and_only_measurands():
+    docs = variants_run()
+    other = result(HEAD, 0, 0, 1.0, ingest_key="other", coordinates__workload={
+        "name": "x", "parameters": {"size": "1"}}, provenance__run_key="another")
+    assert compare.infer_parameter([*docs, other], "run") == "role"
+    with pytest.raises(compare.CompareError, match="no results for run"):
+        compare.infer_parameter(docs, "missing")
+
+
+# --- units are listed in natural order ----------------------------------------------------------
+
+def test_units_are_listed_with_numbers_in_natural_order():
+    """`n=50` before `n=100`, as people read sizes, though "100" sorts before "50" as text."""
+    doc = vevaluate(variants_run(sizes=("100", "10", "50", "1000")))
+    assert invariants(doc) == []
+    assert [u["workload"]["parameters"]["size"] for u in doc["units"]] == ["10", "50", "100", "1000"]
+    shown = [line.split()[1] for line in compare.render(doc).splitlines() if "bench_truncate [" in line]
+    assert shown == ["[size=10]", "[size=50]", "[size=100]", "[size=1000]"]
+
+
+def test_units_are_listed_with_numbers_in_workload_names_in_natural_order():
+    docs = []
+    for name in ("BM_W10", "BM_W2", "BM_W1"):
+        slot = 0
+        for r in range(3):
+            for side, scale in ((BASE, 1.0), (HEAD, 1.1)):
+                docs.append(result(side, r, slot, (r + 1) * scale, workload=name))
+                slot += 1
+    assert [u["workload"]["name"] for u in evaluate(docs)["units"]] == ["BM_W1", "BM_W2", "BM_W10"]
+
+
+def test_units_with_more_than_one_other_parameter_are_ordered_by_name_then_value():
+    docs = variants_run()
+    extra = []
+    for n in ("10", "2"):
+        for size in ("100", "20"):
+            for d in docs:
+                clone = copy.deepcopy(d)
+                clone["ingest_key"] += f":{n}:{size}"
+                clone["coordinates"]["workload"]["parameters"].update(n=n, size=size)
+                extra.append(clone)
+    doc = vevaluate(extra)
+    assert [(u["workload"]["parameters"]["n"], u["workload"]["parameters"]["size"]) for u in doc["units"]] == [
+        ("2", "20"), ("2", "100"), ("10", "20"), ("10", "100")]

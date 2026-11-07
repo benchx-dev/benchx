@@ -178,6 +178,12 @@ class Projection:
             key.sort_key(value) for key, value in zip(self.axis_keys, point_axis))
 
 
+def workload_label(workload: dict) -> str:
+    """A workload as people read it: its name, then its parameters, `name [k=v, ...]`."""
+    parameters = ", ".join(f"{k}={v}" for k, v in (workload.get("parameters") or {}).items())
+    return workload["name"] + (f" [{parameters}]" if parameters else "")
+
+
 def reported_coordinates(doc: dict) -> dict:
     """Everything reported about what was measured, minus the axis revision and the quantity (§4.3)."""
     return {key: doc[key] for key in REPORTED if key in doc}
