@@ -20,8 +20,8 @@ bx ingest <dir|file>                     # sweep documents into the store
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
-bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
+bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
@@ -35,6 +35,9 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
            [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
+bx compare TARGET --profile variants [--vary NAME] [--baseline VALUE]
+           --suite NAME --rounds R [--filter REGEX] [...]       # the options above, except --label
+                                         # measure mode, one target: alternate the two values of a benchmark parameter
 bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compare: one order, a table
          [--adapter …] [--filter REGEX] [--quantity NAMES] [-e NAME=VALUE ...]
          [precision flags, as for bx compare]
@@ -69,6 +72,15 @@ share a run), and `--label` and `--round` need `--slot` (the ingest key gets its
 when a slot is set, so two sides would otherwise share a key). `bx compare --run KEY --profile
 environments --label NAME --baseline VALUE` then compares the sides, and refuses a run whose sides do
 not alternate, have unequal attempt counts, or do not differ.
+
+**The same for variants (UC-02).** The sides of a `variants` comparison are two values of one
+benchmark parameter, so there is no label: each call selects one value, by a case name
+(`bx bench mod.py "bench_truncate('baseline')"`) or by `--filter` (`--filter "'baseline'"`, which
+selects that value's cases of every size), with the shared `--run-key` and its own `--round` and
+`--slot`. `bx compare --run KEY --profile variants --baseline "'baseline'" [--vary NAME]` then compares
+them, and refuses a run whose sides do not alternate. One `bx bench` call that runs both values has no
+round or slot, so it fails `alternating-slots`; the failure names this loop and measure mode as the ways
+to get an alternating run. Measure mode (§5) runs the loop in one command.
 
 What differs between the environments is recorded by the user's own commands, so benchx knows no
 environment kind: a context collector (§3) prints facts about the environment it runs in, which land
@@ -124,10 +136,12 @@ measured tree they sit in, so a run's own output does not mark it dirty. The ear
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
 (a path read by the harness, or `@CONFIG[=SOURCE_REF]`, a call to the project's
-target provider) mean measure mode; `--run` means read mode; giving
+target provider; one target for `variants`, whose sides are two values of one
+parameter) mean measure mode; `--run` means read mode; giving
 both or neither is an error, as is a flag that belongs to the other mode
 (`--baseline` and `--results` are read mode only, since measure mode derives
-the baseline from its first target; `--suite`, `--rounds`, `--project`,
+the baseline from its first target, except that `variants` takes `--baseline`
+in measure mode too, to pick the baseline value; `--suite`, `--rounds`, `--project`,
 `--run-key`, `--out`, `--repetitions`, `--min-time`, `--no-build`, and
 `--source-uri` are measure mode only). `--label` names the label in read mode, and carries the two values in
 measure mode. §5 describes measure mode.
@@ -492,6 +506,7 @@ every fact the policy matches must agree across both sides.
 |---|---|---|---|
 | `revisions` | subject tree id | a revision or tree id prefix | everything the identity policy matches |
 | `environments` | the label `--label` gives, then subject configuration, pinned components, and `environment.system` | the label value | everything else the identity policy matches, and subject revision and tree |
+| `variants` | the workload parameter `--vary` names, else the only one | that parameter's recorded value, quotes included (`'baseline'`) | everything else the identity policy matches, including subject revision and tree, and every other parameter |
 
 A side is one whole axis value, so one label covering two builds is three
 sides, not one. Before any verdict, the eligibility guard (§3) checks that the
@@ -502,10 +517,22 @@ label, equal attempt counts per side, and sides alternating by
 verdict; under `revisions` the same happens to a side with no tree id (the
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
-both sides and in every round (`one-benchmark-tree`, schema §5.5). A side that
+both sides and in every round (`one-benchmark-tree`, schema §5.5), as it does
+under `variants`. A side that
 is not clean does not fail the run: it makes the comparison local-only. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
-listed.
+listed. Under `variants` a failed attempt (`partial`, `censored` or `error`) on either side also makes
+its unit indeterminate with reason `side-failed`, and no effect is reported: a variant that
+times out in the slow rounds is not judged on the fast ones (UC-02 §10). A `skipped` attempt is
+only excluded, as under every profile.
+
+**What a `variants` comparison varies.** One workload parameter, so a side is one value of it
+(schema §5.5 allows several; the prototype compares two sides). It is the `--vary` name, else the
+only workload parameter the results carry; an `-e` variable counts, since the runner records it as
+one, and with several parameters `--vary` is required. The values are recorded as `repr()` strings,
+so `--baseline` is spelled as recorded, quotes included. A unit is named by what both sides share:
+the other parameters stay in its workload, so every combination of them is its own unit
+(`bench_truncate [size=1000]`), and the parameter itself is not part of the name.
 
 Per comparison unit (one workload variant and quantity), the method
 `benchx/paired-relative/v1`:
@@ -519,8 +546,8 @@ Per comparison unit (one workload variant and quantity), the method
   direction when known; otherwise *no change detected*;
 - is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
   never with fewer than two, since the noise is a standard error
-  (`insufficient-rounds`), when a baseline value is zero, or when the guard
-  excluded the unit.
+  (`insufficient-rounds`), when a baseline value is zero, when the guard
+  excluded the unit, or, under `variants`, when an attempt failed (`side-failed`).
 
 Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with
@@ -552,6 +579,20 @@ compares them; it is the workbench's session loop (`system-decomposition.md`
 4. calls the comparator on that run key and profile. The baseline value is
    derived from the first target: its subject tree id for `revisions`, and the
    first value of `--label NAME=BASE,CONTENDER` for `environments`.
+
+**Measure mode for variants.** `bx compare TARGET --profile variants --suite NAME --rounds R` has one
+target and no label; `session.compare_variants` is its loop. It resolves the side once, with the
+refusal above for a tree with no working-tree id, and lists the cases once, with `--filter`, as the
+runner will. It takes the parameter (`--vary`, else the only one the selected benchmarks and the `-e`
+variables give; several are refused, naming who declares each), reads the two values the selected cases
+take, and splits the cases by value. Each round writes two orders, the baseline's value first at slot
+2r and the other at slot 2r + 1, and an order's filter selects exactly its value's cases, by the text
+`name(p0, p1)` the runner searches the filter in. The baseline is `--baseline`, else the first
+declared value. Benchmarks without the parameter run on neither side, and the session says which.
+Refused before anything runs: no parameter; benchmarks that do not take the same two values (a
+`--filter` can pick two of three); a `--baseline` that is not one of them, with the values as they
+must be typed; and Google Benchmark, whose benchmarks have no parameters. The comparison is
+local-only when the tree is not clean, as above.
 
 It is exactly `bx run` 2R times followed by read-mode `bx compare`; it adds no
 document, schema, or contract. It builds nothing itself: both targets must exist
