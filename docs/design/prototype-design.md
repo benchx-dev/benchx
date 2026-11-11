@@ -1,7 +1,7 @@
 # Prototype Design
 
 **Status:** Draft for review
-**Companion to:** `prototype-scope.md` (what's in the slice); `benchmark-result-schema.md` (the result); `runner-schema.md` and `schemas/work-order/0.1.0` (the work order); `harness-adapter.md`; `benchmark-environments.md`; `comparator.md`; `runner.md`; `system-decomposition.md` §3.4 (the workbench); `measurement-result-parquet.md` (#30, the result row)
+**Companion to:** `prototype-scope.md` (what's in the slice); `benchmark-result-schema.md` (the result); `runner-schema.md` and `schemas/work-order/0.1.0` (the work order); `harness-adapter.md`; `benchmark-environments.md`; `comparator.md`; `runner.md`; `system-decomposition.md` §3.4 (the workbench); `measurement-result-parquet.md` (the result row)
 
 ## 1. Shape
 
@@ -404,7 +404,7 @@ through. There are no side files:
 no JSON, no separate entity tables. Each row is one result, the
 `benchmark_result` of schema §4.1:
 
-- **Message columns:** the row `measurement-result-parquet.md` (#30) derives
+- **Message columns:** the row `measurement-result-parquet.md` derives
   from the result schema, typed structs and lists with open objects as
   canonical JSON, for queries.
 - **Derived columns:** the store project (the result's own, or
@@ -412,7 +412,7 @@ no JSON, no separate entity tables. Each row is one result, the
   `payload_sha256`, and an attempt signature over the fields schema §5.3
   requires results of one attempt to share.
 - **The document:** `document` holds the result in its RFC 8785 canonical
-  form. #30's columns cannot reproduce it, since its mapping is not
+  form. The message columns cannot reproduce it, since its mapping is not
   byte-preserving (a bare observation and a structured one map alike), so this
   column is the audit copy and what the comparator reads.
 - **The work order:** `work_order_ref`, and `work_order` with the order itself
