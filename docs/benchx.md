@@ -233,7 +233,8 @@ every result is pyperf. Results also record the installed project's version
   (`paths.store` in `benchx.conf.json` moves it). It reads documents strictly, validates them, and applies the
   schema §5.4 contract: idempotency and the rejection codes `malformed`,
   `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
-  `attempt-conflict`. Each result is one row: the columns #30 derives from the
+  `attempt-conflict`. Each result is one row: the columns
+  [`measurement-result-parquet.md`](design/measurement-result-parquet.md) derives from the
   schema, the store's derived columns, the canonical document, and the work
   order it references. Entities and series are computed from the rows on
   query, under the identity policy in `benchx/identity.py`: the default of

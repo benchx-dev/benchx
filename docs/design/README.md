@@ -14,9 +14,9 @@ designed around it (see the repository README for the philosophy).
 | [`comparator.md`](comparator.md) | Verdicts in history mode and run mode: the eligibility guard, dispersion-scaled verdicts, the comparison document | draft |
 | [`prototype-scope.md`](prototype-scope.md) | What the minimal implementation demonstrates and the decisions locked for it | agreed |
 | [`prototype-design.md`](prototype-design.md) | How the implementation is built: one CLI over a Python API, a Parquet store, three JSON documents | draft |
+| [`measurement-result-parquet.md`](measurement-result-parquet.md) | The Parquet form of a result: the mapping from the result schema to Arrow types, the message columns of the store's row | draft |
 
-In review as pull requests: the work order (`work-order.md`) and the
-Parquet form of a result (`measurement-result-parquet.md`, #30).
+In review as a pull request: the work order (`work-order.md`).
 
 Not yet designed (roles fixed in the decomposition, documents pending):
 workbench, scheduler internals, change detector, alerting & annotations,

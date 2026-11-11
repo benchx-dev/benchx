@@ -1,9 +1,10 @@
-"""The store's row: the message columns #30 derives, plus the store's own.
+"""The store's row: the message columns derived from the result schema, plus the store's own.
 
-`arrow_type` and `to_row` are the mapping of tools/json_to_parquet.py in #30
-(measurement-result-parquet.md §2): closed objects become structs, open
-objects canonical JSON, observations one typed list. The store adds the
-columns it derives at ingest beside them (prototype-design.md §4).
+`arrow_type` and `to_row` are the mapping of measurement-result-parquet.md §2:
+closed objects become structs, open objects canonical JSON, observations one
+typed list. `message_table` is that row alone (tools/json_to_parquet.py
+writes it); the store adds the columns it derives at ingest beside it
+(prototype-design.md §4).
 """
 
 from datetime import datetime
@@ -12,6 +13,7 @@ import pyarrow as pa
 import rfc8785
 
 from .core import catalog
+from .core.hashing import canonical, sha256_hex
 
 _VALIDATOR = catalog.lookup("measurement-result", catalog.MEASUREMENT_RESULT)
 if _VALIDATOR is None:
@@ -86,7 +88,7 @@ DERIVED = [
     pa.field("reported_coordinates_fingerprint", pa.string(), False),
     pa.field("payload_sha256", pa.string(), False),
     pa.field("attempt_signature", pa.string(), False),  # schema §5.3 attempt integrity
-    # The document itself, canonical: #30's columns cannot reproduce it (a bare
+    # The document itself, canonical: the message columns cannot reproduce it (a bare
     # number and a structured observation map alike), and the comparator reads it.
     pa.field("document", pa.json_(), False),
     pa.field("work_order_ref", pa.string()),
@@ -96,16 +98,29 @@ DERIVED = [
 _DEFS = RESULT_SCHEMA["$defs"]
 _BUILD = arrow_type(RESULT_SCHEMA, _DEFS, pa.string())
 _FINAL = arrow_type(RESULT_SCHEMA, _DEFS, pa.json_())
-RESULTS_SCHEMA = pa.schema(list(_FINAL) + DERIVED, metadata={
+# Which message schema a file was written under; the checksum tells drafts
+# apart that change under one URI (measurement-result-parquet.md §3).
+_METADATA = {
     "benchx.schema_uri": RESULT_SCHEMA["$id"],
-})
+    "benchx.message_schema_sha256": sha256_hex(canonical(RESULT_SCHEMA)),
+}
+MESSAGE_SCHEMA = pa.schema(list(_FINAL), metadata=_METADATA)
+RESULTS_SCHEMA = pa.schema(list(_FINAL) + DERIVED, metadata=_METADATA)
+
+
+def _table(rows: list[dict], extra: list[pa.Field], schema: pa.Schema) -> pa.Table:
+    # Build with strings, then cast: PyArrow cannot fill nested JSON fields
+    # from Python values directly.
+    build = [pa.field(f.name, pa.string(), f.nullable) if f.type == pa.json_() else f for f in extra]
+    return pa.Table.from_pylist(rows, schema=pa.schema(list(_BUILD) + build)).cast(schema)
+
+
+def message_table(documents: list[dict]) -> pa.Table:
+    """One row per validated result: the message columns alone."""
+    return _table([to_row(_FINAL, doc) for doc in documents], [], MESSAGE_SCHEMA)
 
 
 def results_table(documents: list[dict], derived: list[dict]) -> pa.Table:
-    """One row per result: the message as #30 maps it, then the derived columns."""
+    """One row per result: the message columns, then the derived columns."""
     rows = [{**to_row(_FINAL, doc), **extra} for doc, extra in zip(documents, derived)]
-    # Build with strings, then cast: PyArrow cannot fill nested JSON fields
-    # from Python values directly.
-    build = [pa.field(f.name, pa.string(), f.nullable) if f.type == pa.json_() else f for f in DERIVED]
-    table = pa.Table.from_pylist(rows, schema=pa.schema(list(_BUILD) + build))
-    return table.cast(RESULTS_SCHEMA)
+    return _table(rows, DERIVED, RESULTS_SCHEMA)

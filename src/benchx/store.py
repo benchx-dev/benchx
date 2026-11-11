@@ -1,8 +1,8 @@
 """The local store: one Parquet file (prototype-design.md §4).
 
-One row per result: the message columns #30 derives from the result schema,
-then the columns the store derives, including the canonical document itself
-and the work order it references. Entities, series, and series points are
+One row per result: the message columns derived from the result schema
+(measurement-result-parquet.md), then the columns the store derives,
+including the canonical document itself and the work order it references. Entities, series, and series points are
 computed from the rows when asked for; nothing else is stored. JSON is for
 documents in transit, never for the store.
 
