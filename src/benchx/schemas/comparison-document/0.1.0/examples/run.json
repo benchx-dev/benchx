@@ -1,0 +1,117 @@
+{
+  "schema_version": "benchx/comparison-document/0.1.0",
+  "mode": "run",
+  "method": {
+    "name": "benchx/paired-relative",
+    "version": "v1",
+    "effect_measure": "relative",
+    "configuration": {
+      "k": 3.0,
+      "min_rounds": 3
+    }
+  },
+  "estimator": {
+    "name": "median",
+    "method_version": "benchx/median/v1",
+    "input_level": "observations"
+  },
+  "identity_schema": "benchx/profile/environments/v1+benchx/benchx-identity/v1",
+  "local_only": true,
+  "run_key": "urn:uuid:9b2e4f1a-6c3d-4e8b-a1f0-2d7c5b9e3a41",
+  "profile": "environments",
+  "varying": "provenance.labels.build",
+  "baseline": "plain",
+  "contender": "hardened",
+  "pairing": "procedure.round",
+  "failed_invariants": [],
+  "units": [
+    {
+      "workload": {
+        "name": "TakeChunked/4194304/2"
+      },
+      "quantity": "wall-time",
+      "series": {
+        "baseline": "3f1c9a0b7d2e4f6a8b1c3d5e7f9a0b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a",
+        "contender": "8e2d4c6b0a9f1e3d5c7b9a0f2e4d6c8b0a1f3e5d7c9b0a2f4e6d8c0b1a3f5e7d"
+      },
+      "rounds": 3,
+      "reference_estimate": 0.0455,
+      "effect": 0.024,
+      "noise": 0.0021,
+      "noise_source": "paired-rounds",
+      "threshold": 0.0063,
+      "verdict": "regressed",
+      "unmatched_differences": []
+    },
+    {
+      "workload": {
+        "name": "TakeChunked/65536/2"
+      },
+      "quantity": "wall-time",
+      "rounds": 2,
+      "noise_source": "paired-rounds",
+      "verdict": "indeterminate",
+      "reason": "insufficient-rounds"
+    }
+  ],
+  "missing": [
+    {
+      "workload": {
+        "name": "TakeChunked/1024/2"
+      },
+      "quantity": "wall-time",
+      "side": "contender"
+    }
+  ],
+  "exclusions": [],
+  "inputs": [
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-1:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-2:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-3:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-4:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-5:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/4194304/2:slot-6:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-7:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-8:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-9:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/65536/2:slot-10:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/1024/2:slot-11:wall-time"
+    },
+    {
+      "producer": "benchx/gbench-adapter",
+      "ingest_key": "run-9b2e:TakeChunked/1024/2:slot-12:wall-time"
+    }
+  ]
+}

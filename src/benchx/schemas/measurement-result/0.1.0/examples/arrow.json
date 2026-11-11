@@ -1,0 +1,157 @@
+{
+  "schema_version": "benchx/measurement-result/0.1.0",
+  "producer": {
+    "name": "example.org/benchmark-adapter",
+    "version": "4.0",
+    "mapping_version": "native-to-benchx/v5"
+  },
+  "ingest_key": "ci-1234:parquet-read/snappy:wall-time",
+  "attempt_key": "ci.example.org/runs/ci-1234/attempts/parquet-read-snappy-1",
+  "project": "arrow",
+  "source": {
+    "uri": "https://github.com/apache/arrow",
+    "type": "git"
+  },
+  "revision": {
+    "key": "02addad7a1f3ce7d6de6a6230ec4c17828cb8f52"
+  },
+  "benchmark": {
+    "source": {
+      "uri": "https://github.com/example/arrow-benchmarks",
+      "type": "git"
+    },
+    "revision": {
+      "key": "92ef3aa0c1d5e8b7f4a2936d5c1e7b8a9f0d3c2e"
+    }
+  },
+  "coordinates": {
+    "workload": {
+      "name": "parquet-read",
+      "parameters": {
+        "compression": "snappy"
+      }
+    },
+    "subject": {
+      "name": "apache-arrow",
+      "components": [
+        {
+          "role": "primary"
+        }
+      ],
+      "configuration": {
+        "build_type": "release",
+        "compiler": "clang-18"
+      }
+    },
+    "protocol": {
+      "name": "benchmark-time",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {
+        "mode": "time",
+        "seconds": 1
+      },
+      "calibration": {
+        "mode": "adaptive",
+        "minimum_sample_seconds": 0.01
+      },
+      "filesystem_cache": "drop-before-attempt"
+    },
+    "environment": {
+      "schema_version": "machine/v1",
+      "identity": {
+        "runner": "bench-01",
+        "cpu": "AMD EPYC 7R13",
+        "cores": 8
+      },
+      "system": {
+        "os": {
+          "kernel": "6.8.0-31-generic"
+        },
+        "libc": {
+          "version": "2.39"
+        },
+        "runtime": {
+          "python": "3.12"
+        }
+      }
+    }
+  },
+  "measurement": {
+    "quantity": {
+      "name": "wall-time",
+      "unit": "s"
+    },
+    "status": "success",
+    "observations": [
+      0.0371,
+      0.0364,
+      0.0363,
+      0.037,
+      0.0368
+    ],
+    "summaries": [
+      {
+        "type": "estimate",
+        "estimator": {
+          "name": "mean",
+          "method_version": "benchx/mean/v1",
+          "input_level": "observations"
+        },
+        "value": 0.03672,
+        "source": "producer"
+      },
+      {
+        "type": "statistic",
+        "name": "sample_standard_deviation",
+        "value": 0.0003564,
+        "method": "n-1",
+        "source": "producer"
+      },
+      {
+        "type": "confidence_interval",
+        "statistic": "mean",
+        "level": 0.95,
+        "lower": 0.03628,
+        "upper": 0.03716,
+        "method": "student-t",
+        "source": "producer"
+      }
+    ]
+  },
+  "procedure": {
+    "inner_iterations": 100,
+    "attempted_repetitions": 5,
+    "completed_repetitions": 5,
+    "warmups_performed": 1,
+    "caches_cleared": [
+      "filesystem"
+    ]
+  },
+  "provenance": {
+    "run_key": "ci.example.org/runs/ci-1234",
+    "started_at": "2026-07-18T09:12:44Z",
+    "subject_dirty": "clean",
+    "subject_tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "benchmark_dirty": "dirty",
+    "benchmark_tree": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "runner": {
+      "name": "example-runner",
+      "version": "2.1"
+    },
+    "source_payload_sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+    "artifacts": [
+      {
+        "kind": "patch",
+        "media_type": "text/x-diff",
+        "uri": "file:///tmp/bench/benchmark.patch",
+        "sha256": "5f3c1e8a9b2d4c6e7f0a1b3c5d7e9f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e"
+      }
+    ]
+  },
+  "quality": {
+    "warnings": [
+      "dirty-benchmark-tree"
+    ]
+  }
+}

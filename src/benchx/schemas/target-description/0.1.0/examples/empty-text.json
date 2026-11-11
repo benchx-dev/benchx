@@ -1,0 +1,11 @@
+{
+  "schema_version": "benchx/target-description/0.1.0",
+  "target": {
+    "kind": "build",
+    "path": "/tmp/bench-plain",
+    "source": { "uri": "https://github.com/apache/arrow" }
+  },
+  "how_built": "",
+  "activation": null,
+  "shell": null
+}

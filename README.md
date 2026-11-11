@@ -25,12 +25,27 @@ lost.
 
 ## Grounded in user stories
 
-To make sure the schema and the components serve real needs, we are collecting
-user stories from projects that will eventually use the system — who benchmarks,
-what they do today, where it hurts, what must not break. Apache Arrow's
-continuous benchmarking setup is the first collected story; more will follow.
+To make sure the schema and the components serve real needs, started by collecting
+[user stories](https://benchx-dev.github.io/benchx/user_stories/) from multiple projects
+-- who benchmarks, what they do today, where it hurts, what must not break.
+We surveyed Apache Arrow's
+continuous benchmarking setup, NumPy, SciPy, Pandas, and several related projects from
+the data science/numerical computing ecosystem.
 The stories drive which components exist and what each must do; the schema must
 allow all of them.
+
+## BenchX usage and development
+
+Install with `pip install benchx` ([PyPI](https://pypi.org/project/benchx/)).
+
+We welcome contributions of all sorts: add a user story, tell us about your use case, try
+`benchx` on your workflow/project, open an issue if you found a rough edge,
+implement a missing feature.
+
+- Documentation: <https://benchx-dev.github.io/benchx/>
+- Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
+- A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
+
 
 ## Contents
 
@@ -39,11 +54,32 @@ allow all of them.
 - `docs/design/measurement-result-parquet.md` — how a result is stored in
   Parquet, with a small PyArrow example in `tools/json_to_parquet.py`.
 - `docs/user_stories/` — user story template and collected stories.
+- `src/benchx/` -- an in-progress implementation, with its tests in `tests/`.
+- `src/benchx/schemas/` -- JSON schemas for the benchmark result and other components
+  (shipped with the package).
+- worked examples of benchmarking setup(s) are in
+  [benchx_examples](https://github.com/benchx-dev/benchx_examples).
+
+## Documentation site
+
+The design documents, use cases, user stories, and a reference page per JSON
+schema are published as a site built with [Zensical](https://zensical.org).
+To preview it locally:
+
+```
+uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
+uv run --with-requirements docs/requirements.txt zensical serve
+```
+
+`tools/gen_docs.py` generates the landing page and the
+schema reference pages into `docs/` (those paths are gitignored); `zensical.toml`
+configures the site, and `.github/workflows/docs.yml` builds and deploys it.
 
 ## Status
 
-Design phase. No implementation yet; the goal at this stage is to get the
-schema and the component boundaries right.
+Beta status: the main features are available and ready for user testing;
+the project is under active development, and we expect to be able to
+start offering API stability guarantees in the near future.
 
 ## License
 

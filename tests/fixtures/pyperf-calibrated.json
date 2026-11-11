@@ -1,0 +1,155 @@
+{
+ "benchmarks": [
+  {
+   "runs": [
+    {
+     "metadata": {
+      "calibrate_loops": 65536,
+      "cpu_freq": "trimmed",
+      "duration": 0.13060829788446426,
+      "mem_max_rss": 26214400,
+      "uptime": "trimmed"
+     },
+     "warmups": [
+      [
+       1,
+       1.2507662177085876e-06
+      ],
+      [
+       2,
+       9.150244295597076e-07
+      ],
+      [
+       4,
+       5.324836820363998e-07
+      ],
+      [
+       8,
+       4.788162186741829e-07
+      ],
+      [
+       16,
+       4.64380718767643e-07
+      ],
+      [
+       32,
+       4.6126660890877247e-07
+      ],
+      [
+       64,
+       4.6017521526664495e-07
+      ],
+      [
+       128,
+       4.603207344189286e-07
+      ],
+      [
+       256,
+       4.6004061005078256e-07
+      ],
+      [
+       512,
+       4.6979039325378835e-07
+      ],
+      [
+       1024,
+       4.653575160773471e-07
+      ],
+      [
+       2048,
+       4.6563081923522986e-07
+      ],
+      [
+       4096,
+       4.6889272198313847e-07
+      ],
+      [
+       8192,
+       4.677548304243828e-07
+      ],
+      [
+       16384,
+       4.657119916373631e-07
+      ],
+      [
+       32768,
+       4.666196105063136e-07
+      ],
+      [
+       65536,
+       4.6563980049540987e-07
+      ],
+      [
+       65536,
+       4.647636444587988e-07
+      ],
+      [
+       65536,
+       4.6662309216571884e-07
+      ]
+     ]
+    },
+    {
+     "metadata": {
+      "cpu_freq": "trimmed",
+      "duration": 0.1015105452388525,
+      "mem_max_rss": 25690112,
+      "uptime": "trimmed"
+     },
+     "values": [
+      4.732610534574633e-07,
+      4.7117362100834725e-07
+     ],
+     "warmups": [
+      [
+       65536,
+       4.737789538467041e-07
+      ]
+     ]
+    },
+    {
+     "metadata": {
+      "cpu_freq": "trimmed",
+      "duration": 0.10224028397351503,
+      "mem_max_rss": 26214400,
+      "uptime": "trimmed"
+     },
+     "values": [
+      4.7628874710881064e-07,
+      4.759058924719284e-07
+     ],
+     "warmups": [
+      [
+       65536,
+       4.7442897255223215e-07
+      ]
+     ]
+    }
+   ]
+  }
+ ],
+ "metadata": {
+  "aslr": "Full randomization",
+  "benchx_env_sha256": "c3a4a466edfe03ca6c3b1bd054811e1ab2e43d509d9f2a963fb8f9e33654f5a9",
+  "boot_time": "trimmed",
+  "cpu_config": "0-63=driver:acpi-cpufreq, governor:schedutil; idle:acpi_idle",
+  "cpu_count": 64,
+  "cpu_model_name": "trimmed",
+  "hostname": "trimmed",
+  "load_avg_1min": 1.06,
+  "loops": 65536,
+  "name": "f",
+  "perf_version": "2.10.0",
+  "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.36",
+  "python_cflags": "trimmed",
+  "python_compiler": "GCC 15.3.0",
+  "python_config_args": "trimmed",
+  "python_executable": "trimmed",
+  "python_implementation": "cpython",
+  "python_version": "3.14.7 (64-bit)",
+  "runnable_threads": 3,
+  "timer": "clock_gettime(CLOCK_MONOTONIC), resolution: 1.00 ns",
+  "unit": "second"
+ },
+ "version": "1.0"
+}

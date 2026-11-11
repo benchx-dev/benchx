@@ -1,0 +1,107 @@
+{
+  "schema_version": "benchx/measurement-result/0.1.0",
+  "producer": {
+    "name": "example.org/narwhals-bench",
+    "version": "0.4.0",
+    "mapping_version": "narwhals-bench-to-benchx/v1"
+  },
+  "ingest_key": "nightly-912:truncate/rows=1000000:overhead-ratio",
+  "attempt_key": "ci.example.org/runs/nightly-912/attempts/truncate-ratio",
+  "project": "narwhals",
+  "source": {
+    "uri": "https://github.com/narwhals-dev/narwhals",
+    "type": "git"
+  },
+  "revision": {
+    "key": "c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3"
+  },
+  "benchmark": {
+    "source": {
+      "uri": "https://github.com/narwhals-dev/narwhals",
+      "type": "git"
+    },
+    "revision": {
+      "key": "c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3"
+    }
+  },
+  "coordinates": {
+    "workload": {
+      "name": "truncate",
+      "parameters": {
+        "rows": 1000000
+      }
+    },
+    "subject": {
+      "name": "narwhals",
+      "components": [
+        {"role": "primary"},
+        {"role": "pandas", "source": "https://github.com/pandas-dev/pandas", "revision": "v2.2.3"}
+      ]
+    },
+    "protocol": {
+      "name": "timeit",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {"mode": "repetitions", "n_warmup": 1},
+      "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.2},
+      "repetitions": {"mode": "fixed", "n_repeat": 5}
+    },
+    "environment": {
+      "schema_version": "machine/v1",
+      "identity": {
+        "runner": "ci-01",
+        "cpu": "AMD EPYC 7R13",
+        "cores": 4
+      },
+      "system": {
+        "runtime": {"python": "3.12"}
+      }
+    }
+  },
+  "measurement": {
+    "quantity": {
+      "name": "overhead-ratio",
+      "unit": "1",
+      "direction": "lower-is-better"
+    },
+    "status": "success",
+    "summaries": [
+      {
+        "type": "estimate",
+        "estimator": {
+          "name": "ratio",
+          "method_version": "benchx/ratio/v1",
+          "input_level": "estimates",
+          "parameters": {
+            "input_estimator": "min"
+          },
+          "inputs": [
+            {"role": "numerator", "quantity": "wall-time"},
+            {"role": "denominator", "quantity": "wall-time"}
+          ]
+        },
+        "value": 1.032,
+        "source": "producer"
+      }
+    ]
+  },
+  "provenance": {
+    "run_key": "ci.example.org/runs/nightly-912",
+    "started_at": "2026-09-16T02:40:19Z",
+    "subject_dirty": "clean",
+    "subject_tree": "1a2b3c4d5e6f7081920a1b2c3d4e5f60718293a4",
+    "benchmark_dirty": "clean",
+    "benchmark_tree": "1a2b3c4d5e6f7081920a1b2c3d4e5f60718293a4",
+    "references": [
+      {
+        "role": "numerator",
+        "result": {"producer": "example.org/narwhals-bench", "ingest_key": "nightly-912:truncate/rows=1000000,role=narwhals:wall-time"}
+      },
+      {
+        "role": "denominator",
+        "result": {"producer": "example.org/narwhals-bench", "ingest_key": "nightly-912:truncate/rows=1000000,role=native:wall-time"}
+      }
+    ],
+    "runner": {"name": "example-runner", "version": "2.1"}
+  }
+}

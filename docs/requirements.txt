@@ -1,0 +1,5 @@
+# Build the documentation site:
+#   uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
+#   uv run --with-requirements docs/requirements.txt zensical serve
+# Zensical is pre-1.0 and moves quickly; pinned so local and CI builds agree.
+zensical==0.0.71

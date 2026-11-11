@@ -1,0 +1,18 @@
+{
+  "schema_version": "benchx/work-order/0.1.0",
+  "work_order_id": "urn:uuid:9b2e4f1a-6c3d-4e8f-a7b0-1c2d3e4f5a6b",
+  "state": "draft",
+  "suites": [
+    { "adapter": "google-benchmark", "suite": "demo-bench", "filter": "BM_.*" }
+  ],
+  "quantities": ["wall-time"],
+  "target": {
+    "kind": "build",
+    "path": "/tmp/bench-plain",
+    "source": { "uri": "https://example.org/demo.git", "type": "git" }
+  },
+  "precision": { "repetitions": 5 },
+  "timeouts": { "case_s": 30, "order_s": 600 },
+  "run_key": "local:demo-2026-09-29",
+  "requester": { "kind": "workbench", "name": "local" }
+}

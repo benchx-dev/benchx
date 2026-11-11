@@ -1,0 +1,15 @@
+{
+  "schema_version": "benchx/target-description/0.1.0",
+  "target": {
+    "kind": "build",
+    "path": "/tmp/bench-hardened",
+    "source": { "uri": "https://github.com/apache/arrow", "type": "git" },
+    "source_dir": "/home/me/arrow"
+  },
+  "build": { "type": "Release", "options": { "ARROW_HARDENING": "ON" } },
+  "how_built": "cmake -S cpp -B /tmp/bench-hardened -GNinja -DCMAKE_BUILD_TYPE=Release -DARROW_BUILD_BENCHMARKS=ON -DARROW_COMPUTE=ON -DARROW_HARDENING=ON\ncmake --build /tmp/bench-hardened --target arrow-compute-vector-selection-benchmark",
+  "activation": "export LD_LIBRARY_PATH=/opt/deps/lib:$LD_LIBRARY_PATH",
+  "shell": "bash",
+  "labels": { "side": "hardened" },
+  "provider": { "name": "build-arrow.sh", "version": "3" }
+}

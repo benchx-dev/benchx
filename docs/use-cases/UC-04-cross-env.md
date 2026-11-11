@@ -121,7 +121,7 @@ Store session_ids, env_labels, interleave_positions, and timings.
 
 ### 10. Degenerate and failure modes
 
-An environment may fail to build, or a test may fail to run.
+An environment may be missing or unusable, or a test may fail to run. Building each environment is the caller's job and its failure is outside benchx; the runner refuses a target it cannot identify and reports the reason (`runner-schema.md` §6).
 
 ### 11. Non-goals
 

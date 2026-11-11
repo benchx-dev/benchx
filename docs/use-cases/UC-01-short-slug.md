@@ -70,6 +70,9 @@ Here `time_eigvals` resolves to the benchmark function `benchmarks/benchmarks/li
 `size`, `contiguous` and `module`.
 The `spin bench` command runs in an existing environment and may set environment
 variables before invoking the benchmarking too that its `bench` command abstracts.
+In this design the target is the project's own in-place build (for `spin`, the one
+`spin build` made), which benchx runs and records without building; a dirty tree
+is allowed and recorded as dirty.
 
 The default view is just display. However, results need saving according to the schema,
 for a user might want to add their own view/analysis postprocessing, which is

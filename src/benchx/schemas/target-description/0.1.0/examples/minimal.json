@@ -1,0 +1,8 @@
+{
+  "schema_version": "benchx/target-description/0.1.0",
+  "target": {
+    "kind": "working_tree",
+    "path": "/home/me/arrow",
+    "source": { "uri": "https://github.com/apache/arrow" }
+  }
+}

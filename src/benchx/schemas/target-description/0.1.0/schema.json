@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:benchx:schema:target-description:0.1.0",
+  "title": "BenchX target description",
+  "description": "What a target provider hands the workbench about one prepared target (docs/design/system-decomposition.md \u00a73.4). The same document arrives three ways: on a provider's stdout, as a sidecar file .benchx-target.json in a build directory, or assembled by the workbench from the user's own input. The workbench copies target, build, how_built, activation and shell into the work order's target, and labels into the order's labels. Nothing else in a work order comes from a provider.",
+  "$comment": "target and build are $refs into urn:benchx:schema:work-order:0.1.0, so the two cannot drift; a validator must register that schema (and the measurement-result schema it refs) together with this one. Paths are absolute because the workbench and the runner may not share a working directory; the schema enforces this for working_tree and build targets. how_built, activation, shell and provider are $refs into the work-order schema's provenanceText, so a description copies into an order unchanged. how_built and activation are declared provenance text (benchmark-environments.md \u00a73.2): recorded as given, never executed and never checked against anything. The user activates the environment before invoking benchx, and the runner records what it inherited. Absent, null, empty, or whitespace-only means not declared. Neither text enters identity. Both are copied verbatim into results, which may be promoted to a shared store, so neither may hold secrets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "benchx/target-description/0.1.0"
+    },
+    "target": {
+      "description": "The work-order target, unchanged.",
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/properties/target"
+    },
+    "build": {
+      "description": "The declared configuration of the prebuilt target, for facts the runner cannot read from it. The work-order build object, unchanged.",
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/properties/build"
+    },
+    "how_built": {
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/$defs/provenanceText/properties/how_built"
+    },
+    "activation": {
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/$defs/provenanceText/properties/activation"
+    },
+    "shell": {
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/$defs/provenanceText/properties/shell"
+    },
+    "labels": {
+      "description": "Caller labels for selecting sides of a comparison, copied to the order's labels. Never enter identity.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "provider": {
+      "$ref": "urn:benchx:schema:work-order:0.1.0#/$defs/provenanceText/properties/provider"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "working_tree",
+                  "build"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "path": {
+                "pattern": "^(/|[A-Za-z]:[\\\\/])"
+              },
+              "source_dir": {
+                "pattern": "^(/|[A-Za-z]:[\\\\/])"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
