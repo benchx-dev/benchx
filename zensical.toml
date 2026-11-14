@@ -4,6 +4,11 @@
 #   zensical serve                  # preview at http://127.0.0.1:8000
 #   zensical build --strict --clean # what CI runs
 #
+#   python tools/build_site.py [PATH]   # everything above in one go, with the pages of the
+#                                       # examples run from the benchx_examples checkout PATH;
+#                                       # without PATH, or without examples, the Examples page
+#                                       # says that none was built (see the script)
+#
 # The generated pages are gitignored; run the generator again after changing
 # a schema or the README.
 

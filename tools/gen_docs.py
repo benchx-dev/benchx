@@ -6,8 +6,9 @@ It writes, into docs/, files that are gitignored and never committed:
 - index.md, from the repository README (links to docs/... rewritten);
 - examples/index.md, the Examples page: the introduction in docs/examples-intro.md (committed),
   then a list of the examples whose pages are under docs/examples/<name>/<name>.md. The docs
-  workflow puts those pages there, from the artifacts of the e2e workflow; run locally, there
-  are none and the page says so;
+  workflow puts those pages there, from the artifacts of the e2e workflow; locally,
+  tools/build_site.py makes them from a benchx_examples checkout, and without them the page
+  says that none was built;
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
 - schemas/<name>/<version>/schema.json and examples/*.json, so the raw
