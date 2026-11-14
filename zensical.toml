@@ -1,6 +1,6 @@
 # Documentation site, built with Zensical (https://zensical.org).
 #
-#   python tools/gen_docs.py        # generate docs/index.md and docs/schemas/
+#   python tools/gen_docs.py        # generate docs/index.md, docs/schemas/ and docs/examples/index.md
 #   zensical serve                  # preview at http://127.0.0.1:8000
 #   zensical build --strict --clean # what CI runs
 #
@@ -20,10 +20,12 @@ docs_dir = "docs"
 site_dir = "site"
 
 # Ablation studies are working notes, not part of the published design;
-# requirements.txt is build tooling.
+# requirements.txt is build tooling; examples-intro.md is the introduction of the generated
+# Examples page (tools/gen_docs.py), not a page of its own.
 exclude_docs = """
 *-ablation.md
 requirements.txt
+examples-intro.md
 """
 
 nav = [
@@ -73,6 +75,7 @@ nav = [
     { "One-off benchmarking" = "user_stories/one-off.md" },
   ] },
   { "benchx" = "benchx.md" },
+  { "Examples" = "examples/index.md" },
   { "Releasing" = "releasing.md" },
 ]
 
