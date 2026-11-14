@@ -19,9 +19,18 @@ on:
       - "zensical.toml"
       - "README.md"
       - ".github/workflows/docs.yml"
+  # Build the site again with the pages that the e2e workflow generated from the examples
+  # (job build-with-examples). The name must match `name:` in e2e.yml. A workflow_run
+  # workflow runs from the default branch, so this part does nothing before it is merged.
+  workflow_run:
+    workflows: ["e2e examples"]
+    types: [completed]
 
+# The event is part of the group, and for workflow_run so is the branch that e2e ran on:
+# github.ref is then the default branch, and a plain `workflow-ref` group would let an
+# examples build cancel the build and deploy of a push to main.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -29,6 +38,8 @@ permissions:
 
 jobs:
   build:
+    # Not for workflow_run: build-with-examples does that build.
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,3 +71,72 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # The same build as `build`, plus a page per example, from the docs-<example> artifacts
+  # of the e2e run that triggered this one. They are assembled into
+  # docs/examples/<example>/, next to the page <example>.md and its assets/.
+  #
+  # Only for e2e runs that succeeded and were not started by a pull request (in practice a
+  # run started by hand today, since e2e.yml runs on pull requests and on demand). Then the
+  # artifacts do not come from a fork. Nothing from them is executed, and the token is
+  # read-only. The site is kept as an artifact and not deployed, and the new pages are
+  # not in `nav`, so they are reached by their URL or by search.
+  build-with-examples:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # The revision that e2e ran on, so the docs and the examples belong together.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      # `gh` puts each artifact in a directory of its own, generated/docs-<example>/.
+      - name: Download the generated example pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'docs-*' \
+            --dir generated
+
+      # Fail rather than build a site without examples when there is nothing to assemble.
+      - name: Assemble the example pages into docs/examples/
+        run: |
+          set -euo pipefail
+          count=0
+          for artifact in generated/docs-*; do
+            [ -d "$artifact" ] || continue
+            example="${artifact##*/docs-}"
+            case "$example" in
+              ""|*[!a-zA-Z0-9_-]*) echo "Invalid example name in $artifact" >&2; exit 1 ;;
+            esac
+            mkdir -p "docs/examples/$example"
+            cp -R "$artifact/." "docs/examples/$example/"
+            count=$((count + 1))
+          done
+          [ "$count" -gt 0 ] || { echo "No docs-* artifacts were downloaded" >&2; exit 1; }
+          find docs/examples -type f | sort
+
+      - name: Generate derived pages (landing page, benchx page, schema reference)
+        run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py
+
+      - name: Build site
+        run: uv run --python 3.12 --with-requirements docs/requirements.txt zensical build --strict --clean
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: documentation-site
+          path: site/
+          if-no-files-found: error
+          retention-days: 14
