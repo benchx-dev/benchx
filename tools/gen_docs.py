@@ -4,6 +4,11 @@ Run before `zensical build` (the docs workflow does; locally: `python tools/gen_
 It writes, into docs/, files that are gitignored and never committed:
 
 - index.md, from the repository README (links to docs/... rewritten);
+- examples/index.md, the Examples page: the introduction in docs/examples-intro.md (committed),
+  then a list of the examples whose pages are under docs/examples/<name>/<name>.md. The docs
+  workflow puts those pages there, from the artifacts of the e2e workflow; locally,
+  tools/build_site.py makes them from a benchx_examples checkout, and without them the page
+  says that none was built;
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
 - schemas/<name>/<version>/schema.json and examples/*.json, so the raw
@@ -489,9 +494,87 @@ def rewrite_readme(text: str, strip_prefix: str) -> str:
     return text
 
 
+# --------------------------------------------------------------------------- examples index
+
+EXAMPLES_REPO_URL = "https://github.com/benchx-dev/benchx_examples"
+
+
+def example_pages() -> list[tuple[str, Path]]:
+    """(name, page) for each docs/examples/<name>/<name>.md, sorted by name.
+
+    Not committed: the docs workflow assembles them before this runs, one directory per
+    example, with the page named like the directory (as benchx_examples' workflow names it).
+    """
+    root = DOCS / "examples"
+    if not root.is_dir():
+        return []
+    return [
+        (d.name, d / f"{d.name}.md")
+        for d in sorted(root.iterdir())
+        if d.is_dir() and (d / f"{d.name}.md").is_file()
+    ]
+
+
+def title_and_summary(path: Path, fallback: str) -> tuple[str, str]:
+    """The first heading of a Markdown page, and its first paragraph as plain text.
+
+    Links are reduced to their text: the summary is shown on another page, where a
+    relative link would point nowhere.
+    """
+    title, paragraph, in_fence, found = fallback, [], False, False
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            if found and paragraph:
+                break
+            continue
+        if in_fence:
+            continue
+        if not found:
+            if line.startswith("# "):
+                title, found = stripped[2:].strip(), True
+            continue
+        if not stripped:
+            if paragraph:
+                break
+            continue
+        if stripped.startswith(("#", "|", ">", "- ", "* ", "!")):  # not a plain paragraph
+            break
+        paragraph.append(stripped)
+    return title, re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", " ".join(paragraph))
+
+
+EXAMPLES_INTRO = DOCS / "examples-intro.md"
+
+
+def examples_index(examples: list[tuple[str, Path]]) -> str:
+    """The Examples page: the introduction, then one entry per example.
+
+    The introduction is the committed Markdown file docs/examples-intro.md (excluded from the
+    site in zensical.toml, so it is not a page of its own). It goes into docs/examples/index.md
+    as it is, so a relative link in it is relative to docs/examples/.
+    """
+    if not EXAMPLES_INTRO.is_file():
+        raise SystemExit(f"{EXAMPLES_INTRO.relative_to(ROOT)} is missing: it is the introduction "
+                         "of the Examples page")
+    out = [EXAMPLES_INTRO.read_text().strip(), ""]
+    if not examples:
+        out.append("No example was built into this site: the pages come from a run of the `e2e` "
+                   "workflow, and none was available.")
+    for name, page in examples:
+        title, summary = title_and_summary(page, name)
+        source = f"[`examples/{name}`]({EXAMPLES_REPO_URL}/tree/main/examples/{name})"
+        out.append(f"- [{title}]({name}/{name}.md)" + (f": {summary}" if summary else "")
+                   + f" Source: {source}.")
+    return "\n".join(out)
+
+
 # --------------------------------------------------------------------------- main
 
-GENERATED = ["index.md", "schemas"]  # paths under docs/, all gitignored
+# Paths under docs/, all gitignored. Not the whole of docs/examples/: its pages are put there
+# by the docs workflow, and only the index is generated here.
+GENERATED = ["index.md", "schemas", "examples/index.md"]
 
 
 def main() -> None:
@@ -515,6 +598,10 @@ def main() -> None:
     # Landing page from the repository README.
     write("index.md", rewrite_readme((ROOT / "README.md").read_text(), "docs/"))
 
+    # The Examples page, from whatever pages are under docs/examples/.
+    examples = example_pages()
+    write("examples/index.md", examples_index(examples))
+
     # Schema reference pages and raw documents.
     pages = discover()
     write("schemas/index.md", schema_index(pages))
@@ -525,7 +612,8 @@ def main() -> None:
             write(f"schemas/{p.name}/{v}/schema.json", (vdir / "schema.json").read_bytes())
             for ex in sorted((vdir / "examples").glob("*.json")) if (vdir / "examples").is_dir() else []:
                 write(f"schemas/{p.name}/{v}/examples/{ex.name}", ex.read_bytes())
-    print(f"generated {len(pages)} schema pages under {DOCS.relative_to(ROOT)}/")
+    print(f"generated {len(pages)} schema pages and the Examples page ({len(examples)} examples)"
+          f" under {DOCS.relative_to(ROOT)}/")
 
 
 if __name__ == "__main__":
