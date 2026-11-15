@@ -119,7 +119,16 @@ The checksum matters while 0.1.0 is a draft that changes under one URI.
 
 A store adds the columns it derives at ingest after the message columns, and may copy a key out of an open object into a typed column when a query needs it. The local store adds its project, `reported_coordinates_fingerprint`, `payload_sha256`, an attempt signature, the canonical `document`, and the work order the result references (`parquet.DERIVED`; `prototype-design.md` §4). Those columns and the store's layout belong to the store's design, not to this document.
 
-Because the Arrow schema is derived, a change to `schema.json` changes the file schema, and files written under different message schemas are told apart by `benchx.message_schema_sha256`. An added optional field reads as null from older rows under PyArrow's permissive schema unification, which is how the local store carries old rows over when it rewrites its file; removing a field or changing its type is a new message contract and is not mixed into one file.
+Because the Arrow schema is derived, a change to `schema.json` changes the file schema. A file written in one go, as the program in §5 writes it, holds rows of one message schema, and `benchx.message_schema_sha256` names it. The local store rewrites its file at every ingest and carries the older rows over under PyArrow's permissive schema unification, so its checksum names the schema of the last write, not of every row. What happens to those older rows depends on the change:
+
+| Change to the message schema | Appending to a file written before it |
+|---|---|
+| an optional field is added | older rows read null |
+| a field is removed | the field stays in the file, null in newer rows |
+| an integer becomes a number | older rows are widened to `float64` |
+| a required field is added, or a type changes otherwise | the append fails and the file is left as it was |
+
+Only the first is a compatible change. The others are a new message contract, which belongs in a new file. Nothing reads the checksum yet, so the store does not refuse them itself: two pass silently and the last surfaces as a PyArrow error.
 
 ## 5. Writing and reading
 
@@ -163,7 +172,7 @@ truncate      wall-time        5     0.000128  perf_counter
 
 The temperature is a condition of the wall-time attempt, read from a sensor rather than timed. The overhead ratio is an aggregate-only compound result, so it has no observations.
 
-`tests/test_parquet.py` checks the mapping over the examples (row order, nullability, canonical JSON, observation values, file metadata), the rules that must fail, and the program.
+`tests/test_parquet.py` checks the mapping over the examples (row order, nullability, canonical JSON, observation values, file metadata, and that nothing a message reports is dropped), that the listing in §3 is the derived schema, the rules that must fail, and the program.
 
 ## 6. Not covered
 
