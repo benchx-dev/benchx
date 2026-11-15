@@ -4,9 +4,9 @@
 Each document is read strictly and checked as `bx validate` checks it; the
 rows are the message columns of benchx.parquet, whose Arrow schema is derived
 from the shipped result schema, so this program cannot drift from it. See
-docs/design/measurement-result-parquet.md.
+docs/design/measurement-result-parquet.md. Run it from a checkout:
 
-    pip install benchx
+    pip install -e .
     python tools/json_to_parquet.py results.parquet \
         src/benchx/schemas/measurement-result/0.1.0/examples/*.json
 """

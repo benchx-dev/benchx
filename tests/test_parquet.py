@@ -75,6 +75,7 @@ def closed(json_type):
     {"oneOf": [{"type": "string"}, closed("string")]},  # a bare value that is not a number
     {"oneOf": [{"type": "number"}, closed("number")]},  # no `value` to hold the bare number
     {"oneOf": [{"type": "number"}, closed("number"), closed("number")]},
+    {"allOf": [{"minLength": 1}, closed("string")]},  # no leading reference
 ])
 def test_unsupported_nodes_fail(node):
     with pytest.raises(ValueError):

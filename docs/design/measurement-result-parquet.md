@@ -29,7 +29,7 @@ The Arrow schema is derived from `src/benchx/schemas/measurement-result/0.1.0/sc
 | integer, integer const | `int64` |
 | number | `float64` |
 | boolean | `bool` |
-| any other `const`, `enum`, or `oneOf` | an error, so that a schema change the rules do not cover is noticed rather than stored loosely |
+| any other `const`, `enum`, `oneOf`, or `allOf` | an error, so that a schema change the rules do not cover is noticed rather than stored loosely |
 
 Open objects stay JSON because their keys are project-defined: workload parameters, subject configuration, the protocol, environment identity and system description, resource selection, labels, and procedure. Canonical text makes equal values equal strings. A store promotes a key to a typed column only when a query needs it.
 
@@ -123,10 +123,10 @@ Because the Arrow schema is derived, a change to `schema.json` changes the file 
 
 ## 5. Writing and reading
 
-The program reads each document strictly and checks it as `bx validate` does, then writes all documents given to it as the rows of one file:
+The program reads each document strictly and checks it as `bx validate` does, then writes all documents given to it as the rows of one file. It runs from a checkout, since `tools/` is not part of the installed package:
 
 ```bash
-pip install benchx
+pip install -e .
 python tools/json_to_parquet.py results.parquet \
     src/benchx/schemas/measurement-result/0.1.0/examples/*.json
 ```

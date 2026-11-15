@@ -16,8 +16,6 @@ designed around it (see the repository README for the philosophy).
 | [`prototype-design.md`](prototype-design.md) | How the implementation is built: one CLI over a Python API, a Parquet store, three JSON documents | draft |
 | [`measurement-result-parquet.md`](measurement-result-parquet.md) | The Parquet form of a result: the mapping from the result schema to Arrow types, the message columns of the store's row | draft |
 
-In review as a pull request: the work order (`work-order.md`).
-
 Not yet designed (roles fixed in the decomposition, documents pending):
 workbench, scheduler internals, change detector, alerting & annotations,
 views, series continuity and identity-policy authoring, the environment

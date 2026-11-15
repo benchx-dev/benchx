@@ -33,6 +33,8 @@ def arrow_type(node, defs, json_type):
         node = defs[node["$ref"].rsplit("/", 1)[-1]]
     nested = lambda n: arrow_type(n, defs, json_type)  # noqa: E731
     if "allOf" in node and "type" not in node:  # a reference narrowed by assertions
+        if "$ref" not in node["allOf"][0]:
+            raise ValueError(f"unsupported allOf without a leading reference: {node}")
         return nested(node["allOf"][0])
     if "oneOf" in node:  # union of closed objects, or number-or-object observation
         branches = [defs[b["$ref"].rsplit("/", 1)[-1]] if "$ref" in b else b for b in node["oneOf"]]
