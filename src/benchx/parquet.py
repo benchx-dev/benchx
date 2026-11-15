@@ -37,8 +37,15 @@ def arrow_type(node, defs, json_type):
     if "oneOf" in node:  # union of closed objects, or number-or-object observation
         branches = [defs[b["$ref"].rsplit("/", 1)[-1]] if "$ref" in b else b for b in node["oneOf"]]
         objects = [b for b in branches if b.get("type") == "object"]
-        if not objects:
-            raise ValueError(f"unsupported oneOf without an object alternative: {node}")
+        others = [b for b in branches if b.get("type") != "object"]
+        closed = all(b.get("additionalProperties") is False and "properties" in b for b in objects)
+        # to_row stores a bare value in `value`, so the only other alternative
+        # allowed is a number beside one object whose `value` is a number.
+        bare = [b.get("type") for b in others] == ["number"] and len(objects) == 1
+        if not objects or not closed or (others and not bare):
+            raise ValueError(f"unsupported oneOf: {node}")
+        if others and nested(objects[0]["properties"].get("value", {})) != SCALARS["number"]:
+            raise ValueError(f"unsupported oneOf: a bare number needs a number `value` to be stored in: {node}")
         required = set.intersection(*(set(b.get("required", [])) for b in objects))
         types = {}  # in first-appearance order
         for b in objects:

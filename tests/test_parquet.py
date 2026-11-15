@@ -70,6 +70,11 @@ def closed(json_type):
     {"enum": ["a", 1]},
     {"oneOf": [{"type": "string"}, {"type": "integer"}]},
     {"oneOf": [closed("string"), closed("integer")]},
+    {"oneOf": [closed("string"), {"type": "object", "properties": {"y": {"type": "string"}}}]},  # open
+    {"oneOf": [closed("string"), {"type": "object", "additionalProperties": False}]},  # no properties
+    {"oneOf": [{"type": "string"}, closed("string")]},  # a bare value that is not a number
+    {"oneOf": [{"type": "number"}, closed("number")]},  # no `value` to hold the bare number
+    {"oneOf": [{"type": "number"}, closed("number"), closed("number")]},
 ])
 def test_unsupported_nodes_fail(node):
     with pytest.raises(ValueError):
