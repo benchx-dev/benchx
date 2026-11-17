@@ -20,7 +20,7 @@ class PairedRelative(Method):
         "type": "object",
         "additionalProperties": False,
         "required": ["k", "min_rounds"],
-        "properties": {"k": {"type": "number"}, "min_rounds": {"type": "integer"}},
+        "properties": {"k": {"type": "number", "minimum": 0}, "min_rounds": {"type": "integer"}},
     }
     details_schema = {
         "type": "object",

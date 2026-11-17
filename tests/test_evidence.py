@@ -235,6 +235,9 @@ def test_configuration_is_checked_against_the_methods_schema():
         compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, alpha=0.05)
     with pytest.raises(compare.CompareError, match="benchx/paired-relative/v1"):
         compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, k="three")
+    with pytest.raises(compare.CompareError, match="minimum"):
+        compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, k=-1.0)
+    assert evaluate(run(), k=0.0)["method"]["configuration"]["k"] == 0.0  # zero is allowed
 
 
 class Careless(Method):
