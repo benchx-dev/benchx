@@ -199,7 +199,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                     for case, index in benchx_params.expand(info["name"], info["params"], case_filter)]
         if not selected:
             if benchx_params.matches_name_only(info["name"], info["params"], case_filter):
-                unmatched.append(info["name"])
+                unmatched.append(info)
             continue
         if info["type"] != "time":
             other[info["type"]] = other.get(info["type"], 0) + 1

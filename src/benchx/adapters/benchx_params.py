@@ -84,6 +84,16 @@ def expand(name, ids, case_filter):
 
 
 def matches_name_only(name, ids, case_filter) -> bool:
-    """Whether a filter that selected none of a benchmark's cases matches its name alone:
-    a parametrized benchmark is searched in `name(p0, p1)`, so `name$` is a likely slip."""
-    return bool(ids and case_filter and re.search(case_filter, name))
+    """Whether a filter that selected none of a benchmark's cases is about this benchmark, though
+    not about any of its combinations: it matches the name alone (`name$` is a likely slip), or the
+    part of it before its first `\\(` does, so what it gives after the name, the arguments, is
+    what fails (in the wrong order, or a value the benchmark does not have)."""
+    if not (ids and case_filter):
+        return False
+    named = case_filter.split(r"\(")[0]
+    if not named.strip("^"):  # it starts with its arguments: no name to go by
+        return False
+    try:
+        return bool(re.search(named, name))
+    except re.error:
+        return False

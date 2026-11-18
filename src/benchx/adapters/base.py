@@ -67,12 +67,15 @@ Optional hooks (the runner calls them when present)
                               attempt. For a harness that repeats at several levels.
 """
 
+import difflib
 import os
+import re
 import signal
 import subprocess
+import textwrap
 
 from ..core import Refusal, Rejected
-from .benchx_params import combination
+from .benchx_params import combination, search_name
 
 
 class Unsupported(Rejected):
@@ -97,25 +100,55 @@ def parametrized_workload(case, runnable) -> tuple[str, dict]:
     return name, dict(zip(info["param_names"], combination(info["params"], index)))
 
 
-def name_only_note(names) -> str:
-    """For a refusal: the filter matched parametrized benchmarks by name, but not their
-    arguments (see `benchx_params.matches_name_only`)."""
-    return (f"the filter matches the name of a parametrized benchmark ({', '.join(names[:3])}) but "
-            "not its arguments, and those are matched as name(p0, p1)")
+def name_only_note(found) -> str:
+    """For a refusal: the filter is about parametrized benchmarks (`found`, their listing entries)
+    but matches none of their arguments (see `benchx_params.matches_name_only`). Says how a case
+    is searched, with the first benchmark's parameters, in order, and one case as it is searched."""
+    first = found[0]
+    names = ", ".join(info["name"] for info in found[:3])
+    return "\n".join([
+        f"the filter matches the name of a parametrized benchmark ({names}) but not its arguments.",
+        "They are searched as name(p0, p1), each as its repr, in the order of param_names:",
+        f"  {first['name']}({', '.join(first['param_names'])})",
+        "for example:",
+        f"  {search_name(first['name'], first['params'], 0)}"])
 
 
-def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupported:
+def similar(case_filter, names, limit=5, cutoff=0.75) -> list[str]:
+    """The names a filter may have meant: those that have, as a dotted part (module, class, method), the
+    most of its words, or words close to them, then the closest first. A word is a run of letters, digits
+    and `_` of three characters or more, so an escape such as `\\d` says nothing, and the case of a letter
+    is not a difference. A filter that names a module and misspells its class thus finds that class's
+    benchmarks, and not the whole module."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", case_filter or "") if len(w) >= 3]
+    scored = []
+    for name in names:
+        parts = name.lower().split(".")
+        best = (max(difflib.SequenceMatcher(None, word, part).ratio() for part in parts) for word in words)
+        hits = [score for score in best if score >= cutoff]
+        if hits:
+            scored.append((-len(hits), -sum(hits), name))
+    scored.sort()
+    return [name for count, _, name in scored[:limit] if count == scored[0][0]]
+
+
+def no_cases(where, case_filter, available=(), notes=(), limit=5) -> Unsupported:
     """The refusal for a plan with no case in it. Nothing would run, and a filter with a
     typo must not end in `0 result(s)` and a success status. `available` are the names
     that could have been selected (the first `limit` are shown) and `notes` say what else
-    the adapter knows about why the plan is empty."""
-    head = f"filter {case_filter!r} selects no case in {where}" if case_filter else f"no case to run in {where}"
-    parts = [head]
+    the adapter knows about why the plan is empty, each on its own lines (a note may have several).
+    The last line is the names that are similar to the filter (`similar`), else the first available.
+    The filter is shown as given, not as a Python string, so its backslashes are the ones typed."""
+    head = f"filter '{case_filter}' selects no case in {where}" if case_filter else f"no case to run in {where}"
+    lines = [head] + [textwrap.indent(note, "  ") for note in notes]
     names = sorted(available)
-    if names:
+    close = similar(case_filter, names, limit)
+    if close:
+        lines.append(f"  similar: {', '.join(close)}")
+    elif names:
         more = f", … ({len(names) - limit} more)" if len(names) > limit else ""
-        parts.append(f"available: {', '.join(names[:limit])}{more}")
-    return Unsupported("; ".join(parts + list(notes)))
+        lines.append(f"  available: {', '.join(names[:limit])}{more}")
+    return Unsupported("\n".join(lines))
 
 
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:

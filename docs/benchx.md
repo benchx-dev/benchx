@@ -183,7 +183,9 @@ neither asv nor asv_runner is used. PATH is a directory holding `asv.conf.json` 
 `benchmark_dir` is the suite) or the benchmark directory itself, and its checkout is
 the target (`bx bench . --adapter asv --suite benchmarks` is the same order).
 `--filter` is asv's `--bench`: searched in the name, and in `name(p0, p1)` for each
-parameter combination; a CASE is an exact name, `name(p0, p1)` for a combination. `adapters/asv_runtime.py` discovers
+parameter combination, the arguments in the order of `param_names`, each as its `repr`; a CASE is an exact name,
+`name(p0, p1)` for a combination. A filter that names a parametrized benchmark and none of its combinations is
+refused with that order and one case as it is searched. `adapters/asv_runtime.py` discovers
 the benchmarks as asv does (names, `params`, `setup`/`teardown`/`setup_cache`, skips,
 and asv's `version` hash all agree with asv_runner's; a test checks it). The
 benchmarks run in the `python` first on `PATH`, which must import pyperf and the

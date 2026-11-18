@@ -197,8 +197,16 @@ def test_a_filter_that_selects_nothing_is_refused(suite, capsys):
     assert cli.main([*ASV, "--filter", "time_plian", "--run-key", "typo", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
     err = capsys.readouterr().err
     assert "refused: filter 'time_plian' selects no case in" in err
-    assert "available: bm.Cached.time_sum, bm.Mutating.time_pop," in err
+    assert "\n  similar: bm.time_plain\n" in err  # what the typo is close to, not the first of the alphabet
+    assert "available" not in err
     assert results(suite, "typo") == {}
+
+
+def test_a_filter_that_is_like_no_name_lists_the_first_available(suite, capsys):
+    assert cli.main([*ASV, "--filter", "zzzzzz", "--run-key", "unlike", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "available: bm.Cached.time_sum, bm.Mutating.time_pop," in err
+    assert "similar" not in err
 
 
 def test_an_anchored_name_of_a_parametrized_benchmark_is_refused_with_a_hint(suite, capsys):
@@ -207,6 +215,16 @@ def test_an_anchored_name_of_a_parametrized_benchmark_is_refused_with_a_hint(sui
                      *FAST]) == cli.EXIT_REFUSED
     assert ("the filter matches the name of a parametrized benchmark (bm.Sort.time_sorted) but not its arguments"
             in capsys.readouterr().err)
+
+
+def test_arguments_in_the_wrong_order_are_refused_with_the_order_and_an_example(suite, capsys):
+    # `Sort` takes (n, key); `('a', 10)` names the benchmark and selects none of its combinations.
+    assert cli.main([*ASV, "--filter", r"time_sorted\('a', 10\)", "--run-key", "order", "--no-ingest",
+                     *FAST]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "the filter matches the name of a parametrized benchmark (bm.Sort.time_sorted) but not its arguments" in err
+    assert "\n    bm.Sort.time_sorted(n, key)\n  for example:\n    bm.Sort.time_sorted(10, 'a')\n" in err
+    assert results(suite, "order") == {}
 
 
 def test_a_filter_that_selects_only_benchmarks_that_are_not_run_is_refused(suite, capsys):
@@ -419,3 +437,16 @@ def test_missing_asv_runner_is_refused(suite, monkeypatch, tmp, capsys):
     monkeypatch.setenv("PATH", str(bare))
     assert cli.main([*ASV, "--no-ingest"]) == cli.EXIT_REFUSED
     assert "pyperf is not importable" in capsys.readouterr().err
+
+
+def test_a_refusal_shows_the_filter_as_it_was_typed(suite, capsys):
+    """Backslashes are not doubled (not a Python repr), and the refusal is one fact per line."""
+    assert cli.main([*ASV, "--filter", r"time_sorted\('a', 10\)", "--run-key", "typed", "--no-ingest",
+                     *FAST]) == cli.EXIT_REFUSED
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith(("refused:", "  "))]
+    assert lines[0].startswith(r"refused: filter 'time_sorted\('a', 10\)' selects no case in ")
+    assert [line.split(":")[0].strip() for line in lines[1:]] == [
+        "the filter matches the name of a parametrized benchmark (bm.Sort.time_sorted) but not its arguments.",
+        "They are searched as name(p0, p1), each as its repr, in the order of param_names",
+        "bm.Sort.time_sorted(n, key)", "for example", "bm.Sort.time_sorted(10, 'a')",
+        "1 module(s) failed to import", "similar"]  # the suite has a module that does not import
