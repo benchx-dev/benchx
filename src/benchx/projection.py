@@ -252,6 +252,20 @@ def axis_order(value) -> tuple:
     return (3, canonical(value).decode())
 
 
+def declared_workload(document: dict) -> dict:
+    """The document's workload with its parameters in the order the benchmark declared them. The store keeps
+    a document in canonical form, with its keys sorted, so the runner records the order as data
+    (`provenance.info.parameter_names`): the names it lists first, then any it does not name, as stored. A
+    result without the list (made before, or by another producer) is as stored."""
+    workload = document["coordinates"]["workload"]
+    parameters = workload.get("parameters")
+    names = ((document.get("provenance") or {}).get("info") or {}).get("parameter_names")
+    if not parameters or not names:
+        return workload
+    ordered = {name: parameters[name] for name in names if name in parameters}
+    return {**workload, "parameters": {**ordered, **{k: v for k, v in parameters.items() if k not in ordered}}}
+
+
 def workload_label(workload: dict) -> str:
     """A workload as people read it: its name, then its parameters, `name [k=v, ...]`."""
     parameters = ", ".join(f"{k}={v}" for k, v in (workload.get("parameters") or {}).items())

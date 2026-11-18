@@ -540,3 +540,13 @@ def test_relative_output_directory(tmp, tree, monkeypatch):
     runner.run(order_path, Path("rel-out"))
     docs = results(elsewhere / "rel-out")
     assert [d["measurement"]["status"] for d in docs] == ["success"]
+
+
+def test_the_runner_records_the_order_the_parameters_were_declared_in(tmp, param_tree):
+    """The store keeps a document with its keys sorted, so `n, key` would come back as `key, n`
+    (PARAMETER_ORDER_PLAN.md): the result says in which order they were declared."""
+    docs = run_order(tmp, pyperf_order(param_tree, "declared", case_filter="bench_sort|bench_plain"), "declared")
+    sort = [d for d in docs if d["coordinates"]["workload"]["name"] == "bench_sort"]
+    plain = [d for d in docs if d["coordinates"]["workload"]["name"] == "bench_plain"]
+    assert sort and all(d["provenance"]["info"]["parameter_names"] == ["n", "key"] for d in sort)
+    assert plain and all("parameter_names" not in d["provenance"]["info"] for d in plain)  # nothing to put in order

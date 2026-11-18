@@ -273,6 +273,8 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             workload = {"name": workload_name}
             if case_parameters:
                 workload["parameters"] = case_parameters
+            if len(case_parameters) > 1:  # the store sorts keys: the order is data (projection.declared_workload)
+                info["parameter_names"] = list(case_parameters)
             subject = {"name": _subject_name(order), "components": [{"role": "primary"}]}
             if configuration:
                 subject["configuration"] = configuration

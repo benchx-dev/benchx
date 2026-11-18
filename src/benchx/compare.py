@@ -16,7 +16,7 @@ import statistics
 
 from . import identity
 from .core import canonical, catalog
-from .projection import Projection, axis_order, get, said, workload_label
+from .projection import Projection, axis_order, declared_workload, get, said, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -325,17 +325,19 @@ def _benchmark_file(documents, names, sides) -> list[dict]:
 def _workload(by_side, axis=()) -> dict:
     """The unit's workload variant, as the comparison document names it: what both sides share,
     so the parameters on the profile's axis (the ones that tell the sides apart) are left out."""
-    workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
+    workload = declared_workload(next(d for docs in by_side.values() for d in docs))
     varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
     parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
     return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
 
 
 def _unit_order(workload: dict, quantity: str) -> tuple:
-    """The order units are listed in: by workload name, then by parameter name and value, then by
-    quantity, with numbers inside names and values in natural order (`axis_order`), so that `n=50`
-    comes before `n=100` and `bench_2` before `bench_10`, as people read them."""
-    parameters = sorted((workload.get("parameters") or {}).items())
+    """The order units are listed in: by workload name, then by the values of its parameters, the first
+    declared changing slowest (the order of the workload's parameters, see `declared_workload`: sorted by
+    name for a result that recorded none), then by quantity, with numbers inside names and values in
+    natural order (`axis_order`), so that `n=50` comes before `n=100` and `bench_2` before `bench_10`, as
+    people read them."""
+    parameters = list((workload.get("parameters") or {}).items())
     return (axis_order(workload["name"]), tuple((name, axis_order(value)) for name, value in parameters), quantity)
 
 

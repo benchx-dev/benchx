@@ -193,7 +193,10 @@ the target (`bx bench . --adapter asv --suite benchmarks` is the same order).
 `--filter` is asv's `--bench`: searched in the name, and in `name(p0, p1)` for each
 parameter combination, the arguments in the order of `param_names`, each as its `repr`; a CASE is an exact name,
 `name(p0, p1)` for a combination. A filter that names a parametrized benchmark and none of its combinations is
-refused with that order and one case as it is searched. `adapters/asv_runtime.py` discovers
+refused with that order and one case as it is searched. The runner records the order in
+`provenance.info.parameter_names` (the store keeps a document with its keys sorted), and `bx bench`, `bx head --table`
+and `bx compare` show the parameters in it, so what they print can be given to `--filter`; results made before have
+no such list and show them sorted. `adapters/asv_runtime.py` discovers
 the benchmarks as asv does (names, `params`, `setup`/`teardown`/`setup_cache`, skips,
 and asv's `version` hash all agree with asv_runner's; a test checks it). The
 benchmarks run in the `python` first on `PATH`, which must import pyperf and the

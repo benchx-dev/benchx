@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import core, snapshot
 from .errors import SessionError
-from .projection import said, workload_label
+from .projection import declared_workload, said, workload_label
 from .store import warning_codes
 
 
@@ -77,7 +77,7 @@ def row_of(document: dict) -> dict:
     # An observation is a number, or an object carrying one with its metadata (pyperf's).
     values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
     return {
-        "case": workload_label(document["coordinates"]["workload"]),
+        "case": workload_label(declared_workload(document)),
         "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
         "n": len(values),
         "median": statistics.median(values) if values else None,
