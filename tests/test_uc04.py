@@ -130,3 +130,15 @@ def test_a_failed_check_is_shown_in_the_comparison_and_changes_nothing_else(tree
     assert "contender: collector-mismatch" in caveats  # beside any dirty-tree caveats the fixture tree earns
     assert "baseline: collector-mismatch" not in out
     assert "failed invariants" not in out and "bench_a" in out
+
+
+def test_tables_name_the_sides_by_their_label(tree, monkeypatch, capsys):
+    write_config(tree, {})
+    loop({"a": {"dep": "1.0"}, "b": {"dep": "2.0"}}, monkeypatch)
+    capsys.readouterr()
+    code = cli.main(["compare", "--run", "S", "--profile", "environments", "--label", "env", "--baseline", "a",
+                     "--tables"])
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_OK
+    assert "env=a" in out and "env=b" in out and out.count("(3 rounds):") == 2
+    assert "Before [a]" in out or "No benchmark changed" in out

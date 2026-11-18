@@ -55,7 +55,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
+           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
@@ -63,7 +63,7 @@ bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds 
 
 # read mode: compare results already measured
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
-           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json]
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json | --tables [--all]]
 
 # low-level command: run a handwritten work oreder
 bx run <order.json> [--out DIR] [--no-ingest]
@@ -274,6 +274,15 @@ outside the checkout is identified by one file): put it inside the checkout.
   (`side-failed`). `--results` compares result files through a throwaway
   store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
+- **The tables** (`--tables`, `benchx/tables.py`) print, after the usual summary, what
+  `asv continuous` prints, laid out and rounded as asv does: a table of each side (a value
+  `4.71±0.08μs` per parameter combination, every cell centered), then one of the changes
+  (Change, Before, After, Ratio, Noise, Verdict, Benchmark), only the changed rows unless `--all`.
+  They are recomputed for display from the run's results; the comparison document is the
+  same. A side's value is the median of its per-round medians and its `±` their standard
+  deviation (not asv's `±`); `Change` and `Verdict` are the comparator's verdict (`+`
+  regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
+  times it), and `Ratio` is After over Before. A text view: not with `--json`.
 
 ## Run it
 

@@ -21,7 +21,7 @@ bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
-           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
@@ -33,7 +33,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--min-time S]
            [--project P | --no-project] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-           [--k 3] [--min-rounds 3] [--json]
+           [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # measure mode: run both sides, then compare
 bx compare TARGET --profile variants [--vary NAME] [--baseline VALUE]
            --suite NAME --rounds R [--filter REGEX] [...]       # the options above, except --label
