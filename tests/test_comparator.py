@@ -619,3 +619,69 @@ def test_units_with_more_than_one_other_parameter_are_ordered_by_name_then_value
     doc = vevaluate(extra)
     assert [(u["workload"]["parameters"]["n"], u["workload"]["parameters"]["size"]) for u in doc["units"]] == [
         ("2", "20"), ("2", "100"), ("10", "20"), ("10", "100")]
+
+
+# --- one benchmark that cannot be compared does not stop the others -------------------------
+
+def run_two(rounds=3, ratio=1.1):
+    """Two workloads measured in every call; the head takes `ratio` times the base's time."""
+    docs, slot = [], 0
+    for r in range(rounds):
+        for side, factor in ((BASE, 1.0), (HEAD, ratio)):
+            docs += [result(side, r, slot, (r + 1.0) * factor, workload=name) for name in ("BM_A", "BM_B")]
+            slot += 1
+    return docs
+
+
+def of_head(docs, workload):
+    return [d for d in docs if d["revision"]["key"] == HEAD and d["coordinates"]["workload"]["name"] == workload]
+
+
+def by_name(doc):
+    return {u["workload"]["name"]: u for u in doc["units"]}
+
+
+def test_an_edited_benchmark_fails_its_own_unit_only():
+    """A benchmark whose code differs between the sides (asv's benchmark version) is a new series and is
+    not comparable; the other benchmark is compared."""
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            version = "v2" if d["revision"]["key"] == HEAD else "v1"
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": version}
+    doc = evaluate(docs)
+    assert invariants(doc) == ["sides-agree"]
+    failure = doc["failed_invariants"][0]
+    assert failure["workload"] == {"name": "BM_B"} and "benchmark_version differ" in failure["detail"]
+    assert list(by_name(doc)) == ["BM_A"] and by_name(doc)["BM_A"]["verdict"] == "regressed"
+
+
+def test_a_failed_attempt_is_excluded_before_the_facts_are_matched():
+    """A benchmark that raises reports no harness version or runtime, so its attempts differ from the other
+    side's in those facts. They are excluded and listed, not matched: the benchmark has no verdict
+    (`insufficient-rounds`) and the other one is compared."""
+    docs = run_two()
+    failing = of_head(docs, "BM_B")
+    for d in docs:
+        if d not in failing:  # the CPU configuration is a fact the projection ignores: what is reported, differs
+            d["coordinates"]["environment"]["system"]["cpu"] = {"config": "performance"}
+    for d in failing:
+        d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+        d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark", "version": "1.9"}
+        d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.12"}
+    doc = evaluate(docs)
+    assert doc["failed_invariants"] == []
+    assert by_name(doc)["BM_A"]["verdict"] == "regressed"
+    failed = by_name(doc)["BM_B"]
+    assert failed["verdict"] == "indeterminate" and failed["reason"] == "insufficient-rounds"
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error"] * 3
+    assert by_name(doc)["BM_B"].get("unmatched_differences", []) == []  # what it did not report is no difference
+    assert by_name(doc)["BM_A"].get("unmatched_differences", []) == []
+
+
+def test_a_failure_of_the_whole_run_still_leaves_no_units():
+    """A third side (a tree edited during the run) is about the run, so no benchmark is compared."""
+    docs = run_two()
+    docs[-1]["provenance"]["subject_tree"] = "c" * 40
+    doc = evaluate(docs)
+    assert invariants(doc) == ["two-sides"] and doc["units"] == []

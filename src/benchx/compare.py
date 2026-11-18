@@ -226,26 +226,33 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                                "detail": "sides do not alternate by procedure.slot: run the sides in the same "
                                          "order every round (a, b, a, b, ...)" + how})
 
-    # Units: one workload variant and quantity each. Everything else the
-    # projection matches must agree across both sides (schema §5.5).
+    # Units: one workload variant and quantity each. Everything else the projection matches must agree
+    # across both sides (schema §5.5), in the attempts that succeeded: a failed attempt reports none of
+    # the facts (runtime, harness version) and is excluded, and listed, below.
     units = {}
     for d, p, s in zip(documents, projected, sides):
         variant = {ptr: v for ptr, v in p.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
         key = (_c(variant), d["measurement"]["quantity"]["name"])
         units.setdefault(key, {"docs": {base: [], contender: []}, "identities": []})
         units[key]["docs"][s].append(d)
-        units[key]["identities"].append(p.identity)
-    for (_, quantity), unit in units.items():
+        if d["measurement"]["status"] == "success":
+            units[key]["identities"].append(p.identity)
+    run_failed = bool(failed)  # the invariants above are about the run, and no unit is compared
+    disagreeing = set()  # `sides-agree` is about one unit: it gets no verdict, and the others are compared
+    for key, unit in units.items():
         differing = _differing(unit["identities"])
         if differing:
             failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"], projection.axis),
-                           "quantity": quantity, "detail": f"{', '.join(differing)} differ"})
-    if failed:
+                           "quantity": key[1], "detail": f"{', '.join(differing)} differ"})
+            disagreeing.add(key)
+    if run_failed:
         return doc
 
-    for (_, quantity), unit in sorted(
+    for (variant_key, quantity), unit in sorted(
             units.items(),
             key=lambda item: _unit_order(_workload(item[1]["docs"], projection.axis), item[0][1])):
+        if (variant_key, quantity) in disagreeing:
+            continue
         by_side = unit["docs"]
         where = {"workload": _workload(by_side, projection.axis), "quantity": quantity}
         absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
@@ -270,7 +277,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
         pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
                  if base in r and contender in r]
         unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed)
-        unit_doc["unmatched_differences"] = _differences(projection, by_side[base], by_side[contender])
+        succeeded = {s: [d for d in by_side[s] if d["measurement"]["status"] == "success"] for s in (base, contender)}
+        unit_doc["unmatched_differences"] = _differences(projection, succeeded[base], succeeded[contender])
         if caveats := _caveats(by_side, base, contender):
             unit_doc["caveats"] = caveats
         doc["units"].append(unit_doc)

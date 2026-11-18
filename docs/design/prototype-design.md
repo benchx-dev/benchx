@@ -518,7 +518,8 @@ matched facts agree (`sides-agree`) and the invariants the profile names over
 the run: exactly two sides, which for `environments` differ in more than their
 label, equal attempt counts per side, and sides alternating by
 `procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
-verdict; under `revisions` the same happens to a side with no tree id (the
+verdict (`sides-agree` and `equal-attempts` affect one unit, and the others are still compared; the rest
+affect every unit; `sides-agree` looks at the attempts that succeeded); under `revisions` the same happens to a side with no tree id (the
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
 both sides and in every round (`one-benchmark-tree`, schema §5.5), as it does

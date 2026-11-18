@@ -139,6 +139,39 @@ def test_a_side_that_failed_shows_its_status():
     assert "| indeterminate (" in shown
 
 
+def test_a_benchmark_that_raises_on_one_side_leaves_the_others_compared():
+    """The failing benchmark reports no harness version or runtime. It shows its status in the tables and is
+    `indeterminate` in the change table; the other benchmarks have their rows."""
+    docs = make()
+    for d in docs:
+        if d["revision"]["key"] == HEAD and d["coordinates"]["workload"]["name"] == PLAIN:
+            d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+            d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.12"}
+    doc = evaluate(docs)
+    assert doc["failed_invariants"] == []
+    shown = tables.render(doc, docs, all_rows=True)
+    assert "bench_b.Plain.time_x  2.04±0.03ms" in shown and "bench_b.Plain.time_x  error" in shown
+    rows = [line for line in shown.splitlines() if line.startswith("| ")]
+    assert sum("| regressed " in line for line in rows) == 2
+    assert any("bench_b.Plain.time_x" in line and "| ?" in line and "error" in line and "n/a" in line
+               and "indeterminate (insufficient-rounds)" in line for line in rows)
+
+
+def test_an_edited_benchmark_has_no_row_but_the_others_do():
+    """Its two sides ran different code, so it is not compared (`sides-agree`): no row in the change table,
+    while the table of each side still shows what it measured."""
+    docs = make()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == MEAN:
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    doc = evaluate(docs)
+    assert [f["invariant"] for f in doc["failed_invariants"]] == ["sides-agree"] * 2
+    shown = tables.render(doc, docs)
+    rows = [line for line in shown.splitlines() if line.startswith("| ")]
+    assert len(rows) == 2 and PLAIN in rows[1] and not any(MEAN in line for line in rows)
+    assert shown.count(f"{MEAN}  ok") == 2  # the grid of each side
+
+
 def test_a_dirty_side_is_named_in_its_heading():
     docs = make(provenance__subject_dirty="dirty")
     shown = tables.render(evaluate(docs), docs)

@@ -136,9 +136,11 @@ side are equal, and sides alternate by `procedure.slot`; under `revisions`,
 that each side has exactly one tree id and the two differ; under `revisions`
 and `variants`, that a separately recorded benchmark has one `benchmark_tree`
 across both sides and all rounds (`one-benchmark-tree`, schema §5.5). A side that is not clean does
-not fail the run; it makes the comparison local-only (UC-03 §10). A run that
-fails an invariant is not compared: the comparison document records the failed invariant
-and contains no verdicts for the units it affects.
+not fail the run; it makes the comparison local-only (UC-03 §10). An invariant of the
+run (the sides, their tree ids, the alternation, the benchmark file) that fails leaves no unit compared. One of a
+single unit (the matched facts agree, attempt counts are equal) takes that unit out and the others are compared: the
+document records the failed invariant with its workload, and has no verdict for that unit. The matched facts are
+those of the attempts that succeeded; a failed attempt reports none of them, and is excluded and listed.
 
 Excluded points and their reasons remain visible in the output. Changes in
 facts the projection ignores do not split a series by themselves, but differences between
