@@ -53,29 +53,29 @@ def test_values_are_written_as_asv_writes_them(value, spread, unit, expected):
 
 
 def test_a_revisions_run_has_a_table_per_commit_and_one_of_changes():
-    """asv's layout (format_text_table, tabulate "github"): every cell of a side's table centered, a column
+    """asv's layout (format_text_table, tabulate "github"), the grids indented by two spaces: every cell centered, a column
     its widest cell plus 2, lines not trimmed; Ratio and Noise right-aligned; the verdict repeated."""
     docs = make()
     assert tables.render(evaluate(docs), docs).split("\n") == [
         "",
         "For local/host commit aaaaaaaa (5 rounds):",
         "bench_a.Mean.time_mean_axis  ok",
-        "====== =============",
-        " size               ",
-        "------ -------------",
-        "  1     5.30±0.08μs ",
-        "  10    5.71±0.09μs ",
-        "====== =============",
+        "  ====== =============",
+        "   size               ",
+        "  ------ -------------",
+        "    1     5.30±0.08μs ",
+        "    10    5.71±0.09μs ",
+        "  ====== =============",
         "bench_b.Plain.time_x  2.04±0.03ms",
         "",
         "For local/host commit bbbbbbbb (5 rounds):",
         "bench_a.Mean.time_mean_axis  ok",
-        "====== =============",
-        " size               ",
-        "------ -------------",
-        "  1     5.57±0.09μs ",
-        "  10    6.00±0.09μs ",
-        "====== =============",
+        "  ====== =============",
+        "   size               ",
+        "  ------ -------------",
+        "    1     5.57±0.09μs ",
+        "    10    6.00±0.09μs ",
+        "  ====== =============",
         "bench_b.Plain.time_x  2.14±0.03ms",
         "",
         "| Change   | Before [aaaaaaaa]   | After [bbbbbbbb]   |   Ratio |   Noise | Verdict   | Benchmark (Parameter)           |",

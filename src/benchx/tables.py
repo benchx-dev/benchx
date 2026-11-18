@@ -154,7 +154,7 @@ def side_tables(units, role, info) -> str:
         bad = [u[role]["status"] for u in group if u[role]["status"] != "ok"]
         lines.append(f"{title}  {bad[0] if bad else 'ok'}")
         rows = [[(u["workload"].get("parameters") or {}).get(n, "") for n in names] + [cell(u)] for u in group]
-        lines.extend(_grid([*names, ""], rows))
+        lines.extend("  " + line for line in _grid([*names, ""], rows))  # under the title
     return "\n".join(lines)
 
 
