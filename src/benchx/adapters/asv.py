@@ -168,7 +168,8 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
                         env=env)
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
+        raise Unsupported(f"pyperf is not importable by {python}: "
+                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
     return {"python": python, "benchmark_dir": benchmark_dir, "root": root,
             "project": _project(benchmark_dir, root), "benchmarks": {}}
 
