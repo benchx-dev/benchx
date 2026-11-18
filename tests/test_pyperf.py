@@ -427,6 +427,14 @@ def test_translating_captured_output():
     assert adapter.harness(info) == {"name": "pyperf", "version": "2.10.0"}
 
 
+
+def test_boot_time_is_provenance_not_environment():
+    # btime drifts on WSL2; as a system fact it split one environment into several sides (#121)
+    native = {"metadata": {"boot_time": "2026-11-16 16:28:41", "platform": "Linux"}}
+    system, info = adapter.context_facts(native)
+    assert system == {"os": {"platform": "Linux"}}
+    assert info["boot_time"] == "2026-11-16 16:28:41"
+
 def test_translation_is_idempotent_and_does_not_mutate_input():
     native = json.loads((FIXTURES / "pyperf-native.json").read_text())
     before = copy.deepcopy(native)

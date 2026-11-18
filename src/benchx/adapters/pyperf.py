@@ -409,10 +409,12 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
 
 # File-level pyperf metadata as environment.system facts (schema Appendix B):
 # {metadata key: (system object, key)}. The default identity policy ignores
-# cpu and os and matches runtime.
+# cpu and os and matches runtime. boot_time is provenance, not a system fact:
+# it says when the machine started, and /proc/stat's btime drifts (WSL2), so
+# as a fact it would split one environment into several (#121).
 _SYSTEM = {
     "cpu_config": ("cpu", "config"), "cpu_affinity": ("cpu", "affinity"),
-    "aslr": ("os", "aslr"), "platform": ("os", "platform"), "boot_time": ("os", "boot_time"),
+    "aslr": ("os", "aslr"), "platform": ("os", "platform"),
     "python_version": ("runtime", "python"), "python_implementation": ("runtime", "implementation"),
     "python_compiler": ("runtime", "compiler"), "python_cflags": ("runtime", "cflags"),
     "python_gc": ("runtime", "gc"),
@@ -430,7 +432,7 @@ def context_facts(native: dict | None) -> tuple[dict, dict]:
     for key, (group, name) in _SYSTEM.items():
         if key in md:
             system.setdefault(group, {})[name] = md[key]
-    info = {k: md[k] for k in ("hostname", "cpu_model_name", "cpu_count", "python_executable") if k in md}
+    info = {k: md[k] for k in ("hostname", "cpu_model_name", "cpu_count", "python_executable", "boot_time") if k in md}
     if "perf_version" in md:
         info["library_version"] = md["perf_version"]
     return system, info

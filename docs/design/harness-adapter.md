@@ -222,8 +222,8 @@ pyperf's JSON (`-o`) holds `benchmarks[]`, each with `metadata` and `runs[]`; me
 | `timer` | `protocol.timer` |
 | `python_version`, `python_implementation`, `python_compiler`, `python_cflags` | `environment.system.runtime`, merged per §3 |
 | `python_executable`, `perf_version` | `provenance.info`; `perf_version` also names the harness version beside `producer` |
-| `hostname`, `cpu_model_name`, `cpu_count` | `provenance.info`; identity comes from the context document (§3) |
-| `cpu_config`, `cpu_affinity`, `aslr`, `platform`, `boot_time` | environment system, kept beside the snapshot's own readings (§3) |
+| `hostname`, `cpu_model_name`, `cpu_count`, `boot_time` | `provenance.info`; identity comes from the context document (§3), and `boot_time` says when the machine started, not what it runs |
+| `cpu_config`, `cpu_affinity`, `aslr`, `platform` | environment system, kept beside the snapshot's own readings (§3) |
 | `load_avg_1min`, `cpu_freq`, `cpu_temp`, `uptime`, `mem_max_rss`, `duration` per run | condition measurements, one observation per group (`duration` to procedure); never identity |
 | `date` of the first run, the benchmark, or the file, most specific first | `started_at` fallback |
 | `tags` | `provenance.labels` |
