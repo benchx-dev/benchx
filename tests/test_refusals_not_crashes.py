@@ -118,3 +118,19 @@ def test_compare_targets_passes_the_configured_order_timeout(profile, tmp, monke
                                 label=("env", "x", "y") if profile == "environments" else None,
                                 store=Store(tmp / "s.parquet"), order_s=7)
     assert seen == [7]
+
+
+# ---- a label name with a '/' is refused before any round runs, and as a refusal in read mode
+
+def test_a_label_name_with_a_slash_is_refused_before_measuring(capsys):
+    argv = ["compare", "nowhere", "nowhere", "--profile", "environments", "--label", "a/b=x,y",
+            "--suite", "s", "--rounds", "1", "--adapter", "pyperf"]
+    assert cli.main(argv) == cli.EXIT_REFUSED
+    assert "must not contain '/'" in capsys.readouterr().err
+
+
+def test_a_label_name_with_a_slash_is_a_compare_error_in_read_mode():
+    from benchx import compare
+
+    with pytest.raises(compare.CompareError, match="must not contain '/'"):
+        compare.profile_projection("environments", "a/b")

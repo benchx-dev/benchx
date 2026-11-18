@@ -44,6 +44,8 @@ def parse_label(text: str) -> tuple[str, str, str]:
     base, comma, contender = values.partition(",")
     if not (name and base and comma and contender) or "," in contender:
         raise SessionError(f"--label must be NAME=BASE,CONTENDER in measure mode, not {text!r}")
+    if "/" in name:  # the name is a path segment of the comparison's axis: refuse it before measuring
+        raise SessionError(f"--label name {name!r} must not contain '/'")
     return name, base, contender
 
 
