@@ -43,6 +43,7 @@ def exact_filter(names, arguments=False) -> str | None:
 
 class Harness:
     name: str
+    FAMILY: str  # harnesses of one family take the same precision, so one `adapter` block of the config serves all
     FLAGS: tuple[str, ...] = ()
     BARE_PATH_KIND: str
     NAMES_TAKE_ARGUMENTS = False
@@ -83,6 +84,7 @@ class GoogleBenchmark(Harness):
     Google Benchmark's default, and the order states it."""
 
     name = "google-benchmark"
+    FAMILY = "google-benchmark"
     FLAGS = ("repetitions", "min_time")
     BARE_PATH_KIND = "build"  # the binary is built; BUILD_DIR[:SOURCE_DIR]
     DEFAULT_REPETITIONS = adapters.gbench.DEFAULT_REPETITIONS
@@ -105,6 +107,7 @@ class Pyperf(Harness):
     flags leave out."""
 
     name = "pyperf"
+    FAMILY = "pyperf"  # asv, timed by pyperf, inherits it
     FLAGS = ("processes", "values", "min_time", "loops", "warmups")
     BARE_PATH_KIND = "working_tree"  # the module is run as found; the path is its own source
     NAMES_TAKE_ARGUMENTS = True  # a function with params is one case per combination
@@ -148,6 +151,13 @@ ASV = Asv()
 HARNESSES = {h.name: h for h in (GOOGLE_BENCHMARK, PYPERF, ASV)}
 # Every precision flag some harness takes, each once, in a stable order (for a CLI).
 FLAG_NAMES = tuple(dict.fromkeys(name for h in HARNESSES.values() for name in h.FLAGS))
+
+
+def same_family(a: str, b: str) -> bool:
+    """Whether harnesses `a` and `b` take the same precision, as pyperf and asv do (asv is timed by
+    pyperf). An unknown name is in no family."""
+    first, second = HARNESSES.get(a), HARNESSES.get(b)
+    return first is not None and second is not None and first.FAMILY == second.FAMILY
 
 
 def get(name: str) -> Harness:

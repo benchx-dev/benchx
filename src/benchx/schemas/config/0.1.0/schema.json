@@ -36,7 +36,7 @@
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
-        "name": { "description": "pyperf or google-benchmark.", "type": "string", "minLength": 1 },
+        "name": { "description": "pyperf, asv or google-benchmark. The block's precision belongs to this adapter and to the others that take the same precision: a pyperf block also serves `--adapter asv`, which is timed by pyperf.", "type": "string", "minLength": 1 },
         "suite": {
           "description": "The benchmark program in the target: pyperf, the module's path in the working tree; google-benchmark, the binary in the build directory.",
           "type": "string",

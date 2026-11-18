@@ -129,12 +129,14 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     """The settings `bx bench` and `bx compare` share, each from the command line,
     else the file, else its default (config.Config.pick); ConfigError when a
     required one has none. The file's adapter block belongs to the adapter it
-    names, so naming another is refused."""
+    names and to the others of its family (pyperf's serves asv), so naming an
+    adapter of another family is refused."""
     block = cfg.adapter
     given = forced_adapter or args.adapter
-    if given and block.get("name") and given != block["name"]:
+    if given and block.get("name") and not harnesses.same_family(given, block["name"]):
         raise config_mod.ConfigError(f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
-                                     "and its suite and precision belong to that harness")
+                                     "and its precision belongs to that harness and the ones that share it "
+                                     "(pyperf and asv)")
     quantities = config_mod.parse_quantities(args.quantity) if args.quantity else block.get("quantities", ["wall-time"])
     if args.project and args.no_project:
         raise UsageError("give --project or --no-project, not both")
