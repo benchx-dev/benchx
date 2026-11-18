@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,19 @@ def test_a_filter_with_no_name_in_it_gets_no_note_about_arguments(param_tree):
     with pytest.raises(adapter.Unsupported) as refused:
         planned(param_tree, r"\(7, ")
     assert "not its arguments" not in str(refused.value.problems[0])
+
+
+def test_the_driver_of_a_case_gives_python_nothing_to_warn_about(tmp, param_tree):
+    """The driver is a script of its own, run once per worker. It has `if <index> is not None:` for a
+    parametrized case, and Python warns about `is not` with a literal: a SyntaxWarning on the
+    stderr of every worker, which a failing case's message was once taken from."""
+    run_order(tmp, pyperf_order(param_tree, "quiet", case_filter="bench_sort|bench_plain"), "quiet")
+    drivers = sorted((tmp / "quiet").rglob("*.driver.py"))
+    assert len(drivers) == 5  # four combinations and a function without parameters
+    for driver in drivers:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(driver.read_text(), str(driver), "exec")
 
 
 def test_params_that_cannot_be_read_matter_only_to_the_function_that_has_them(param_tree):
