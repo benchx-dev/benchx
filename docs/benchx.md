@@ -130,6 +130,14 @@ resolved values are written into the order. `--quantity` takes a comma-separated
 and one run collects them all. The workers run the `python` first on `PATH`, which must have
 pyperf.
 
+A function has a version, as an asv benchmark does: its `version` attribute, else a hash of
+its source (as asv_runner hashes a plain function: comments and docstrings count; what it
+calls, its `params` and the library under test do not). Each result records it in
+`protocol.pyperf.benchmark_version`, and protocol is what the two sides of a comparison must
+agree on, so two revisions whose function differs fail `sides-agree`. That suits a function
+that exercises code elsewhere in the tree. When the function body is what changes, declare a
+`version` (`bench_a.version = "1"`). A function without readable source has no version.
+
 `bx bench MODULE.py [FUNCTION …]` is the shorthand for the quickest case, timing a few
 functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished

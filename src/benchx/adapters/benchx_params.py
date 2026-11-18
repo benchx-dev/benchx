@@ -10,8 +10,11 @@ and `param_names`. One combination of values is one case, in `itertools.product`
 and a value is recorded as the string `stable_repr` gives, as asv does.
 """
 
+import hashlib
+import inspect
 import itertools
 import re
+import textwrap
 from collections import Counter
 
 
@@ -24,6 +27,23 @@ def stable_repr(obj) -> str:
         if default and default[2] == match[2]:
             text = match[1] + match[3]
     return text
+
+
+def source_version(func):
+    """The version of a benchmark function, as asv has it: an explicit `version` attribute (any value,
+    kept as a string), else a SHA-256 of its source text, which is what asv_runner hashes for a plain
+    function: the lines stripped of trailing whitespace, dedented. Comments and docstrings count. What the
+    function calls, its `params` and the library under test do not. None when the source cannot be read
+    (a built-in, code made by `exec`) and no version is declared."""
+    declared = getattr(func, "version", None)
+    if declared is not None:
+        return str(declared)
+    try:
+        lines, _ = inspect.getsourcelines(func)
+    except (OSError, TypeError):
+        return None
+    source = textwrap.dedent("\n".join(line.rstrip() for line in lines)).rstrip()
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
 def normalize(params, param_names):

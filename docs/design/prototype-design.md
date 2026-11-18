@@ -456,9 +456,13 @@ apart, so adding an estimator never renames the policy:
 - **Identity policy** `benchx/benchx-identity/v1` (`benchx/identity.py`):
   the default policy (`schemas/identity-policy/0.1.0/examples/default.json`)
   with the benchmark's revision ignored. A test checks it against the schema
-  and pins it to its name, so an edit without a new name fails. The implementation has no declared benchmark versions, and
-  with benchmarks in the subject's checkout the benchmark revision changes on
-  every commit, so matching it would split history at every point (schema §1).
+  and pins it to its name, so an edit without a new name fails. The implementation has no *declared* benchmark versions (a
+  project's own mapping, schema §4.1), and with benchmarks in the subject's checkout the
+  benchmark revision changes on every commit, so matching it would split history at every
+  point (schema §1). It does record a computed version of each benchmark function in
+  `protocol` (asv, pyperf: a hash of the function's source, or its `version` attribute),
+  which changes only when the function does and is matched like the rest of protocol: an
+  edited benchmark is not compared with its old self and starts a new series.
   Being ignored, its change is flagged on each point where it happens. A thin
   result's identity carries its implicit project.
 - **Estimators** (`ESTIMATORS`): `median`, derived from observations, plus

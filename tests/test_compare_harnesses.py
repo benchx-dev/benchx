@@ -65,15 +65,21 @@ def test_a_pyperf_side_order(tmp):
 
 # --- end to end, with real pyperf --------------------------------------------------
 
+# The two commits differ in a module constant, not in the function: a function's source is its version
+# (`protocol.pyperf.benchmark_version`), and two sides that ran different functions do not agree.
 MODULE = textwrap.dedent('''
+    WORK = {work}
+
     def f():
-        sum(range({work}))
+        sum(range(WORK))
 ''')
 
 
 PARAM_MODULE = textwrap.dedent('''
+    WORK = {work}
+
     def bench_s(n):
-        sum(range(n * {work}))
+        sum(range(n * WORK))
 
     bench_s.params = [1, 2]
     bench_s.param_names = ["n"]
