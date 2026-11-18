@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -187,7 +187,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
     cases, unmatched = [], []
     for info in listing:

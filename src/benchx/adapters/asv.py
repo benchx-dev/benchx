@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params, pyperf
-from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -190,7 +190,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if out.returncode != 0:
         raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
         print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
     cases, other, unmatched = [], {}, []

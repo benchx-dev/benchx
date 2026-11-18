@@ -50,3 +50,36 @@ def test_the_probe_message_survives_an_empty_stderr(module, suite_is_dir, tmp, m
     _probe_fails(monkeypatch, module, "")
     with pytest.raises(base.Unsupported, match="not importable by /fake/python: no output"):
         module.locate(tmp, "suite", {})
+
+
+# ---- a listing that does not end in JSON is a refusal
+
+def _listing_prints(monkeypatch, module, stdout):
+    monkeypatch.setattr(module, "run_bounded", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout=stdout, stderr=""))
+
+
+@pytest.mark.parametrize("stdout, found", [
+    ("", "it printed nothing"),
+    ("[]\nbye from atexit\n", "'bye from atexit'"),
+    ("not json at all", "'not json at all'"),
+])
+def test_a_pyperf_listing_that_does_not_end_in_json_is_refused(stdout, found, tmp, monkeypatch):
+    (tmp / "m.py").write_text("")
+    _listing_prints(monkeypatch, pyperf, stdout)
+    runnable = {"python": "/fake/python", "module": tmp / "m.py", "root": tmp}
+    with pytest.raises(base.Unsupported, match="cannot read the benchmark listing of m.py") as e:
+        pyperf.list_cases(runnable, None, {})
+    assert found in str(e.value)
+
+
+@pytest.mark.parametrize("stdout, found", [
+    ("", "it printed nothing"),
+    ('{"failed": []}\nbye\n', "'bye'"),
+])
+def test_an_asv_listing_that_does_not_end_in_json_is_refused(stdout, found, tmp, monkeypatch):
+    _listing_prints(monkeypatch, asv, stdout)
+    runnable = {"python": "/fake/python", "benchmark_dir": tmp, "root": tmp}
+    with pytest.raises(base.Unsupported, match="cannot read the benchmark listing of") as e:
+        asv.list_cases(runnable, None, {})
+    assert found in str(e.value)
