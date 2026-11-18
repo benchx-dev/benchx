@@ -73,7 +73,9 @@ def _environment(items) -> dict:
     for item in items or []:
         name, eq, value = item.partition("=")
         if not (name and eq):
-            raise UsageError(f"-e wants NAME=VALUE, not {item!r}")
+            # Not echoed: a value typed without its NAME, or after an empty one, is a secret more
+            # often than a typo, and this message goes to stderr and to the log.
+            raise UsageError("-e wants NAME=VALUE (the item is not shown, in case it holds a value)")
         env[name] = value
     return env
 
