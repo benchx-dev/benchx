@@ -321,12 +321,22 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
 
 
 def _failure_message(stderr: str) -> str:
-    """The worker's exception line. The manager then raises its own
-    "<python> failed with exit code N" after a second traceback; that wrapper
-    only counts when nothing else was said."""
-    lines = [l for l in stderr.splitlines() if l and not l[0].isspace() and not l.startswith("Traceback")]
-    own = [l for l in lines if "failed with exit code" not in l]
-    return (own or lines or [stderr.strip().splitlines()[-1]])[0]
+    """The worker's exception line: the line that ends a traceback (the first unindented line after
+    "Traceback"), the last one when exceptions were chained. A warning printed before is not it, and
+    neither is the manager's own "<python> failed with exit code N" after a second traceback: that wrapper
+    only counts when nothing else was said. Without a traceback (a killed process), the first line said."""
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    ended, in_traceback = [], False
+    for line in lines:
+        if line.startswith("Traceback"):
+            in_traceback = True
+        elif in_traceback and not line[0].isspace():
+            ended.append(line)
+            in_traceback = False
+    own = [line for line in ended if "failed with exit code" not in line]
+    if own or ended:
+        return (own or ended)[-1]
+    return next((line for line in lines if not line[0].isspace()), lines[-1] if lines else stderr.strip())
 
 
 def attempted(applied: dict) -> int:

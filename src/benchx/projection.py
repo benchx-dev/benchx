@@ -258,6 +258,17 @@ def workload_label(workload: dict) -> str:
     return workload["name"] + (f" [{parameters}]" if parameters else "")
 
 
+def said(document: dict, width: int = 160) -> str | None:
+    """What the producer said about a result that is not a measurement (`provenance.info.message`): for a
+    failed pyperf case the exception line, for a skipped asv benchmark the reason. Its first line, cut at
+    `width` characters; None when it said nothing."""
+    message = str(((document.get("provenance") or {}).get("info") or {}).get("message") or "").strip()
+    line = message.splitlines()[0] if message else ""
+    if not line:
+        return None
+    return line if len(line) <= width else line[:width - 1] + "…"
+
+
 def reported_coordinates(doc: dict) -> dict:
     """Everything reported about what was measured, minus the axis revision and the quantity (§4.3)."""
     return {key: doc[key] for key in REPORTED if key in doc}

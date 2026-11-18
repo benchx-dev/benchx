@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import core, snapshot
 from .errors import SessionError
-from .projection import workload_label
+from .projection import said, workload_label
 from .store import warning_codes
 
 
@@ -87,6 +87,7 @@ def row_of(document: dict) -> dict:
         "max": max(values) if values else None,
         "loops": document.get("procedure", {}).get("inner_iterations"),
         "warnings": warning_codes(document),
+        "message": None if measurement["status"] == "success" else said(document),
     }
 
 
@@ -110,3 +111,18 @@ def render(rows, leading=()) -> str:
     widths = [max(len(row[i]) for row in [header, *body]) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip() for row in [header, *body]]
     return "\n".join([lines[0], "  ".join("-" * w for w in widths), *lines[1:]])
+
+
+def failures(rows, names=3) -> str:
+    """The section under the table for the cases that were not measured: what each said, `case: message`,
+    cases with the same message as one line, `message (K cases: a, b, c, …)`. Empty when none has a message
+    (the status column is then all there is). A row's message is one line already (`projection.said`)."""
+    said_by = {}
+    for row in rows:
+        if row.get("message"):
+            said_by.setdefault(row["message"], []).append(row["case"])
+    if not said_by:
+        return ""
+    lines = [f"  {message} ({len(cases)} cases: {', '.join(cases[:names])}{', …' if len(cases) > names else ''})"
+             if len(cases) > 1 else f"  {cases[0]}: {message}" for message, cases in said_by.items()]
+    return "\n".join(["", f"not measured ({sum(len(c) for c in said_by.values())})", *lines])

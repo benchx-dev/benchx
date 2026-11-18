@@ -204,7 +204,10 @@ def cmd_bench(args):
         return EXIT_REFUSED
     except runner.Refused as e:
         return _refused(e)
-    print(bench_mod.render(bench_mod.summarize(summary["files"])))
+    rows = bench_mod.summarize(summary["files"])
+    print(bench_mod.render(rows))
+    if failed := bench_mod.failures(rows):
+        print(failed)
     print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
     if store is None:
         return EXIT_OK
