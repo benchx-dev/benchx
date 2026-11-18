@@ -99,7 +99,7 @@ def test_a_function_with_params_is_named_by_itself_or_by_one_combination(tree, c
     assert cli.main(["bench", "mod.py", "bench_sort(100, 'a')", "--run-key", "one", "--no-ingest", *FAST]) == cli.EXIT_OK
     assert ran("one") == ["100'a'"]
     assert cli.main(["bench", "mod.py", "bench_srot", "--run-key", "typo", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
-    assert "selects no case in mod.py; available: bench_sort" in capsys.readouterr().err
+    assert "selects no case in mod.py\n  similar: bench_sort\n" in capsys.readouterr().err
 
 
 def test_shorthand_order_is_stable(tree):

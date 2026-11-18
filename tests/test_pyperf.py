@@ -183,8 +183,26 @@ def test_a_filter_that_matches_a_name_but_no_arguments_is_refused_with_a_hint(pa
     with pytest.raises(adapter.Unsupported) as refused:
         planned(param_tree, "bench_sort$")
     message = str(refused.value.problems[0])
-    assert "filter 'bench_sort$' selects no case in mod.py; available: bench_plain, bench_sort;" in message
+    assert message.startswith("filter 'bench_sort$' selects no case in mod.py\n")
+    assert "\n  similar: bench_sort" in message
     assert "the filter matches the name of a parametrized benchmark (bench_sort) but not its arguments" in message
+
+
+def test_a_refusal_says_how_the_arguments_of_a_case_are_searched(param_tree):
+    """Arguments in the wrong order: the filter names the function, so the note gives the order
+    of `param_names` and a case as it is searched."""
+    with pytest.raises(adapter.Unsupported) as refused:
+        planned(param_tree, r"bench_sort\('a', 10\)")
+    message = str(refused.value.problems[0])
+    assert "the filter matches the name of a parametrized benchmark (bench_sort) but not its arguments" in message
+    assert message.splitlines()[3:6] == ["    bench_sort(n, key)", "  for example:", "    bench_sort(10, 'a')"]
+    assert message.index("not its arguments") < message.index("similar:")  # the hint comes before the list
+
+
+def test_a_filter_with_no_name_in_it_gets_no_note_about_arguments(param_tree):
+    with pytest.raises(adapter.Unsupported) as refused:
+        planned(param_tree, r"\(7, ")
+    assert "not its arguments" not in str(refused.value.problems[0])
 
 
 def test_params_that_cannot_be_read_matter_only_to_the_function_that_has_them(param_tree):

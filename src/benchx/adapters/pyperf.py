@@ -211,7 +211,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         selected = benchx_params.expand(name, info["params"], case_filter)
         if not selected:
             if benchx_params.matches_name_only(name, info["params"], case_filter):
-                unmatched.append(name)
+                unmatched.append(info)
             continue
         if "error" in info:
             raise Unsupported(f"cannot read the params of {name} in {where}: {info['error']}")

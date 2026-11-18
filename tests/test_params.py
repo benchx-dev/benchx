@@ -76,6 +76,17 @@ def test_a_filter_that_matches_only_the_name_is_noticed():
     assert not params.matches_name_only("m.C.time_x", IDS, None)
 
 
+def test_a_filter_that_gives_the_arguments_in_the_wrong_order_is_noticed():
+    """The part before the first `\\(` is the benchmark's name; what follows it selected nothing."""
+    assert params.expand("m.C.time_x", IDS, r"C\.time_x\('a', 10\)") == []
+    assert params.matches_name_only("m.C.time_x", IDS, r"C\.time_x\('a', 10\)")
+    assert params.matches_name_only("m.C.time_x", IDS, r"^m\.C\.time_x\(100, 'c'\)$")
+    assert not params.matches_name_only("m.C.time_x", IDS, r"C\.time_y\(10, 'a'\)")  # another benchmark
+    assert not params.matches_name_only("m.C.time_x", IDS, r"\(10, ")  # no name to go by
+    assert not params.matches_name_only("m.C.time_x", IDS, r"^\(10, ")
+    assert not params.matches_name_only("m.C.time_x", IDS, r"(unbalanced\(10")  # not a regex: no hint, no error
+
+
 def test_the_workload_of_a_case_comes_from_the_table_not_from_the_id():
     runnable = {"cases": {"m.C.time_x-2": ("m.C.time_x", 2), "m.time_y-1": ("m.time_y", None)},
                 "benchmarks": {"m.C.time_x": {"params": IDS, "param_names": ["n", "key"]}, "m.time_y": {}}}
@@ -83,10 +94,42 @@ def test_the_workload_of_a_case_comes_from_the_table_not_from_the_id():
     assert base.parametrized_workload("m.time_y-1", runnable) == ("m.time_y", {})  # a name that looks like -1
 
 
+NAMES = ["bench_function_base.Partition.time_argpartition", "bench_function_base.Partition.time_partition",
+         "bench_function_base.Sort.time_sort", "bench_linalg.Linalg.time_norm", "bench_ufunc.UFunc.time_add"]
+
+
+def test_a_slip_in_a_word_of_the_filter_finds_the_names_that_have_it():
+    assert base.similar("Partiton", NAMES) == NAMES[:2]  # a class, as spelled in the names
+    assert base.similar("time_argpartiton", NAMES) == NAMES[:2]  # a method: its own first (0.97), then time_partition (0.87)
+    assert base.similar("bench_linalgg", NAMES) == [NAMES[3]]  # a module
+    assert base.similar("partition", NAMES) == NAMES[:2]  # the case of a letter is no difference
+
+
+def test_the_words_of_a_regex_are_what_is_compared():
+    assert base.similar(r"^bench_function_base\.Partiton\.time_x\(10, 'a'\)$", NAMES) == NAMES[:2]
+    assert base.similar(r"Partiton|time_ad\b", NAMES) == [NAMES[0], NAMES[1], NAMES[4]]  # 0.94, 0.94, then 0.93
+    assert base.similar(r"\d+\.\w", NAMES) == []  # escapes and one letter say nothing
+
+
+def test_nothing_is_similar_to_what_is_not_like_any_name():
+    assert base.similar("zzzz", NAMES) == []
+    assert base.similar(None, NAMES) == []
+    assert base.similar("Partiton", []) == []
+
+
+def test_the_most_similar_names_come_first_and_at_most_limit_are_returned():
+    names = ["m.Alpha.time_a", "m.Alphb.time_a", "m.Alpxx.time_a", "m.Alpha.time_b"]
+    assert base.similar("Alpha", names) == ["m.Alpha.time_a", "m.Alpha.time_b", "m.Alphb.time_a"]  # exact, then near
+    assert base.similar("Alpha", names, limit=1) == ["m.Alpha.time_a"]
+
+
 def test_the_note_names_the_benchmarks_it_means():
-    note = base.name_only_note(["a", "b", "c", "d"])
+    found = [{"name": name, "param_names": ["n", "key"], "params": IDS} for name in "abcd"]
+    note = base.name_only_note(found)
     assert "(a, b, c)" in note  # three at most
     assert "name(p0, p1)" in note
+    # the first one's parameters, in order, and a case of it, each on a line of its own to be copied
+    assert note.splitlines()[2:] == ["  a(n, key)", "for example:", "  a(10, 'a')"]
 
 
 def test_search_name_is_exactly_what_expand_searches():
