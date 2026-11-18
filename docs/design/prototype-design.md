@@ -270,7 +270,10 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). In any
+the missing, failed-invariant, and excluded listings with counts, in words: a failed invariant names the unit
+it affects, units that failed alike are one line, and results excluded for the same reason are one line with
+their number, the reason carrying what the failed attempt said, such as `error: harness.error: ValueError: …`;
+which results they are is in `--json`). In any
 profile, a comparison in which either side is not `clean` has `local_only:
 true` (schema §5.5), is headed `[local-only]`, and names the sides that are not
 clean on the `caveats:` line; the `revisions` profile fails a side with no

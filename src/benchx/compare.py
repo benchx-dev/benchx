@@ -16,7 +16,7 @@ import statistics
 
 from . import identity
 from .core import canonical, catalog
-from .projection import Projection, axis_order, get, workload_label
+from .projection import Projection, axis_order, get, said, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -270,7 +270,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                 if d["measurement"]["status"] != "success":
                     status, reason = d["measurement"]["status"], d["measurement"].get("reason")
                     result = {"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]}
-                    doc["exclusions"].append({"result": result, "reason": f"{status}: {reason}" if reason else status})
+                    why = f"{status}: {reason}" if reason else status
+                    doc["exclusions"].append({"result": result, "reason": f"{why}: {said(d)}" if said(d) else why})
                     side_failed = side_failed or (profile in STRICT_STATUS and status in FAILED_STATUSES)
                     continue
                 rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
@@ -438,6 +439,45 @@ def _differences(projection: Projection, a_docs, b_docs) -> list[str]:
     return [p for p in _differing(a + b) if seen(a, p) != seen(b, p)]
 
 
+def _few(names, shown=3, count=False) -> str:
+    """The first `shown` names; `, …` when there are more, and with `count` how many."""
+    more = len(names) - shown
+    return ", ".join(names[:shown]) + ((f", … (+{more} more)" if count else ", …") if more > 0 else "")
+
+
+def _failed(items) -> list[str]:
+    """Failed invariants in words, `invariant: detail`: the unit it affects first when it affects one, and
+    units that failed alike as one line, `(K units: a, b, c, …)`."""
+    groups = {}
+    for item in items:
+        label = workload_label(item["workload"]) if "workload" in item else None
+        groups.setdefault((item["invariant"], item["detail"]), []).append(label)
+    lines = []
+    for (invariant, detail), labels in groups.items():
+        units = list(dict.fromkeys(label for label in labels if label))
+        text = f"{invariant}: {detail}"
+        lines.append(f"{units[0]}: {text}" if len(units) == 1 else
+                     f"{text}  ({len(units)} units: {_few(units)})" if units else text)
+    return lines
+
+
+def _excluded(items) -> list[str]:
+    """Results left out, one line for each reason (which has what the result said): `reason  (K results)`.
+    Which results is in the document (`--json`), not here."""
+    counts = {}
+    for item in items:
+        counts[item["reason"]] = counts.get(item["reason"], 0) + 1
+    return [f"{reason}  ({n} result{'s' if n != 1 else ''})" for reason, n in counts.items()]
+
+
+def _missing(items) -> list[str]:
+    """Units a side has no result for, one line for each side: `not on contender: a, b, c, … (+N more)`."""
+    sides = {}
+    for item in items:
+        sides.setdefault(item["side"], []).append(workload_label(item["workload"]))
+    return [f"not on {side}: {_few(list(dict.fromkeys(labels)), count=True)}" for side, labels in sorted(sides.items())]
+
+
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
     lines = [f"run {doc['run_key']}  profile {doc['profile']}  "
@@ -468,9 +508,9 @@ def render(doc: dict) -> str:
             reason = f"  ({u['reason']})" if "reason" in u else ""
             lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} effect {effect}  noise {noise}"
                          f"  rounds={u['rounds']}{reason}")
-    for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
-                       ("exclusions", "excluded")):
-        if doc[key]:
-            lines.append(f"\n{title} ({len(doc[key])})")
-            lines.extend(f"  {item}" for item in doc[key])
+    for title, items, say in (("missing", doc["missing"], _missing), ("failed invariants", doc["failed_invariants"], _failed),
+                              ("excluded", doc["exclusions"], _excluded)):
+        if items:
+            lines.append(f"\n{title} ({len(items)})")
+            lines.extend(f"  {line}" for line in say(items))
     return "\n".join(lines)

@@ -142,7 +142,9 @@ single unit (the matched facts agree, attempt counts are equal) takes that unit 
 document records the failed invariant with its workload, and has no verdict for that unit. The matched facts are
 those of the attempts that succeeded; a failed attempt reports none of them, and is excluded and listed.
 
-Excluded points and their reasons remain visible in the output. Changes in
+Excluded points and their reasons remain visible in the output: the reason of an excluded result ends with what the
+attempt said when it said something (a failed pyperf case's exception line, an asv benchmark's skip reason), and
+the rendered listing is one line per reason with a count. Changes in
 facts the projection ignores do not split a series by themselves, but differences between
 the target and its reference are carried as caveats so that a kernel, load, or
 other recorded condition is not hidden from the reader.

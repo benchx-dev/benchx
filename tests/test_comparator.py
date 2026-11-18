@@ -685,3 +685,82 @@ def test_a_failure_of_the_whole_run_still_leaves_no_units():
     docs[-1]["provenance"]["subject_tree"] = "c" * 40
     doc = evaluate(docs)
     assert invariants(doc) == ["two-sides"] and doc["units"] == []
+
+
+# --- what the output says about what was left out (FAILURE_MESSAGES_PLAN.md, decisions 8 and 9) ---
+
+def failing_head(docs, workload="BM_B", message="ValueError: array has no axis 3"):
+    """The head's attempts of a workload fail, the worker having said `message`."""
+    for d in of_head(docs, workload):
+        d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+        if message:
+            d["provenance"] = {**d["provenance"], "info": {"message": message}}
+    return docs
+
+
+def test_an_exclusion_says_what_the_failed_attempt_said():
+    doc = evaluate(failing_head(run_two()))
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error: ValueError: array has no axis 3"] * 3
+
+
+def test_an_exclusion_of_an_attempt_that_said_nothing_is_as_it_was():
+    doc = evaluate(failing_head(run_two(), message=None))
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error"] * 3
+
+
+def test_excluded_results_that_failed_alike_are_one_line_with_their_number():
+    text = compare.render(evaluate(failing_head(run_two())))
+    assert text.endswith("\nexcluded (3)\n  error: harness.error: ValueError: array has no axis 3  (3 results)")
+    assert "ingest_key" not in text and "{'" not in text  # words, not the document's dicts
+
+
+def test_excluded_results_that_failed_differently_are_lines_of_their_own():
+    docs = failing_head(run_two(), message="ValueError: array has no axis 3")
+    docs[docs.index(of_head(docs, "BM_B")[0])]["provenance"]["info"]["message"] = "KeyError: 'x'"
+    lines = compare.render(evaluate(docs)).splitlines()
+    assert lines[-3:] == ["excluded (3)", "  error: harness.error: KeyError: 'x'  (1 result)",
+                          "  error: harness.error: ValueError: array has no axis 3  (2 results)"]
+
+
+def test_a_message_in_the_reason_is_one_line_and_cut():
+    docs = failing_head(run_two(), message="RuntimeError: " + "x" * 300 + "\nthe second line")
+    [reason, *_] = {e["reason"] for e in evaluate(docs)["exclusions"]}
+    assert reason.startswith("error: harness.error: RuntimeError: xxx") and reason.endswith("…")
+    assert "second line" not in reason and len(reason) == len("error: harness.error: ") + 160
+
+
+def test_a_failed_invariant_of_one_unit_names_the_unit_in_words():
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    text = compare.render(evaluate(docs))
+    assert text.endswith("\nfailed invariants (1)\n  BM_B: sides-agree: /coordinates/protocol/asv/benchmark_version differ")
+    assert "'invariant'" not in text
+
+
+def test_units_that_failed_an_invariant_alike_are_one_line():
+    docs = run_two()
+    for d in docs:
+        d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    text = compare.render(evaluate(docs))
+    assert text.endswith("\nfailed invariants (2)\n"
+                         "  sides-agree: /coordinates/protocol/asv/benchmark_version differ  (2 units: BM_A, BM_B)")
+
+
+def test_a_failed_invariant_of_the_run_is_in_words_too():
+    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
+           "missing": [], "exclusions": [],
+           "failed_invariants": [{"invariant": "equal-attempts", "detail": "3 against 2: run the same number of rounds"}]}
+    assert compare.render(doc).endswith("\nfailed invariants (1)\n  equal-attempts: 3 against 2: run the same number of rounds")
+
+
+def test_missing_results_are_one_line_for_each_side_with_a_few_names():
+    where = lambda name, side: {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
+    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
+           "failed_invariants": [], "exclusions": [],
+           "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"), where("d", "contender"),
+                       where("e", "baseline")]}
+    assert compare.render(doc).endswith(
+        "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)")
+

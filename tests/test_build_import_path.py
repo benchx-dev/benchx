@@ -93,7 +93,8 @@ def test_the_build_root_imports_nothing(tmp, toy, monkeypatch):
     unit = doc["units"][0]
     assert unit["rounds"] == 0
     assert unit["verdict"] == "indeterminate"
-    assert doc["exclusions"] and {e["reason"] for e in doc["exclusions"]} == {"error: harness.error"}
+    assert doc["exclusions"] and {e["reason"] for e in doc["exclusions"]} == {
+        "error: harness.error: ModuleNotFoundError: No module named 'toy'"}  # and says what the worker said
 
 
 def test_one_pythonpath_measures_one_build_on_both_sides(tmp, toy, monkeypatch):
