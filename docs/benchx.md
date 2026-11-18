@@ -216,7 +216,9 @@ calibrates loops as usual. The flags are pyperf's
 `--case-timeout` covers all its rounds (default 1800 s). The harness in
 every result is pyperf. Results also record the installed project's version
 (`provenance.info.asv.installed`) and asv's hash of the benchmark's code
-(`protocol.asv.benchmark_version`), so editing a benchmark starts a new series.
+(`protocol.asv.benchmark_version`), so editing a benchmark starts a new series. An asv
+suite outside the subject's checkout is refused (an asv suite is a directory, and a suite
+outside the checkout is identified by one file): put it inside the checkout.
 
 ## What it does
 

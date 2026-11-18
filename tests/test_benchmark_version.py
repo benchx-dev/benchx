@@ -1,4 +1,5 @@
-"""The version of a pyperf benchmark function (PYPERF_VERSION_PLAN.md).
+"""The version of a pyperf benchmark function, and the refusal of a suite directory outside the
+checkout (PYPERF_VERSION_PLAN.md).
 
 The version is what asv calls it: a hash of the function's source, which the result records in
 `protocol.pyperf.benchmark_version` so that two sides that ran different code do not agree.
@@ -185,3 +186,44 @@ def test_a_declared_version_keeps_two_revisions_comparable(tmp_path):
     """A function that is itself the subject, pinned: its body changes, its version does not."""
     doc = compare(tmp_path, "def f():\n    sum(range({work}))\n\nf.version = '1'\n", "pinned")
     assert doc["failed_invariants"] == [] and [u["workload"]["name"] for u in doc["units"]] == ["f"]
+
+
+# --- a suite directory outside the checkout ---------------------------------------------------
+
+def test_an_asv_suite_outside_the_checkout_is_refused_with_a_message(tmp_path, capsys):
+    pytest.importorskip("pyperf")
+    from benchx import cli
+    tree, suite = tmp_path / "tree", tmp_path / "suite"
+    tree.mkdir()
+    suite.mkdir()
+    (tree / "x.txt").write_text("x\n")
+    (suite / "bm.py").write_text("class T:\n    def time_x(self):\n        sum(range(100))\n")
+    import subprocess
+    for directory in (tree, suite):
+        for args in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"]):
+            subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True)
+    code = cli.main(["bench", str(tree), "--adapter", "asv", "--suite", str(suite), "--run-key", "out",
+                     "--no-ingest", "--processes", "2", "--values", "2", "--out", str(tmp_path / "out")])
+    assert code == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "bx bench: error:" in err and "outside the subject's checkout" in err and "put it inside" in err
+    assert "Traceback" not in err
+    assert not list((tmp_path / "out").glob("**/*.json"))  # nothing ran, nothing was written
+
+
+def test_what_is_found_outside_the_checkout_is_a_file_or_it_is_refused(tmp_path):
+    from benchx import harnesses
+    from benchx.errors import SessionError
+    from benchx.session import _found_benchmark
+    source, build, elsewhere = tmp_path / "source", tmp_path / "build", tmp_path / "elsewhere"
+    for directory in (source / "benchmarks", build, elsewhere):
+        directory.mkdir(parents=True)
+    (elsewhere / "m.py").write_text("def bench_a():\n    pass\n")
+    asv, pyperf = harnesses.get("asv"), harnesses.get("pyperf")
+    # a suite inside the source checkout, with the target the build elsewhere (NumPy through the provider)
+    assert _found_benchmark(asv, build, str(source / "benchmarks"), str(source)) is None
+    # a pyperf file outside the checkout is the benchmark's own source, identified by the file
+    assert _found_benchmark(pyperf, source, str(elsewhere / "m.py"), str(source))["tree"]
+    # a directory outside has no such identity
+    with pytest.raises(SessionError, match="outside the subject's checkout"):
+        _found_benchmark(asv, source, str(elsewhere), str(source))
