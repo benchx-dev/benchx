@@ -276,7 +276,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     harness, precision = _harness(adapter, flags, file_precision, quantities)
     operation = "prepare" if build else "describe"
     sides = [_side(spec, suite, operation, harness, environment_variables, provider,
-                   timeout=orders.ORDER_TIMEOUT_S) for spec in (baseline, contender)]
+                   timeout=order_s) for spec in (baseline, contender)]
     if profile == "revisions":
         for name, side in zip(("baseline", "contender"), sides):
             _refuse_unknown_tree(side, name)

@@ -7,8 +7,9 @@ import subprocess
 
 import pytest
 
-from benchx import cli
+from benchx import cli, session
 from benchx.adapters import asv, base, pyperf
+from benchx.store import Store
 
 MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"]
 
@@ -99,3 +100,21 @@ def test_an_invalid_regular_expression_filter_is_refused(module, runnable, monke
     monkeypatch.setattr(module, "run_bounded", _nothing_may_start)
     with pytest.raises(base.Unsupported, match=r"the case filter '\(' is not a regular expression"):
         module.list_cases(runnable, "(", {})
+
+
+# ---- `bx compare` honours the configured order timeout, as `bx bench` does
+
+@pytest.mark.parametrize("profile", ["revisions", "environments"])
+def test_compare_targets_passes_the_configured_order_timeout(profile, tmp, monkeypatch):
+    seen = []
+
+    def stop(*args, **kwargs):
+        seen.append(kwargs["timeout"])
+        raise session.SessionError("stop here")
+
+    monkeypatch.setattr(session, "_side", stop)
+    with pytest.raises(session.SessionError, match="stop here"):
+        session.compare_targets("A", "B", profile=profile, suite="s", rounds=1, adapter="pyperf",
+                                label=("env", "x", "y") if profile == "environments" else None,
+                                store=Store(tmp / "s.parquet"), order_s=7)
+    assert seen == [7]
