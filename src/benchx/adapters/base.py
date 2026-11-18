@@ -69,6 +69,7 @@ Optional hooks (the runner calls them when present)
 
 import json
 import os
+import re
 import signal
 import subprocess
 
@@ -117,6 +118,16 @@ def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupporte
         more = f", … ({len(names) - limit} more)" if len(names) > limit else ""
         parts.append(f"available: {', '.join(names[:limit])}{more}")
     return Unsupported("; ".join(parts + list(notes)))
+
+
+def check_filter(case_filter) -> None:
+    """Unsupported when `case_filter` is not a regular expression, before any listing process
+    is started: `re.search` would otherwise raise a PatternError, a traceback, after it."""
+    if case_filter:
+        try:
+            re.compile(case_filter)
+        except re.error as e:
+            raise Unsupported(f"the case filter {case_filter!r} is not a regular expression: {e}") from None
 
 
 def last_json(out: subprocess.CompletedProcess, what: str):

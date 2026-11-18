@@ -83,3 +83,19 @@ def test_an_asv_listing_that_does_not_end_in_json_is_refused(stdout, found, tmp,
     with pytest.raises(base.Unsupported, match="cannot read the benchmark listing of") as e:
         asv.list_cases(runnable, None, {})
     assert found in str(e.value)
+
+
+# ---- a filter that is not a regular expression is a refusal, before anything is started
+
+def _nothing_may_start(*args, **kwargs):
+    raise AssertionError("a listing process was started for an invalid filter")
+
+
+@pytest.mark.parametrize("module, runnable", [
+    (pyperf, {"python": "/fake/python", "module": "m.py", "root": "."}),
+    (asv, {"python": "/fake/python", "benchmark_dir": ".", "root": "."}),
+])
+def test_an_invalid_regular_expression_filter_is_refused(module, runnable, monkeypatch):
+    monkeypatch.setattr(module, "run_bounded", _nothing_may_start)
+    with pytest.raises(base.Unsupported, match=r"the case filter '\(' is not a regular expression"):
+        module.list_cases(runnable, "(", {})

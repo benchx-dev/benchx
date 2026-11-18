@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import Unsupported, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -177,6 +177,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     `benchmark_*`, with one any function, by a regex searched in the name (and, for a
     function with `params`, in `name(p0, p1)`, once per combination; see
     `benchx_params.expand`). A combination is the case `function-INDEX`."""
+    check_filter(case_filter)
     try:
         where = runnable["module"].relative_to(runnable["root"])
     except ValueError:  # a suite outside the target, named by its absolute path

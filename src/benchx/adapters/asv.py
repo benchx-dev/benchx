@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params, pyperf
-from .base import Unsupported, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -180,6 +180,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     searched once per combination, as `name(p0, p1)`, and only the matching
     combinations run. Modules that fail to import and benchmarks of other types
     are reported on stderr, never run."""
+    check_filter(case_filter)
     with tempfile.TemporaryDirectory() as scratch:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
