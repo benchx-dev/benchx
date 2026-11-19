@@ -1,6 +1,6 @@
 # Measurement Results in Parquet
 
-**Status:** Draft for review
+**Status:** Agreed
 
 **Companion to:** `benchmark-result-schema.md` §5 (the message; where this document and the schema differ, the schema wins), `prototype-design.md` §4 (the local store, whose row begins with these columns)
 
