@@ -229,3 +229,30 @@ def test_without_tables_the_output_is_what_it_was(repo, tmp, builds, capsys):
 def test_tables_flags_that_do_not_fit_are_refused(argv, message, capsys):
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err
+
+
+def same_commit(dirty_sides):
+    """The two sides are one commit (its key), told apart only by their trees: uncommitted changes
+    against HEAD, say. `dirty_sides` are the sides with changes."""
+    docs = make()
+    for d in docs:
+        d["revision"]["key"] = "c" * 40
+        if d["provenance"]["subject_tree"] in dirty_sides:
+            d["provenance"]["subject_dirty"] = "dirty"
+    return docs
+
+
+def test_uncommitted_changes_against_the_same_commit_are_told_apart_in_the_change_table():
+    docs = same_commit({HEAD})
+    shown = tables.render(evaluate(docs), docs)
+    assert "Before [cccccccc]" in shown and "After [cccccccc (dirty)]" in shown
+    assert "For local/host commit cccccccc (5 rounds):" in shown
+    assert "For local/host commit cccccccc [dirty tree] (5 rounds):" in shown
+
+
+def test_two_dirty_sides_of_one_commit_are_told_apart_by_their_trees():
+    docs = same_commit({BASE, HEAD})
+    shown = tables.render(evaluate(docs), docs)
+    assert "Before [cccccccc tree aaaaaaaa (dirty)]" in shown and "After [cccccccc tree bbbbbbbb (dirty)]" in shown
+    assert "For local/host commit cccccccc tree aaaaaaaa [dirty tree] (5 rounds):" in shown
+    assert "For local/host commit cccccccc tree bbbbbbbb [dirty tree] (5 rounds):" in shown

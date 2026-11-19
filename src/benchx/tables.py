@@ -108,15 +108,22 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
                       **{role: _side(unit["docs"][role]) for role in ROLES}})
     units.sort(key=lambda u: _unit_order(u["workload"], u["quantity"]["name"]))
     varying = doc["varying"].rsplit(".", 1)[-1]  # the label or parameter that names the sides
+    revisions = doc["profile"] == "revisions"  # its sides are two commits; the others', two values
     info = {}
     for role, docs in sides.items():
-        project = store_project(docs[0]) if docs else ""
-        commit = docs[0]["revision"]["key"][:SHA] if docs else "?"
-        revisions = doc["profile"] == "revisions"  # its sides are two commits; the others', two values
-        info[role] = {"tag": commit if revisions else str(doc[role]),
-                      "heading": f"{project} commit {commit}" if revisions else f"{project} {varying}={doc[role]}",
+        info[role] = {"project": store_project(docs[0]) if docs else "",
+                      "commit": docs[0]["revision"]["key"][:SHA] if docs else "?",
                       "rounds": len({d.get("procedure", {}).get("round") for d in docs}),
                       "dirty": any(d["provenance"].get(flag) == "dirty" for d in docs for flag, _ in DIRTY_WARNINGS)}
+    if revisions and len({(side["commit"], side["dirty"]) for side in info.values()}) == 1:
+        # The same commit on both sides, each with uncommitted changes: the tree id tells them apart.
+        for role, side in info.items():
+            side["commit"] += f" tree {str(doc[role])[:SHA]}"
+    for role, side in info.items():
+        # Uncommitted changes against HEAD share HEAD's commit, so a side that is not clean says so.
+        side["tag"] = side["commit"] + (" (dirty)" if side["dirty"] else "") if revisions else str(doc[role])
+        side["heading"] = (f"{side['project']} commit {side['commit']}" if revisions
+                           else f"{side['project']} {varying}={doc[role]}")
     return units, info
 
 
