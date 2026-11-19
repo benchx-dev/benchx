@@ -55,7 +55,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
+           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
@@ -63,7 +63,7 @@ bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds 
 
 # read mode: compare results already measured
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
-           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json]
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json | --tables [--all]]
 
 # low-level command: run a handwritten work oreder
 bx run <order.json> [--out DIR] [--no-ingest]
@@ -191,7 +191,12 @@ neither asv nor asv_runner is used. PATH is a directory holding `asv.conf.json` 
 `benchmark_dir` is the suite) or the benchmark directory itself, and its checkout is
 the target (`bx bench . --adapter asv --suite benchmarks` is the same order).
 `--filter` is asv's `--bench`: searched in the name, and in `name(p0, p1)` for each
-parameter combination; a CASE is an exact name, `name(p0, p1)` for a combination. `adapters/asv_runtime.py` discovers
+parameter combination, the arguments in the order of `param_names`, each as its `repr`; a CASE is an exact name,
+`name(p0, p1)` for a combination. A filter that names a parametrized benchmark and none of its combinations is
+refused with that order and one case as it is searched. The runner records the order in
+`provenance.info.parameter_names` (the store keeps a document with its keys sorted), and `bx bench`, `bx head --table`
+and `bx compare` show the parameters in it, so what they print can be given to `--filter`; results made before have
+no such list and show them sorted. `adapters/asv_runtime.py` discovers
 the benchmarks as asv does (names, `params`, `setup`/`teardown`/`setup_cache`, skips,
 and asv's `version` hash all agree with asv_runner's; a test checks it). The
 benchmarks run in the `python` first on `PATH`, which must import pyperf and the
@@ -274,6 +279,15 @@ outside the checkout is identified by one file): put it inside the checkout.
   (`side-failed`). `--results` compares result files through a throwaway
   store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
+- **The tables** (`--tables`, `benchx/tables.py`) print, after the usual summary, what
+  `asv continuous` prints, laid out and rounded as asv does: a table of each side (a value
+  `4.71±0.08μs` per parameter combination, every cell centered), then one of the changes
+  (Change, Before, After, Ratio, Noise, Verdict, Benchmark), only the changed rows unless `--all`.
+  They are recomputed for display from the run's results; the comparison document is the
+  same. A side's value is the median of its per-round medians and its `±` their standard
+  deviation (not asv's `±`); `Change` and `Verdict` are the comparator's verdict (`+`
+  regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
+  times it), and `Ratio` is After over Before. A text view: not with `--json`.
 
 ## Run it
 

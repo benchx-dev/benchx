@@ -9,6 +9,7 @@ on the input results, so the same results give the same document from any
 store.
 """
 
+import collections
 import json
 import math
 import re
@@ -16,7 +17,7 @@ import statistics
 
 from . import identity
 from .core import canonical, catalog
-from .projection import Projection, axis_order, get, workload_label
+from .projection import Projection, axis_order, declared_workload, get, said, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -226,26 +227,33 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                                "detail": "sides do not alternate by procedure.slot: run the sides in the same "
                                          "order every round (a, b, a, b, ...)" + how})
 
-    # Units: one workload variant and quantity each. Everything else the
-    # projection matches must agree across both sides (schema §5.5).
+    # Units: one workload variant and quantity each. Everything else the projection matches must agree
+    # across both sides (schema §5.5), in the attempts that succeeded: a failed attempt reports none of
+    # the facts (runtime, harness version) and is excluded, and listed, below.
     units = {}
     for d, p, s in zip(documents, projected, sides):
         variant = {ptr: v for ptr, v in p.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
         key = (_c(variant), d["measurement"]["quantity"]["name"])
         units.setdefault(key, {"docs": {base: [], contender: []}, "identities": []})
         units[key]["docs"][s].append(d)
-        units[key]["identities"].append(p.identity)
-    for (_, quantity), unit in units.items():
+        if d["measurement"]["status"] == "success":
+            units[key]["identities"].append(p.identity)
+    run_failed = bool(failed)  # the invariants above are about the run, and no unit is compared
+    disagreeing = set()  # `sides-agree` is about one unit: it gets no verdict, and the others are compared
+    for key, unit in units.items():
         differing = _differing(unit["identities"])
         if differing:
             failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"], projection.axis),
-                           "quantity": quantity, "detail": f"{', '.join(differing)} differ"})
-    if failed:
+                           "quantity": key[1], "detail": f"{', '.join(differing)} differ"})
+            disagreeing.add(key)
+    if run_failed:
         return doc
 
-    for (_, quantity), unit in sorted(
+    for (variant_key, quantity), unit in sorted(
             units.items(),
             key=lambda item: _unit_order(_workload(item[1]["docs"], projection.axis), item[0][1])):
+        if (variant_key, quantity) in disagreeing:
+            continue
         by_side = unit["docs"]
         where = {"workload": _workload(by_side, projection.axis), "quantity": quantity}
         absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
@@ -263,14 +271,16 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                 if d["measurement"]["status"] != "success":
                     status, reason = d["measurement"]["status"], d["measurement"].get("reason")
                     result = {"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]}
-                    doc["exclusions"].append({"result": result, "reason": f"{status}: {reason}" if reason else status})
+                    why = f"{status}: {reason}" if reason else status
+                    doc["exclusions"].append({"result": result, "reason": f"{why}: {said(d)}" if said(d) else why})
                     side_failed = side_failed or (profile in STRICT_STATUS and status in FAILED_STATUSES)
                     continue
                 rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
         pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
                  if base in r and contender in r]
         unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed)
-        unit_doc["unmatched_differences"] = _differences(projection, by_side[base], by_side[contender])
+        succeeded = {s: [d for d in by_side[s] if d["measurement"]["status"] == "success"] for s in (base, contender)}
+        unit_doc["unmatched_differences"] = _differences(projection, succeeded[base], succeeded[contender])
         if caveats := _caveats(by_side, base, contender):
             unit_doc["caveats"] = caveats
         doc["units"].append(unit_doc)
@@ -316,17 +326,19 @@ def _benchmark_file(documents, names, sides) -> list[dict]:
 def _workload(by_side, axis=()) -> dict:
     """The unit's workload variant, as the comparison document names it: what both sides share,
     so the parameters on the profile's axis (the ones that tell the sides apart) are left out."""
-    workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
+    workload = declared_workload(next(d for docs in by_side.values() for d in docs))
     varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
     parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
     return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
 
 
 def _unit_order(workload: dict, quantity: str) -> tuple:
-    """The order units are listed in: by workload name, then by parameter name and value, then by
-    quantity, with numbers inside names and values in natural order (`axis_order`), so that `n=50`
-    comes before `n=100` and `bench_2` before `bench_10`, as people read them."""
-    parameters = sorted((workload.get("parameters") or {}).items())
+    """The order units are listed in: by workload name, then by the values of its parameters, the first
+    declared changing slowest (the order of the workload's parameters, see `declared_workload`: sorted by
+    name for a result that recorded none), then by quantity, with numbers inside names and values in
+    natural order (`axis_order`), so that `n=50` comes before `n=100` and `bench_2` before `bench_10`, as
+    people read them."""
+    parameters = list((workload.get("parameters") or {}).items())
     return (axis_order(workload["name"]), tuple((name, axis_order(value)) for name, value in parameters), quantity)
 
 
@@ -378,12 +390,21 @@ def _caveats(by_side, base, contender) -> list[str]:
 def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False):
     first = {s: by_side[s][0] for s in (base, contender)}
     quantity = first[base]["measurement"]["quantity"]
+    # The evidence behind `rounds`: how each side's attempts ended, by status.
+    attempts = {role: dict(sorted(collections.Counter(d["measurement"]["status"] for d in by_side[s]).items()))
+                for role, s in (("baseline", base), ("contender", contender))}
     unit = {**where, "series": {name: identity.series_fingerprint(first[s], store_project(first[s]), identity.MEDIAN)
                                 for name, s in (("baseline", base), ("contender", contender))},
-            "rounds": len(pairs), "noise_source": "paired-rounds", "verdict": "indeterminate"}
+            "rounds": len(pairs), "attempts": attempts, "noise_source": "paired-rounds",
+            "verdict": "indeterminate"}
     if side_failed:
         # UC-02 §10: if either side fails to run, the benchmark has failed; no effect is reported.
         unit["reason"] = "side-failed"
+        return unit
+    if any("success" not in statuses for statuses in attempts.values()):
+        # A side that never measured it (every attempt skipped, or failed where a failed pair is dropped)
+        # leaves no pair: more rounds would not help, so this is not `insufficient-rounds`.
+        unit["reason"] = "not-measured"
         return unit
     estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
     estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
@@ -430,6 +451,59 @@ def _differences(projection: Projection, a_docs, b_docs) -> list[str]:
     return [p for p in _differing(a + b) if seen(a, p) != seen(b, p)]
 
 
+def _few(names, shown=3, count=False) -> str:
+    """The first `shown` names; `, …` when there are more, and with `count` how many."""
+    more = len(names) - shown
+    return ", ".join(names[:shown]) + ((f", … (+{more} more)" if count else ", …") if more > 0 else "")
+
+
+def _failed(items) -> list[str]:
+    """Failed invariants in words, `invariant: detail`: the unit it affects first when it affects one, and
+    units that failed alike as one line, `(K units: a, b, c, …)`."""
+    groups = {}
+    for item in items:
+        label = workload_label(item["workload"]) if "workload" in item else None
+        groups.setdefault((item["invariant"], item["detail"]), []).append(label)
+    lines = []
+    for (invariant, detail), labels in groups.items():
+        units = list(dict.fromkeys(label for label in labels if label))
+        text = f"{invariant}: {detail}"
+        lines.append(f"{units[0]}: {text}" if len(units) == 1 else
+                     f"{text}  ({len(units)} units: {_few(units)})" if units else text)
+    return lines
+
+
+def _reason(unit) -> str:
+    """The unit's reason; for `not-measured`, which side measured nothing, and how its attempts ended:
+    `not-measured: contender skipped`, or `baseline error 2, skipped 1` when the statuses differ."""
+    if unit["reason"] != "not-measured":
+        return unit["reason"]
+    sides = []
+    for role, statuses in unit["attempts"].items():
+        if "success" not in statuses:
+            many = len(statuses) > 1
+            sides.append(f"{role} " + ", ".join(f"{status} {n}" if many else status
+                                               for status, n in sorted(statuses.items(), key=lambda x: (-x[1], x[0]))))
+    return f"not-measured: {', '.join(sides)}"
+
+
+def _excluded(items) -> list[str]:
+    """Results left out, one line for each reason (which has what the result said): `reason  (K results)`.
+    Which results is in the document (`--json`), not here."""
+    counts = {}
+    for item in items:
+        counts[item["reason"]] = counts.get(item["reason"], 0) + 1
+    return [f"{reason}  ({n} result{'s' if n != 1 else ''})" for reason, n in counts.items()]
+
+
+def _missing(items) -> list[str]:
+    """Units a side has no result for, one line for each side: `not on contender: a, b, c, … (+N more)`."""
+    sides = {}
+    for item in items:
+        sides.setdefault(item["side"], []).append(workload_label(item["workload"]))
+    return [f"not on {side}: {_few(list(dict.fromkeys(labels)), count=True)}" for side, labels in sorted(sides.items())]
+
+
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
     lines = [f"run {doc['run_key']}  profile {doc['profile']}  "
@@ -457,12 +531,12 @@ def render(doc: dict) -> str:
         for u in rows:
             effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
             noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
-            reason = f"  ({u['reason']})" if "reason" in u else ""
+            reason = f"  ({_reason(u)})" if "reason" in u else ""
             lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} effect {effect}  noise {noise}"
                          f"  rounds={u['rounds']}{reason}")
-    for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
-                       ("exclusions", "excluded")):
-        if doc[key]:
-            lines.append(f"\n{title} ({len(doc[key])})")
-            lines.extend(f"  {item}" for item in doc[key])
+    for title, items, say in (("missing", doc["missing"], _missing), ("failed invariants", doc["failed_invariants"], _failed),
+                              ("excluded", doc["exclusions"], _excluded)):
+        if items:
+            lines.append(f"\n{title} ({len(items)})")
+            lines.extend(f"  {line}" for line in say(items))
     return "\n".join(lines)

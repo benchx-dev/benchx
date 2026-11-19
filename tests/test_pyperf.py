@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
@@ -183,8 +184,39 @@ def test_a_filter_that_matches_a_name_but_no_arguments_is_refused_with_a_hint(pa
     with pytest.raises(adapter.Unsupported) as refused:
         planned(param_tree, "bench_sort$")
     message = str(refused.value.problems[0])
-    assert "filter 'bench_sort$' selects no case in mod.py; available: bench_plain, bench_sort;" in message
+    assert message.startswith("filter 'bench_sort$' selects no case in mod.py\n")
+    assert "\n  similar: bench_sort" in message
     assert "the filter matches the name of a parametrized benchmark (bench_sort) but not its arguments" in message
+
+
+def test_a_refusal_says_how_the_arguments_of_a_case_are_searched(param_tree):
+    """Arguments in the wrong order: the filter names the function, so the note gives the order
+    of `param_names` and a case as it is searched."""
+    with pytest.raises(adapter.Unsupported) as refused:
+        planned(param_tree, r"bench_sort\('a', 10\)")
+    message = str(refused.value.problems[0])
+    assert "the filter matches the name of a parametrized benchmark (bench_sort) but not its arguments" in message
+    assert message.splitlines()[3:6] == ["    bench_sort(n, key)", "  for example:", "    bench_sort(10, 'a')"]
+    assert message.index("not its arguments") < message.index("similar:")  # the hint comes before the list
+
+
+def test_a_filter_with_no_name_in_it_gets_no_note_about_arguments(param_tree):
+    with pytest.raises(adapter.Unsupported) as refused:
+        planned(param_tree, r"\(7, ")
+    assert "not its arguments" not in str(refused.value.problems[0])
+
+
+def test_the_driver_of_a_case_gives_python_nothing_to_warn_about(tmp, param_tree):
+    """The driver is a script of its own, run once per worker. It has `if <index> is not None:` for a
+    parametrized case, and Python warns about `is not` with a literal: a SyntaxWarning on the
+    stderr of every worker, which a failing case's message was once taken from."""
+    run_order(tmp, pyperf_order(param_tree, "quiet", case_filter="bench_sort|bench_plain"), "quiet")
+    drivers = sorted((tmp / "quiet").rglob("*.driver.py"))
+    assert len(drivers) == 5  # four combinations and a function without parameters
+    for driver in drivers:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(driver.read_text(), str(driver), "exec")
 
 
 def test_params_that_cannot_be_read_matter_only_to_the_function_that_has_them(param_tree):
@@ -508,3 +540,13 @@ def test_relative_output_directory(tmp, tree, monkeypatch):
     runner.run(order_path, Path("rel-out"))
     docs = results(elsewhere / "rel-out")
     assert [d["measurement"]["status"] for d in docs] == ["success"]
+
+
+def test_the_runner_records_the_order_the_parameters_were_declared_in(tmp, param_tree):
+    """The store keeps a document with its keys sorted, so `n, key` would come back as `key, n`
+    (PARAMETER_ORDER_PLAN.md): the result says in which order they were declared."""
+    docs = run_order(tmp, pyperf_order(param_tree, "declared", case_filter="bench_sort|bench_plain"), "declared")
+    sort = [d for d in docs if d["coordinates"]["workload"]["name"] == "bench_sort"]
+    plain = [d for d in docs if d["coordinates"]["workload"]["name"] == "bench_plain"]
+    assert sort and all(d["provenance"]["info"]["parameter_names"] == ["n", "key"] for d in sort)
+    assert plain and all("parameter_names" not in d["provenance"]["info"] for d in plain)  # nothing to put in order

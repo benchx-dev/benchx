@@ -18,6 +18,7 @@ from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
 from . import core, harnesses, orders, runner, session, snapshot
+from . import tables as tables_mod
 from . import target as target_mod
 from .core.validation import Kind
 from .store import Store, warning_codes
@@ -129,12 +130,14 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     """The settings `bx bench` and `bx compare` share, each from the command line,
     else the file, else its default (config.Config.pick); ConfigError when a
     required one has none. The file's adapter block belongs to the adapter it
-    names, so naming another is refused."""
+    names and to the others of its family (pyperf's serves asv), so naming an
+    adapter of another family is refused."""
     block = cfg.adapter
     given = forced_adapter or args.adapter
-    if given and block.get("name") and given != block["name"]:
+    if given and block.get("name") and not harnesses.same_family(given, block["name"]):
         raise config_mod.ConfigError(f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
-                                     "and its suite and precision belong to that harness")
+                                     "and its precision belongs to that harness and the ones that share it "
+                                     "(pyperf and asv)")
     quantities = config_mod.parse_quantities(args.quantity) if args.quantity else block.get("quantities", ["wall-time"])
     if args.project and args.no_project:
         raise UsageError("give --project or --no-project, not both")
@@ -201,7 +204,10 @@ def cmd_bench(args):
         return EXIT_REFUSED
     except runner.Refused as e:
         return _refused(e)
-    print(bench_mod.render(bench_mod.summarize(summary["files"])))
+    rows = bench_mod.summarize(summary["files"])
+    print(bench_mod.render(rows))
+    if failed := bench_mod.failures(rows):
+        print(failed)
     print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
     if store is None:
         return EXIT_OK
@@ -388,6 +394,7 @@ def cmd_compare(args):
         policy = _policy(cfg, args)
         mode = _mode(args, policy["profile"])
         _profile_flags(args, policy["profile"])
+        _view_flags(args)
     except (UsageError, config_mod.ConfigError) as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
@@ -413,6 +420,14 @@ def _profile_flags(args, profile):
     if args.label and profile == "variants":
         raise UsageError("--label names the sides of an environments comparison; the sides of a variants "
                          "comparison are two values of a parameter (--vary)")
+
+
+def _view_flags(args):
+    """--tables is a text view of the comparison, and --all a switch of it."""
+    if args.tables and args.json:
+        raise UsageError("--tables is a text view: not with --json")
+    if args.all and not args.tables:
+        raise UsageError("--all goes with --tables")
 
 
 def _read(cfg, args, policy):
@@ -452,8 +467,18 @@ def _measure(cfg, args, policy):
     except (session.SessionError, compare_mod.CompareError) as e:
         print(f"cannot compare: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
+    _show(doc, args, store.documents(doc["run_key"]) if args.tables else None)
     return EXIT_OK
+
+
+def _show(doc, args, documents):
+    """The comparison as JSON, or as text; with --tables, the asv-style tables follow the summary."""
+    if args.json:
+        print(json.dumps(doc, indent=1))
+        return
+    print(compare_mod.render(doc))
+    if args.tables:
+        print(tables_mod.render(doc, documents, all_rows=args.all))
 
 
 def _compare(store, args, policy):
@@ -470,7 +495,7 @@ def _compare(store, args, policy):
     except compare_mod.CompareError as e:
         print(f"cannot compare: {e}", file=sys.stderr)
         return EXIT_REFUSED
-    print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
+    _show(doc, args, documents)
     return EXIT_OK
 
 
@@ -628,6 +653,10 @@ def main(argv=None):
     p.add_argument("--k", type=float, help="noise multiplier (default: compare.k, else 3)")
     p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 3)")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--tables", action="store_true",
+                   help="after the summary, asv-style tables: one per side, then the changes")
+    p.add_argument("--all", action="store_true",
+                   help="with --tables: every row of the change table, not only the changed ones (as asv continuous)")
     p.add_argument("--label", help="read mode: the label that names the sides (environments); "
                                    "measure mode: NAME=BASE,CONTENDER")
     p.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value; "

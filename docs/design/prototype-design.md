@@ -21,7 +21,7 @@ bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
-           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
@@ -33,7 +33,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--min-time S]
            [--project P | --no-project] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-           [--k 3] [--min-rounds 3] [--json]
+           [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # measure mode: run both sides, then compare
 bx compare TARGET --profile variants [--vary NAME] [--baseline VALUE]
            --suite NAME --rounds R [--filter REGEX] [...]       # the options above, except --label
@@ -270,7 +270,10 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). In any
+the missing, failed-invariant, and excluded listings with counts, in words: a failed invariant names the unit
+it affects, units that failed alike are one line, and results excluded for the same reason are one line with
+their number, the reason carrying what the failed attempt said, such as `error: harness.error: ValueError: …`;
+which results they are is in `--json`). In any
 profile, a comparison in which either side is not `clean` has `local_only:
 true` (schema §5.5), is headed `[local-only]`, and names the sides that are not
 clean on the `caveats:` line; the `revisions` profile fails a side with no
@@ -518,7 +521,8 @@ matched facts agree (`sides-agree`) and the invariants the profile names over
 the run: exactly two sides, which for `environments` differ in more than their
 label, equal attempt counts per side, and sides alternating by
 `procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
-verdict; under `revisions` the same happens to a side with no tree id (the
+verdict (`sides-agree` and `equal-attempts` affect one unit, and the others are still compared; the rest
+affect every unit; `sides-agree` looks at the attempts that succeeded); under `revisions` the same happens to a side with no tree id (the
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
 both sides and in every round (`one-benchmark-tree`, schema §5.5), as it does
@@ -550,8 +554,11 @@ Per comparison unit (one workload variant and quantity), the method
   direction when known; otherwise *no change detected*;
 - is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
   never with fewer than two, since the noise is a standard error
-  (`insufficient-rounds`), when a baseline value is zero, when the guard
-  excluded the unit, or, under `variants`, when an attempt failed (`side-failed`).
+  (`insufficient-rounds`), when a side has no successful attempt at all, its
+  attempts skipped or failed and their pairs dropped (`not-measured`; the unit
+  carries `attempts`, the count of each side's attempts by status), when a
+  baseline value is zero, when the guard excluded the unit, or, under
+  `variants`, when an attempt failed (`side-failed`).
 
 Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with

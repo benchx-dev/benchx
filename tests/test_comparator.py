@@ -140,12 +140,12 @@ def test_one_pair_has_no_noise_whatever_min_rounds_says(min_rounds):
 
 
 def test_no_pair_at_all_is_indeterminate_too():
-    """Every head attempt failed, so no round pairs; `min_rounds=0` must not reach the mean of nothing."""
+    """Every head attempt failed, so no round pairs, and the reason says the head was not measured; `min_rounds=0` must not reach the mean of nothing."""
     docs = run()
     for d in docs[1::2]:
         d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
     unit = evaluate(docs, min_rounds=0)["units"][0]
-    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "insufficient-rounds", 0)
+    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
 
 
 def test_two_pairs_are_enough_when_min_rounds_allows():
@@ -619,3 +619,190 @@ def test_units_with_more_than_one_other_parameter_are_ordered_by_name_then_value
     doc = vevaluate(extra)
     assert [(u["workload"]["parameters"]["n"], u["workload"]["parameters"]["size"]) for u in doc["units"]] == [
         ("2", "20"), ("2", "100"), ("10", "20"), ("10", "100")]
+
+
+# --- one benchmark that cannot be compared does not stop the others -------------------------
+
+def run_two(rounds=3, ratio=1.1):
+    """Two workloads measured in every call; the head takes `ratio` times the base's time."""
+    docs, slot = [], 0
+    for r in range(rounds):
+        for side, factor in ((BASE, 1.0), (HEAD, ratio)):
+            docs += [result(side, r, slot, (r + 1.0) * factor, workload=name) for name in ("BM_A", "BM_B")]
+            slot += 1
+    return docs
+
+
+def of_head(docs, workload):
+    return [d for d in docs if d["revision"]["key"] == HEAD and d["coordinates"]["workload"]["name"] == workload]
+
+
+def by_name(doc):
+    return {u["workload"]["name"]: u for u in doc["units"]}
+
+
+def test_an_edited_benchmark_fails_its_own_unit_only():
+    """A benchmark whose code differs between the sides (asv's benchmark version) is a new series and is
+    not comparable; the other benchmark is compared."""
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            version = "v2" if d["revision"]["key"] == HEAD else "v1"
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": version}
+    doc = evaluate(docs)
+    assert invariants(doc) == ["sides-agree"]
+    failure = doc["failed_invariants"][0]
+    assert failure["workload"] == {"name": "BM_B"} and "benchmark_version differ" in failure["detail"]
+    assert list(by_name(doc)) == ["BM_A"] and by_name(doc)["BM_A"]["verdict"] == "regressed"
+
+
+def test_a_failed_attempt_is_excluded_before_the_facts_are_matched():
+    """A benchmark that raises reports no harness version or runtime, so its attempts differ from the other
+    side's in those facts. They are excluded and listed, not matched: the benchmark has no verdict
+    (`not-measured`) and the other one is compared."""
+    docs = run_two()
+    failing = of_head(docs, "BM_B")
+    for d in docs:
+        if d not in failing:  # the CPU configuration is a fact the projection ignores: what is reported, differs
+            d["coordinates"]["environment"]["system"]["cpu"] = {"config": "performance"}
+    for d in failing:
+        d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+        d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark", "version": "1.9"}
+        d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.12"}
+    doc = evaluate(docs)
+    assert doc["failed_invariants"] == []
+    assert by_name(doc)["BM_A"]["verdict"] == "regressed"
+    failed = by_name(doc)["BM_B"]
+    assert failed["verdict"] == "indeterminate" and failed["reason"] == "not-measured"
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error"] * 3
+    assert by_name(doc)["BM_B"].get("unmatched_differences", []) == []  # what it did not report is no difference
+    assert by_name(doc)["BM_A"].get("unmatched_differences", []) == []
+
+
+def test_a_failure_of_the_whole_run_still_leaves_no_units():
+    """A third side (a tree edited during the run) is about the run, so no benchmark is compared."""
+    docs = run_two()
+    docs[-1]["provenance"]["subject_tree"] = "c" * 40
+    doc = evaluate(docs)
+    assert invariants(doc) == ["two-sides"] and doc["units"] == []
+
+
+# --- what the output says about what was left out (FAILURE_MESSAGES_PLAN.md, decisions 8 and 9) ---
+
+def failing_head(docs, workload="BM_B", message="ValueError: array has no axis 3"):
+    """The head's attempts of a workload fail, the worker having said `message`."""
+    for d in of_head(docs, workload):
+        d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+        if message:
+            d["provenance"] = {**d["provenance"], "info": {"message": message}}
+    return docs
+
+
+def test_an_exclusion_says_what_the_failed_attempt_said():
+    doc = evaluate(failing_head(run_two()))
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error: ValueError: array has no axis 3"] * 3
+
+
+def test_an_exclusion_of_an_attempt_that_said_nothing_is_as_it_was():
+    doc = evaluate(failing_head(run_two(), message=None))
+    assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error"] * 3
+
+
+def test_excluded_results_that_failed_alike_are_one_line_with_their_number():
+    text = compare.render(evaluate(failing_head(run_two())))
+    assert text.endswith("\nexcluded (3)\n  error: harness.error: ValueError: array has no axis 3  (3 results)")
+    assert "ingest_key" not in text and "{'" not in text  # words, not the document's dicts
+
+
+def test_excluded_results_that_failed_differently_are_lines_of_their_own():
+    docs = failing_head(run_two(), message="ValueError: array has no axis 3")
+    docs[docs.index(of_head(docs, "BM_B")[0])]["provenance"]["info"]["message"] = "KeyError: 'x'"
+    lines = compare.render(evaluate(docs)).splitlines()
+    assert lines[-3:] == ["excluded (3)", "  error: harness.error: KeyError: 'x'  (1 result)",
+                          "  error: harness.error: ValueError: array has no axis 3  (2 results)"]
+
+
+def test_a_message_in_the_reason_is_one_line_and_cut():
+    docs = failing_head(run_two(), message="RuntimeError: " + "x" * 300 + "\nthe second line")
+    [reason, *_] = {e["reason"] for e in evaluate(docs)["exclusions"]}
+    assert reason.startswith("error: harness.error: RuntimeError: xxx") and reason.endswith("…")
+    assert "second line" not in reason and len(reason) == len("error: harness.error: ") + 160
+
+
+def test_a_failed_invariant_of_one_unit_names_the_unit_in_words():
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    text = compare.render(evaluate(docs))
+    assert text.endswith("\nfailed invariants (1)\n  BM_B: sides-agree: /coordinates/protocol/asv/benchmark_version differ")
+    assert "'invariant'" not in text
+
+
+def test_units_that_failed_an_invariant_alike_are_one_line():
+    docs = run_two()
+    for d in docs:
+        d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    text = compare.render(evaluate(docs))
+    assert text.endswith("\nfailed invariants (2)\n"
+                         "  sides-agree: /coordinates/protocol/asv/benchmark_version differ  (2 units: BM_A, BM_B)")
+
+
+def test_a_failed_invariant_of_the_run_is_in_words_too():
+    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
+           "missing": [], "exclusions": [],
+           "failed_invariants": [{"invariant": "equal-attempts", "detail": "3 against 2: run the same number of rounds"}]}
+    assert compare.render(doc).endswith("\nfailed invariants (1)\n  equal-attempts: 3 against 2: run the same number of rounds")
+
+
+def test_missing_results_are_one_line_for_each_side_with_a_few_names():
+    where = lambda name, side: {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
+    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
+           "failed_invariants": [], "exclusions": [],
+           "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"), where("d", "contender"),
+                       where("e", "baseline")]}
+    assert compare.render(doc).endswith(
+        "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)")
+
+
+
+def skip(docs, indexes, status="skipped", reason="harness.skipped"):
+    for i in indexes:
+        docs[i]["measurement"] = {"quantity": docs[i]["measurement"]["quantity"], "status": status,
+                                  "reason": reason}
+    return docs
+
+
+def test_a_side_that_skipped_every_round_was_not_measured_not_short_of_rounds():
+    """A setup that raises on the contender leaves no pair at all. More rounds would not help, so the
+    reason is not `insufficient-rounds`; the unit carries how each side's attempts ended."""
+    doc = evaluate(skip(run(), [1, 3, 5]))
+    unit = doc["units"][0]
+    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 3}}
+    assert "reference_estimate" not in unit and "effect" not in unit
+    assert "rounds=0  (not-measured: contender skipped)" in compare.render(doc)
+    assert [e["reason"] for e in doc["exclusions"]] == ["skipped: harness.skipped"] * 3
+
+
+def test_the_render_names_every_side_that_was_not_measured_and_how_its_attempts_ended():
+    docs = skip(skip(run(), [0, 2, 4], "error", "harness.error"), [1, 3], "skipped")
+    docs = skip(docs, [5], "error", "harness.error")
+    doc = evaluate(docs)
+    unit = doc["units"][0]
+    assert unit["reason"] == "not-measured"
+    assert unit["attempts"] == {"baseline": {"error": 3}, "contender": {"error": 1, "skipped": 2}}
+    assert "(not-measured: baseline error, contender skipped 2, error 1)" in compare.render(doc)
+
+
+def test_some_rounds_measured_on_both_sides_is_still_insufficient_rounds():
+    """One skipped round leaves two pairs: the sides were measured, there are too few rounds."""
+    unit = evaluate(skip(run(), [5]))["units"][0]
+    assert (unit["reason"], unit["rounds"]) == ("insufficient-rounds", 2)
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 1, "success": 2}}
+    assert "(insufficient-rounds)" in compare.render(evaluate(skip(run(), [5])))
+
+
+def test_every_unit_carries_how_its_attempts_ended():
+    unit = evaluate(run())["units"][0]
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
