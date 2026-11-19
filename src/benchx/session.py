@@ -38,14 +38,21 @@ def parse_target(text: str) -> tuple[str, str | None]:
     return build, source or None
 
 
+def check_label_name(name: str) -> None:
+    """A label name is a path segment of the environments comparison's axis, so it cannot hold a '/'.
+    Refused when the label is given, by `bx bench` as it records it and by `parse_label` before the
+    first round, not when `bx compare` meets it afterwards."""
+    if "/" in name:
+        raise SessionError(f"--label name {name!r} must not contain '/'")
+
+
 def parse_label(text: str) -> tuple[str, str, str]:
     """`NAME=BASE,CONTENDER`, the two label values that name the sides."""
     name, _, values = text.partition("=")
     base, comma, contender = values.partition(",")
     if not (name and base and comma and contender) or "," in contender:
         raise SessionError(f"--label must be NAME=BASE,CONTENDER in measure mode, not {text!r}")
-    if "/" in name:  # the name is a path segment of the comparison's axis: refuse it before measuring
-        raise SessionError(f"--label name {name!r} must not contain '/'")
+    check_label_name(name)
     return name, base, contender
 
 

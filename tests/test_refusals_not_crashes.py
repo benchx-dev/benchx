@@ -134,3 +134,13 @@ def test_a_label_name_with_a_slash_is_a_compare_error_in_read_mode():
 
     with pytest.raises(compare.CompareError, match="must not contain '/'"):
         compare.profile_projection("environments", "a/b")
+
+
+def test_bx_bench_refuses_a_label_name_with_a_slash_as_it_records_it(capsys):
+    """Otherwise the results are recorded and ingested, and `bx compare --label a/b` then refuses them."""
+    with pytest.raises(session.SessionError) as expected:
+        session.parse_label("a/b=x,y")
+    argv = ["bench", "nowhere", "--suite", "s", "--adapter", "pyperf", "--run-key", "k", "--slot", "0",
+            "--label", "a/b=x"]
+    assert cli.main(argv) == cli.EXIT_REFUSED
+    assert f"bx bench: error: {expected.value}" in capsys.readouterr().err

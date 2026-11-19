@@ -89,6 +89,7 @@ def _session_position(args) -> tuple[dict, int | None, int | None]:
         name, eq, value = item.partition("=")
         if not (name and eq and value):
             raise UsageError(f"--label wants NAME=VALUE, not {item!r}")
+        session.check_label_name(name)  # a SessionError, which cmd_bench reports as it does a UsageError
         if name in labels:
             raise UsageError(f"--label {name} is given twice")
         labels[name] = value
