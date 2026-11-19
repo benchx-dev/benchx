@@ -290,7 +290,12 @@ class Store:
                      "(an order delivered by an earlier ingest is not attached)", outcome["ingested"],
                      outcome["duplicate"], len(outcome["rejected"]), len(used_orders), len(unused), without_order)
         if accepted:
-            self._write(parquet.results_table(accepted, derived))
+            try:
+                table = parquet.results_table(accepted, derived)
+            except Exception:  # one list comprehension over the batch: an error there writes nothing
+                logger.error("cannot convert %d result(s) to rows for %s: nothing is written", len(accepted), self.path)
+                raise
+            self._write(table)
         return outcome
 
     def _write(self, new: pa.Table) -> None:
@@ -307,12 +312,17 @@ class Store:
             if added or widened:  # permissive promotion adds nested fields and widens types, not only columns
                 logger.debug("%s: the schema was promoted: added %s; widened %s", self.path, ", ".join(added) or "nothing",
                              ", ".join(widened) or "nothing")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(f".{self.path.name}.tmp")
-        pq.write_table(table.replace_schema_metadata(new.schema.metadata), tmp, compression="zstd")
-        with open(tmp, "rb") as f:
-            os.fsync(f.fileno())
-        os.replace(tmp, self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            pq.write_table(table.replace_schema_metadata(new.schema.metadata), tmp, compression="zstd")
+            with open(tmp, "rb") as f:
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+        except OSError as e:  # disk full, permissions: the results are still in their files
+            logger.error("cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
+                         self.path, new.num_rows, e.strerror or e, tmp)
+            raise
         logger.debug("wrote %s: %d row(s) added to %d, %.2f s", self.path, new.num_rows, old.num_rows if old else 0,
                      time.monotonic() - started)
 

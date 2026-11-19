@@ -326,3 +326,24 @@ def test_degraded_phrases_end_the_footer_and_are_warnings(tmp):
     text = path.read_text()
     assert " WARNING 1 of 2 cases not measured" in text
     assert re.search(r" INFO end: ok \(exit 0\), [\d.]+ s, 1 of 2 cases not measured\n$", text)
+
+
+def test_the_logger_passes_only_the_levels_somebody_wants(tmp):
+    """`isEnabledFor(DEBUG)` is false when nothing wants DEBUG, so a record costs nothing (plan R11). Until the
+    log is on, DEBUG is kept: the command's own checks buffer their records for it."""
+    benchx = logging.getLogger("benchx")
+    try:
+        log.start_console(0)
+        log.configure(False)  # --no-log leaves the console's level
+        assert benchx.isEnabledFor(logging.INFO) and not benchx.isEnabledFor(logging.DEBUG)
+        log.start_console(2)  # -vv
+        log.configure(False)
+        assert benchx.isEnabledFor(logging.DEBUG)
+        log.start_console(0)
+        log.configure(tmp / "x.log", level=logging.INFO)  # --log-level info
+        assert benchx.isEnabledFor(logging.INFO) and not benchx.isEnabledFor(logging.DEBUG)
+        log.configure(tmp / "x.log")  # the default: the log keeps DEBUG
+        assert benchx.isEnabledFor(logging.DEBUG)
+    finally:
+        log.stop()
+    assert not benchx.isEnabledFor(logging.INFO)  # nothing installed: only the NullHandler

@@ -202,3 +202,11 @@ def test_a_failing_collector_is_a_warning_with_its_reason_and_the_progress_is_in
     assert any(level == "INFO" and m.startswith("collector 2/2 bad: failed, ") for level, m in messages)
     assert ("WARNING", "collector bad failed: exit 3: boom") in messages
     assert any(level == "WARNING" and m == "collector bad: stderr| boom" for level, m in messages)
+
+
+def test_a_bench_with_a_failed_case_keeps_the_not_measured_section_on_stdout_with_the_log_on(build, capsys):
+    assert bench(build, "--log") == cli.EXIT_OK
+    out = capsys.readouterr()
+    assert re.search(r"not measured \(\d+\)", out.out) and "BM_Broken" in out.out
+    assert not any(re.match(r"^\d{4}-\d\d-\d\dT", line) for line in out.out.splitlines())  # no log line on stdout
+    assert any(re.match(r"^\d{4}-\d\d-\d\dT", line) for line in out.err.splitlines())  # the log is on stderr

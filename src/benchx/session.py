@@ -230,7 +230,12 @@ def _run_side(side: dict, path: Path, store=None, *, title="the order", **order)
     summary = runner.run(path, path.parent.parent, allow_collectors=True)
     logger.debug("%s: work order %s; output %s; artifacts %s", title, summary["files"][0], summary["out"],
                  Path(summary["out"]) / "artifacts")  # the work order holds the -e values: the path, never the content
-    outcome = store.ingest_paths(summary["files"]) if store else None
+    try:
+        outcome = store.ingest_paths(summary["files"]) if store else None
+    except BaseException:
+        logger.error("%s: the results are in %s, not delivered to the store; bx ingest %s stores them", title,
+                     summary["out"], summary["out"])
+        raise
     delivered = (f"; store: ingested {outcome['ingested']}, duplicate {outcome['duplicate']}, rejected "
                  f"{len(outcome['rejected'])}") if outcome else ""
     logger.info("%s: %d case(s), %d result(s)%s, %.1f s", title, summary["cases"], summary["results"], delivered,

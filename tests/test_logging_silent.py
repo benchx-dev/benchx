@@ -194,3 +194,25 @@ def test_the_store_says_what_it_swept_what_it_refused_and_what_it_read(session, 
     with caplog.at_level(logging.DEBUG, logger="benchx"):
         assert not Store(tmp / "absent.parquet").documents("S")
     assert any("absent, read as an empty store" in m for _, m in records(caplog))
+
+
+@pytest.mark.parametrize("extra", [["--tables"], ["--tables", "--all"]])
+def test_compare_tables_keeps_stdout_clean_with_the_log_on(session, capsys, extra):
+    capsys.readouterr()
+    assert cli.main(["compare", "--run", "S", "--profile", "revisions", "--baseline", session, *extra, "--log"]) \
+        == cli.EXIT_OK
+    out = capsys.readouterr()
+    assert "Before" in out.out or "Change" in out.out or out.out.strip()  # the tables, whatever they hold
+    assert not any(re.match(r"^\d{4}-\d\d-\d\dT", line) for line in out.out.splitlines())
+    assert " INFO compared run S" in out.err
+
+
+def test_a_store_that_cannot_be_written_says_where_the_results_are(session, tmp, monkeypatch, capsys):
+    from benchx import store as store_mod
+    monkeypatch.setattr(store_mod.pq, "write_table", lambda *a, **k: (_ for _ in ()).throw(OSError(28, "No space left")))
+    assert cli.main(["bench", str(tmp / "b-base"), *GBENCH, "--run-key", "fresh"]) == 1  # a crash: the status Python gives
+    text = (tmp / "results" / "fresh" / "bx.log").read_text()
+    assert " ERROR cannot write " in text and "No space left" in text
+    assert re.search(r" ERROR the order: the results are in \S+/results/fresh, not delivered to the store; "
+                     r"bx ingest \S+/results/fresh stores them", text)
+    assert " INFO end: crashed (exit 1), " in text
