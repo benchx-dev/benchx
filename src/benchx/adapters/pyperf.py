@@ -16,6 +16,13 @@ a function, so its bare name selects every combination (`benchx_params.expand`).
 `setup`, `teardown` and `skip_params` are asv's, and pyperf's `bench_func` has no
 place for them.
 
+Version: a function has one, as in asv, so that an edited benchmark is not compared with its
+old self. It is the function's `version` attribute when it has one, else a hash of its source
+(`benchx_params.source_version`), found when the module is listed, and recorded in each
+result's `protocol.pyperf.benchmark_version`. Protocol is what the sides must agree on, so two
+revisions whose function differs fail `sides-agree`. A function without readable source has no
+version.
+
 The driver records the environment it actually had, before it imports the
 user's module: a digest in every worker's run metadata and, from a worker,
 the full environment as an artifact. The adapter reports what the workers had, not what the manager
@@ -34,7 +41,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -141,7 +148,8 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
                         env=env)
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
+        raise Unsupported(f"pyperf is not importable by {python}: "
+                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
     return {"python": python, "module": module.resolve(), "root": root.resolve()}
 
 
@@ -166,6 +174,12 @@ for name, func in sorted(vars(module).items()):
                 getattr(func, "params", []), getattr(func, "param_names", []))
         except Exception as error:
             info["error"] = f"{type(error).__name__}: {error}"
+        try:
+            version = params.source_version(func)
+        except Exception:  # a callable with odd attributes: no version, still a benchmark
+            version = None
+        if version is not None:
+            info["version"] = version
         found.append(info)
 print(json.dumps(found))
 """
@@ -176,6 +190,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     `benchmark_*`, with one any function, by a regex searched in the name (and, for a
     function with `params`, in `name(p0, p1)`, once per combination; see
     `benchx_params.expand`). A combination is the case `function-INDEX`."""
+    check_filter(case_filter)
     try:
         where = runnable["module"].relative_to(runnable["root"])
     except ValueError:  # a suite outside the target, named by its absolute path
@@ -186,7 +201,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
     cases, unmatched = [], []
     for info in listing:
@@ -301,7 +316,8 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
         artifacts.append(("worker-environment", "application/json", worker_env))
     return {"exit_status": status, "timed_out": status is None, "stdout": stdout or "", "stderr": stderr or "",
             "native": native, "artifacts": artifacts,
-            "worker_env": captured, "passed_env_digest": env_digest(env)}
+            "worker_env": captured, "passed_env_digest": env_digest(env),
+            "benchmark_version": runnable.get("benchmarks", {}).get(function, {}).get("version")}
 
 
 def _failure_message(stderr: str) -> str:
@@ -334,6 +350,13 @@ def repetition_levels(applied: dict, run: dict, case: str) -> list[dict]:
         planned *= level["n"]
         levels.append({"unit": level["unit"], "attempted": planned, "completed": realized[level["unit"]]})
     return levels
+
+
+def case_protocol(applied: dict, run: dict, case: str) -> dict:
+    """One case's protocol: the order's, and the version of the benchmark function when there is one
+    (`benchx_params.source_version`), so that sides that ran different code do not agree."""
+    version = run.get("benchmark_version")
+    return {**applied, "pyperf": {"benchmark_version": version}} if version else applied
 
 
 def harness(info: dict) -> dict:
@@ -409,10 +432,12 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
 
 # File-level pyperf metadata as environment.system facts (schema Appendix B):
 # {metadata key: (system object, key)}. The default identity policy ignores
-# cpu and os and matches runtime.
+# cpu and os and matches runtime. boot_time is provenance, not a system fact:
+# it says when the machine started, and /proc/stat's btime drifts (WSL2), so
+# as a fact it would split one environment into several (#121).
 _SYSTEM = {
     "cpu_config": ("cpu", "config"), "cpu_affinity": ("cpu", "affinity"),
-    "aslr": ("os", "aslr"), "platform": ("os", "platform"), "boot_time": ("os", "boot_time"),
+    "aslr": ("os", "aslr"), "platform": ("os", "platform"),
     "python_version": ("runtime", "python"), "python_implementation": ("runtime", "implementation"),
     "python_compiler": ("runtime", "compiler"), "python_cflags": ("runtime", "cflags"),
     "python_gc": ("runtime", "gc"),
@@ -430,7 +455,7 @@ def context_facts(native: dict | None) -> tuple[dict, dict]:
     for key, (group, name) in _SYSTEM.items():
         if key in md:
             system.setdefault(group, {})[name] = md[key]
-    info = {k: md[k] for k in ("hostname", "cpu_model_name", "cpu_count", "python_executable") if k in md}
+    info = {k: md[k] for k in ("hostname", "cpu_model_name", "cpu_count", "python_executable", "boot_time") if k in md}
     if "perf_version" in md:
         info["library_version"] = md["perf_version"]
     return system, info

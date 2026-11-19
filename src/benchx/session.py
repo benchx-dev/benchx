@@ -38,12 +38,21 @@ def parse_target(text: str) -> tuple[str, str | None]:
     return build, source or None
 
 
+def check_label_name(name: str) -> None:
+    """A label name is a path segment of the environments comparison's axis, so it cannot hold a '/'.
+    Refused when the label is given, by `bx bench` as it records it and by `parse_label` before the
+    first round, not when `bx compare` meets it afterwards."""
+    if "/" in name:
+        raise SessionError(f"--label name {name!r} must not contain '/'")
+
+
 def parse_label(text: str) -> tuple[str, str, str]:
     """`NAME=BASE,CONTENDER`, the two label values that name the sides."""
     name, _, values = text.partition("=")
     base, comma, contender = values.partition(",")
     if not (name and base and comma and contender) or "," in contender:
         raise SessionError(f"--label must be NAME=BASE,CONTENDER in measure mode, not {text!r}")
+    check_label_name(name)
     return name, base, contender
 
 
@@ -115,7 +124,13 @@ def _found_benchmark(harness, path: Path, suite: str, subject_source: str) -> di
     snapshot.benchmark_identity), else None. A suite that is a built binary is the subject's own."""
     if not adapters.get(harness.name).SUITE_IS_SOURCE:
         return None
-    return snapshot.benchmark_identity(path / suite, subject_source)
+    found = snapshot.benchmark_identity(path / suite, subject_source)
+    if found is not None and not found.get("tree"):
+        # Outside the checkout a suite is identified by one file (its blob id); an asv suite is a directory.
+        raise SessionError(f"cannot record the suite {(path / suite).resolve()}: it is outside the subject's "
+                           f"checkout ({subject_source}), where a suite is identified by one file, which a "
+                           "directory is not; put it inside the checkout")
+    return found
 
 
 def _benchmark(found: dict | None) -> dict | None:
@@ -276,7 +291,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     harness, precision = _harness(adapter, flags, file_precision, quantities)
     operation = "prepare" if build else "describe"
     sides = [_side(spec, suite, operation, harness, environment_variables, provider,
-                   timeout=orders.ORDER_TIMEOUT_S) for spec in (baseline, contender)]
+                   timeout=order_s) for spec in (baseline, contender)]
     if profile == "revisions":
         for name, side in zip(("baseline", "contender"), sides):
             _refuse_unknown_tree(side, name)

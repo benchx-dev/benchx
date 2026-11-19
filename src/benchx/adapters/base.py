@@ -67,7 +67,9 @@ Optional hooks (the runner calls them when present)
                               attempt. For a harness that repeats at several levels.
 """
 
+import json
 import os
+import re
 import signal
 import subprocess
 
@@ -116,6 +118,29 @@ def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupporte
         more = f", … ({len(names) - limit} more)" if len(names) > limit else ""
         parts.append(f"available: {', '.join(names[:limit])}{more}")
     return Unsupported("; ".join(parts + list(notes)))
+
+
+def check_filter(case_filter) -> None:
+    """Unsupported when `case_filter` is not a regular expression, before any listing process
+    is started: `re.search` would otherwise raise a PatternError, a traceback, after it."""
+    if case_filter:
+        try:
+            re.compile(case_filter)
+        except re.error as e:
+            raise Unsupported(f"the case filter {case_filter!r} is not a regular expression: {e}") from None
+
+
+def last_json(out: subprocess.CompletedProcess, what: str):
+    """The JSON a listing process prints on its last line of stdout. A module that prints
+    nothing, or prints after the listing (an `atexit` handler, say), is a refusal that names
+    the line, not a traceback: the process exited 0, so `run_bounded` cannot tell."""
+    lines = out.stdout.strip().splitlines()
+    try:
+        return json.loads(lines[-1])
+    except (IndexError, ValueError):
+        found = f"its last line of output is {lines[-1][:80]!r}" if lines else "it printed nothing"
+        raise Unsupported(f"cannot read the benchmark listing of {what}: {found}, not the JSON "
+                          "the listing ends with") from None
 
 
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:

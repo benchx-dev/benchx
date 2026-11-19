@@ -64,6 +64,8 @@ def profile_projection(profile: str, label: str | None = None, parameter: str | 
     if profile == "environments":
         if not label:
             raise CompareError("the environments profile needs the label that names the sides")
+        if "/" in label:  # a path segment of the axis (projection.with_axis_first would raise ProjectionError)
+            raise CompareError(f"label {label!r}: a label name must not contain '/'")
         projection = projection.with_axis_first(f"/provenance/labels/{label}")
     if profile == "variants":
         if not parameter:
