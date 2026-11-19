@@ -39,6 +39,7 @@ nav = [
     { "Comparator" = "design/comparator.md" },
     { "Prototype scope" = "design/prototype-scope.md" },
     { "Prototype design" = "design/prototype-design.md" },
+    { "Result in Parquet" = "design/measurement-result-parquet.md" },
   ] },
   { "Schemas" = [
     { "Overview" = "schemas/index.md" },
