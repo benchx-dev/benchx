@@ -48,14 +48,17 @@ import math
 import shutil
 import statistics
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-from .. import snapshot
+from .. import log, snapshot
 from . import benchx_params, pyperf
 from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
                    kill_group, stop_group)
+
+# asv's skip warnings are shown to the user, as `bx` shows its other messages (plan §4): the one
+# library module that makes console messages, until `list_cases` returns them as data.
+say = log.console(__name__)
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -192,7 +195,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
     listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
-        print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
+        say.warning(f"asv: skipped module {failure['module']}: {failure['error']}")
     cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
@@ -207,8 +210,8 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
             continue
         scope = info["declared"].get("setup_scope", "call")
         if scope not in SETUP_SCOPES:
-            print(f"asv: skipped {info['name']}: setup_scope must be one of {', '.join(map(repr, SETUP_SCOPES))}, "
-                  f"not {scope!r}", file=sys.stderr)
+            say.warning(f"asv: skipped {info['name']}: setup_scope must be one of "
+                        f"{', '.join(map(repr, SETUP_SCOPES))}, not {scope!r}")
             continue
         runnable["benchmarks"][info["name"]] = info
         for case, target in selected:
@@ -229,7 +232,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         raise no_cases(runnable["benchmark_dir"], case_filter,
                        {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
-        print(f"asv: not run (only time benchmarks map to wall-time): {not_run}", file=sys.stderr)
+        say.warning(f"asv: not run (only time benchmarks map to wall-time): {not_run}")
     return cases
 
 

@@ -98,6 +98,17 @@
         "k": { "type": "number", "exclusiveMinimum": 0 },
         "min_rounds": { "type": "integer", "minimum": 1 }
       }
+    },
+    "logging": {
+      "description": "Diagnostics: false (off), true (to stderr), or a file to append to, relative to this file's directory. {out} in the path is the run's output folder and {root} the project root, as in collectors. Default: {out}/bx.log.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "string", "minLength": 1, "not": { "pattern": "\\.json$" } }
+      ]
+    },
+    "log_level": {
+      "description": "Level of what the log keeps: debug (the default), info, warning or error.",
+      "enum": ["debug", "info", "warning", "error"]
     }
   }
 }

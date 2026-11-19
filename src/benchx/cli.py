@@ -7,17 +7,20 @@ the file, and the file over a built-in default.
 """
 
 import argparse
+import dataclasses
 import json
+import logging
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from typing import get_args
 
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import core, harnesses, orders, runner, session, snapshot
+from . import core, harnesses, log, orders, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
 from .core.validation import Kind
@@ -27,11 +30,18 @@ EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
 EXIT_REFUSED = 2  # the command was refused or could not be carried out
 ASV_CASE_TIMEOUT_S = 1800
+VERBOSE_ENV = "BENCHX_VERBOSE"
+LOG_LEVEL_ENV = "BENCHX_LOG_LEVEL"
+DEFAULT_LOG = "{out}/bx.log"
+OUTCOMES = {EXIT_OK: "ok", EXIT_INVALID: "invalid", EXIT_REFUSED: "refused"}
+
+say = log.console(__name__)  # what `bx` shows its user: console messages (logging_plan.md §4)
+logger = logging.getLogger(__name__)
 
 
 def _refused(error: runner.Refused) -> int:
     for problem in error.problems:
-        print(f"refused: {problem}", file=sys.stderr)
+        say.error(f"refused: {problem}")
     return EXIT_REFUSED
 
 
@@ -41,10 +51,126 @@ def _load(command):
     try:
         cfg = config_mod.load()
     except config_mod.ConfigError as e:
-        print(f"bx {command}: error: {e}", file=sys.stderr)
+        say.error(f"bx {command}: error: {e}")
         return None
-    snapshot.ignore(cfg.store_path, cfg.results_dir)
+    snapshot.ignore(*cfg.own_paths)
     return cfg
+
+
+def _source_text(source, env=None) -> str:
+    return f"environment {env}" if source == "env" else source
+
+
+def _verbosity(args) -> tuple[int, str]:
+    """How much the terminal shows, -2 (`-qq`) to 2 (`-vv`), and where that came from: the net
+    count of `-v` and `-q`, else $BENCHX_VERBOSE, else 0. UsageError for a bad variable."""
+    if args.verbose is not None or args.quiet is not None:
+        return max(-2, min(2, (args.verbose or 0) - (args.quiet or 0))), "flag"
+    text = os.environ.get(VERBOSE_ENV)
+    if text:
+        try:
+            value = int(text)
+        except ValueError:
+            value = None
+        if value is None or not -2 <= value <= 2:
+            raise UsageError(f"{VERBOSE_ENV}={text}: not a whole number from -2 to 2")
+        return value, _source_text("env", VERBOSE_ENV)
+    return 0, "default"
+
+
+def _log_level(cfg, args) -> tuple[int, str]:
+    """The level the log keeps, and where it came from: the flag, $BENCHX_LOG_LEVEL, the file's
+    `log_level`, else debug."""
+    value, source = cfg.pick_with_source(args.log_level, cfg.data.get("log_level"), "debug", flag="--log-level",
+                                         key="log_level", env=LOG_LEVEL_ENV)
+    if value.lower() not in log.LEVELS:
+        origin = f"{LOG_LEVEL_ENV}={value}" if source == "env" else f"log_level in {cfg.path}"
+        raise UsageError(f"{origin}: not one of {', '.join(log.LEVELS)}")
+    return log.LEVELS[value.lower()], _source_text(source, LOG_LEVEL_ENV)
+
+
+def _log_setting(cfg, args, out, command):
+    """What the switch says for this command, and where that came from: False (off), True
+    (stderr) or the resolved log file. A command with no output folder (`out` None) logs only
+    when a flag asks (plan §3, R12): the file, the environment and the default are ignored."""
+    setting, source = cfg.pick_with_source(args.log, cfg.data.get("logging"), DEFAULT_LOG, flag="--log",
+                                           key="logging")
+    if out is None and source != "flag":
+        return False, source
+    if isinstance(setting, str):
+        setting = setting.replace("{root}", str(cfg.root))
+        if "{out}" in setting:
+            if out is None:
+                raise UsageError(f"--log-file {setting}: bx {command} has no output folder")
+            setting = Path(setting.replace("{out}", str(out))).resolve()
+        elif source == "file":
+            setting = cfg._path(setting).resolve()  # relative to the project root, as paths.store is
+        else:
+            setting = Path(setting).expanduser().resolve()  # a flag: relative to the working directory
+    return setting, source
+
+
+def _check_log_file(path, out, origin):
+    """UsageError unless `path` can be appended to. benchx creates only its own output folder."""
+    if str(path).endswith(".json"):
+        raise UsageError(f"{origin}: a log file must not end in .json")
+    try:
+        if out is not None and path.is_relative_to(Path(out).resolve()):
+            Path(out).mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            raise UsageError(f"{origin}: {path} is a directory")
+        path.open("a").close()
+    except OSError as e:
+        raise UsageError(f"{origin}: cannot open {path}: {e}") from None
+
+
+def _start_logging(cfg, args, out, command, *, read_config=True, lenient=False):
+    """Turn the log on for this command: the config with `log_file` set, or None (after saying
+    why) when the setting is unusable. Called once the command has validated its own flags and
+    values, so a refusal for those leaves no folder (plan R1), and before it calls `session`.
+    `out` is the command's output folder, or None. `lenient`: a log that cannot be opened is
+    skipped without a word, unless a flag named it (a read must not need to write)."""
+    try:
+        if args.log is False and args.log_level is not None:
+            raise UsageError("--no-log with --log-level: there is nothing to set a level on")
+        level, level_source = _log_level(cfg, args)
+        setting, source = _log_setting(cfg, args, out, command)
+        if isinstance(setting, Path):
+            origin = {"flag": f"--log-file {args.log}", "file": f"logging in {cfg.path}"}.get(source, "the default log")
+            try:
+                _check_log_file(setting, out, origin)
+            except UsageError:
+                if not (lenient and source != "flag"):
+                    raise
+                setting = False
+    except UsageError as e:
+        say.error(f"bx {command}: error: {e}")
+        return None
+    log.configure(setting, level=level, argv=args.argv)
+    cfg = dataclasses.replace(cfg, log_file=setting if isinstance(setting, Path) else None)
+    snapshot.ignore(*cfg.own_paths, *([args.out] if getattr(args, "out", None) else []))  # the log is not the tree
+    if read_config:
+        _log_config(cfg)
+    shown = "off" if setting is False else "stderr" if setting is True else str(setting)
+    logger.debug("logging: %s (%s); log level: %s (%s); verbosity: %d (%s)", shown, _source_text(source),
+                 logging.getLevelName(level).lower(), level_source, args.verbosity, args.verbosity_source)
+    return cfg
+
+
+def _log_config(cfg):
+    """Which config file was used, and where the store and the results are (INFO, once)."""
+    found = cfg.path or f"none found from {Path.cwd()} upward"
+    home = ""
+    if os.environ.get(config_mod.HOME_ENV):
+        home = f" (set by ${config_mod.HOME_ENV}" + (", which hides paths.store in the file)" if "store" in cfg.section("paths") else ")")
+    logger.info("config file: %s; project root %s; store %s%s; results %s", found, cfg.root, cfg.store_path, home,
+                cfg.results_dir)
+
+
+def _log_settings(sources):
+    """The settings a command resolved, each with its value and where it came from (DEBUG)."""
+    for name, value, source in sources:
+        logger.debug("setting %s: %s (%s)", name, value, source)
 
 
 def cmd_run(args):
@@ -54,7 +180,11 @@ def cmd_run(args):
     if (cfg := _load("run")) is None:
         return EXIT_REFUSED
     out = Path(args.out) if args.out else cfg.results_dir
-    snapshot.ignore(cfg.store_path, cfg.results_dir, out)
+    # `bx run` has no check phase; the log goes in --out, and nowhere without it (the results
+    # directory is shared by every run).
+    if (cfg := _start_logging(cfg, args, Path(args.out) if args.out else None, "run")) is None:
+        return EXIT_REFUSED
+    snapshot.ignore(*cfg.own_paths, out)
     try:
         summary = runner.run(args.order, out, allow_collectors=args.allow_collectors)
     except runner.Refused as e:
@@ -131,41 +261,80 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     else the file, else its default (config.Config.pick); ConfigError when a
     required one has none. The file's adapter block belongs to the adapter it
     names and to the others of its family (pyperf's serves asv), so naming an
-    adapter of another family is refused."""
+    adapter of another family is refused. `sources` lists each setting with where it came
+    from, for the log (the caller pops it before the rest goes to `session`)."""
     block = cfg.adapter
     given = forced_adapter or args.adapter
     if given and block.get("name") and not harnesses.same_family(given, block["name"]):
         raise config_mod.ConfigError(f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
                                      "and its precision belongs to that harness and the ones that share it "
                                      "(pyperf and asv)")
+    sources = []
     quantities = config_mod.parse_quantities(args.quantity) if args.quantity else block.get("quantities", ["wall-time"])
+    sources.append(("quantities", ", ".join(quantities),
+                    "flag" if args.quantity else "file" if "quantities" in block else "default"))
     if args.project and args.no_project:
         raise UsageError("give --project or --no-project, not both")
     timeouts = cfg.section("timeouts")
-    adapter = cfg.pick(given, block.get("name"), flag="--adapter", key="adapter.name")
+    adapter, adapter_source = cfg.pick_with_source(given, block.get("name"), flag="--adapter", key="adapter.name")
+    named = block.get("name")
+    if given and named and given != named:  # the file's block serves another adapter of its family
+        adapter_source += f"; the file says {named}, same family"
+    sources.append(("adapter", adapter, adapter_source))
+    suite, suite_source = cfg.pick_with_source(forced_suite or args.suite, block.get("suite"), flag="--suite",
+                                               key="adapter.suite")
+    sources.append(("suite", suite, suite_source))
+    from_flag, from_file = _environment(args.env), cfg.section("environment_variables")
+    environment_variables = {**from_file, **from_flag}
+    where = [f"-e: {', '.join(sorted(from_flag))}" if from_flag else "", f"file: {', '.join(sorted(from_file))}" if from_file else ""]
+    if overrode := sorted(set(from_flag) & set(from_file)):
+        where.append(f"-e overrode the file's {', '.join(overrode)}")
+    sources.append(("environment_variables", "names only", "; ".join(w for w in where if w) or "default: none"))
+    if args.no_project:
+        project = None
+        sources.append(("project", "none: results are filed as local/HOST", "flag --no-project"))
+    else:
+        project, project_source = cfg.pick_with_source(args.project, cfg.data.get("project"), None, flag="--project",
+                                                       key="project")
+        sources.append(("project", project or "none: results are filed as local/HOST", project_source))
+    source_uri, uri_source = cfg.pick_with_source(args.source_uri or None, cfg.section("source").get("uri"), None,
+                                                  flag="--source-uri", key="source.uri")
+    sources.append(("source.uri", source_uri or "the checkout's origin remote", uri_source))
+    case_s, case_source = cfg.pick_with_source(getattr(args, "case_timeout", None), timeouts.get("case_s"),
+                                               ASV_CASE_TIMEOUT_S if adapter == "asv" else orders.CASE_TIMEOUT_S,
+                                               flag="--case-timeout", key="timeouts.case_s")
+    if case_source == "default":
+        case_source = "default for asv, which times every round of a benchmark" if adapter == "asv" else "default"
+    sources.append(("timeouts.case_s", f"{case_s:g} s", case_source))
+    order_s = timeouts.get("order_s", orders.ORDER_TIMEOUT_S)
+    sources.append(("timeouts.order_s", f"{order_s:g} s", "file" if "order_s" in timeouts else "default"))
+    flagged = [name for name in harnesses.FLAG_NAMES if getattr(args, name) is not None]
+    precision_file = sorted(block.get("precision") or {})
+    sources.append(("precision", f"flags {', '.join(flagged) or 'none'}; file {', '.join(precision_file) or 'none'}",
+                    "flag over file over the harness's defaults"))
+    if args.filter:
+        sources.append(("filter", args.filter, "flag"))
     return {
         "adapter": adapter,
-        "suite": cfg.pick(forced_suite or args.suite, block.get("suite"), flag="--suite", key="adapter.suite"),
+        "suite": suite,
         "flags": {name: getattr(args, name) for name in harnesses.FLAG_NAMES},
         "file_precision": block.get("precision"),
         "quantities": quantities,
         "filter": args.filter,
-        "environment_variables": {**cfg.section("environment_variables"), **_environment(args.env)},
-        "project": None if args.no_project else cfg.pick(args.project, cfg.data.get("project"), None,
-                                                          flag="--project", key="project"),
+        "environment_variables": environment_variables,
+        "project": project,
         "run_key": args.run_key,
         "out": args.out,
-        "source_uri": args.source_uri or cfg.section("source").get("uri"),
+        "source_uri": source_uri,
         "build": not args.no_build,
         "provider": cfg.provider,
         "collectors": cfg.collectors,
         "results_dir": cfg.results_dir,
         # An asv case is every round of its benchmark, each bounded by the benchmark's own timeout.
-        "case_s": cfg.pick(getattr(args, "case_timeout", None), timeouts.get("case_s"),
-                           ASV_CASE_TIMEOUT_S if adapter == "asv" else orders.CASE_TIMEOUT_S,
-                           flag="--case-timeout", key="timeouts.case_s"),
-        "order_s": timeouts.get("order_s", orders.ORDER_TIMEOUT_S),
+        "case_s": case_s,
+        "order_s": order_s,
         "config_path": cfg.path,
+        "sources": sources,
     }
 
 
@@ -187,20 +356,29 @@ def cmd_bench(args):
         target, forced_suite, forced_adapter = _bench_target(args)
         settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
         settings["labels"], settings["round_"], settings["slot"] = _session_position(args)
+        session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
+                              settings["quantities"])
         _needs_provider(cfg, target)
         # A name may carry `(arguments)` where the harness has parametrized benchmarks.
         names = harnesses.exact_filter(args.functions, harnesses.get(settings["adapter"]).NAMES_TAKE_ARGUMENTS)
     except (UsageError, config_mod.ConfigError, bench_mod.SessionError) as e:
-        print(f"bx bench: error: {e}", file=sys.stderr)
+        say.error(f"bx bench: error: {e}")
         return EXIT_REFUSED
+    # The run key and the output folder are settled before any target is resolved (a provider
+    # may build), so the log can live in the folder from the start.
+    run_key = args.run_key or orders.default_run_key("bench")
+    out = Path(args.out) if args.out else session.run_directory(cfg.results_dir, run_key)
+    if (cfg := _start_logging(cfg, args, out, "bench")) is None:
+        return EXIT_REFUSED
+    _log_settings(settings.pop("sources"))
+    settings["run_key"], settings["out"] = run_key, out
     settings["filter"] = names or settings["filter"]
-    snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
+    snapshot.ignore(*cfg.own_paths, *([args.out] if args.out else []))
     store = None if args.no_ingest else Store(cfg.store_path)
     try:
-        summary = session.bench_target(target, store=store, progress=lambda message: print(message, file=sys.stderr),
-                                       **settings)
+        summary = session.bench_target(target, store=store, progress=say.info, **settings)
     except (session.SessionError, config_mod.ConfigError) as e:
-        print(f"bx bench: error: {e}", file=sys.stderr)
+        say.error(f"bx bench: error: {e}")
         return EXIT_REFUSED
     except runner.Refused as e:
         return _refused(e)
@@ -217,19 +395,45 @@ def cmd_bench(args):
 
 def cmd_config(args):
     if args.action == "init":
+        # `init` does not read the file: it resolves the logging settings from the flags and the environment
+        if _start_logging(_no_config(), args, None, "config", read_config=False) is None:
+            return EXIT_REFUSED
         try:
             path = config_mod.write_template(args.dir, args.adapter)
         except config_mod.ConfigError as e:
-            print(f"bx config: error: {e}", file=sys.stderr)
+            say.error(f"bx config: error: {e}")
             return EXIT_REFUSED
         print(f"wrote {path}")
         return EXIT_OK
     if (cfg := _load("config")) is None:
         return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "config")) is None:
+        return EXIT_REFUSED
     print(f"file  {cfg.where}\nroot  {cfg.root}")
-    for key, value, source in _resolved(cfg):
+    for key, value, source in (*_resolved(cfg), *_logging_rows(cfg, args)):
         print(f"{key:<26} {value}  ({source})")
     return EXIT_OK
+
+
+def _no_config() -> config_mod.Config:
+    """The configuration of a command that does not read the file: the working directory, no data."""
+    return config_mod.Config(root=Path.cwd(), path=None, data={})
+
+
+def _logging_rows(cfg, args):
+    """What `bx config show` adds for the log: the switch, the level and the verbosity, each with
+    where it came from (a flag, an environment variable, the file or the default)."""
+    setting, source = cfg.pick_with_source(args.log, cfg.data.get("logging"), DEFAULT_LOG, flag="--log", key="logging")
+    if isinstance(setting, str):
+        setting = setting.replace("{root}", str(cfg.root))
+    if isinstance(setting, str) and "{out}" not in setting:
+        setting = str(cfg._path(setting).resolve() if source == "file" else Path(setting).expanduser().resolve())
+    else:
+        setting = json.dumps(setting)
+    yield "logging", setting, _source_text(source)
+    level, level_source = _log_level(cfg, args)
+    yield "log level", logging.getLevelName(level).lower(), level_source
+    yield "verbosity", str(args.verbosity), args.verbosity_source
 
 
 def _resolved(cfg):
@@ -264,7 +468,7 @@ def _resolved(cfg):
 
 def _report(outcome):
     for r in outcome["rejected"]:
-        print(f"  rejected {r['document']}: {r['code']} — {r['message']}", file=sys.stderr)
+        say.warning(f"  rejected {r['document']}: {r['code']} — {r['message']}")
     counts = f"ingested {outcome['ingested']}, duplicate {outcome['duplicate']}"
     if outcome["rejected"]:
         codes = sorted({r["code"] for r in outcome["rejected"]})
@@ -276,11 +480,15 @@ def _report(outcome):
 def cmd_ingest(args):
     if (cfg := _load("ingest")) is None:
         return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "ingest")) is None:
+        return EXIT_REFUSED
     return _report(Store(cfg.store_path).ingest_paths(args.paths))
 
 
 def cmd_series(args):
     if (cfg := _load("series")) is None:
+        return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "series")) is None:
         return EXIT_REFUSED
     for s in Store(cfg.store_path).series(args.workload, args.quantity):
         estimator = json.loads(s["estimator"])["method_version"]
@@ -291,6 +499,8 @@ def cmd_series(args):
 
 def cmd_history(args):
     if (cfg := _load("history")) is None:
+        return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "history")) is None:
         return EXIT_REFUSED
     points = Store(cfg.store_path).history(args.series)
     print("revision order unavailable without a revision graph; listed by measurement start")
@@ -304,6 +514,8 @@ def cmd_history(args):
 
 def cmd_head(args):
     if (cfg := _load("head")) is None:
+        return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "head")) is None:
         return EXIT_REFUSED
     store = Store(cfg.store_path)
     total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
@@ -337,14 +549,16 @@ def cmd_target(args):
     build (the provider's own tools do that, never benchx)."""
     if (cfg := _load("target")) is None:
         return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "target")) is None:
+        return EXIT_REFUSED
     try:
         _needs_provider(cfg, args.target)
         description = target_mod.resolve(args.target, operation=args.operation, provider=cfg.provider)
     except (target_mod.TargetError, config_mod.ConfigError) as e:
-        print(f"cannot {args.operation} {args.target}: {e}", file=sys.stderr)
+        say.error(f"cannot {args.operation} {args.target}: {e}")
         return EXIT_REFUSED
     if description is None:
-        print(f"{args.target} has no description: no {target_mod.SIDECAR} in it", file=sys.stderr)
+        say.warning(f"{args.target} has no description: no {target_mod.SIDECAR} in it")
         return EXIT_INVALID
     print(json.dumps(description, indent=1))
     return EXIT_OK
@@ -391,25 +605,29 @@ def cmd_compare(args):
     if (cfg := _load("compare")) is None:
         return EXIT_REFUSED
     try:
-        policy = _policy(cfg, args)
+        policy, sources = _policy(cfg, args)
         mode = _mode(args, policy["profile"])
         _profile_flags(args, policy["profile"])
         _view_flags(args)
     except (UsageError, config_mod.ConfigError) as e:
-        print(f"bx compare: error: {e}", file=sys.stderr)
+        say.error(f"bx compare: error: {e}")
         return EXIT_REFUSED
-    return _measure(cfg, args, policy) if mode == "measure" else _read(cfg, args, policy)
+    sources.append(("mode", mode, "inferred: " + ("targets were given" if mode == "measure" else "--run was given")))
+    return _measure(cfg, args, policy, sources) if mode == "measure" else _read(cfg, args, policy, sources)
 
 
-def _policy(cfg, args) -> dict:
-    """The comparison's own settings: the command line, else `compare` in the file, else the default."""
+def _policy(cfg, args) -> tuple[dict, list]:
+    """The comparison's own settings: the command line, else `compare` in the file, else the default;
+    and each with where it came from, for the log."""
     compare = cfg.section("compare")
-    return {
-        "profile": cfg.pick(args.profile, compare.get("profile"), flag="--profile", key="compare.profile"),
-        "k": cfg.pick(args.k, compare.get("k"), 3.0, flag="--k", key="compare.k"),
-        "min_rounds": cfg.pick(args.min_rounds, compare.get("min_rounds"), 3, flag="--min-rounds",
-                               key="compare.min_rounds"),
-    }
+    profile, profile_source = cfg.pick_with_source(args.profile, compare.get("profile"), flag="--profile",
+                                                   key="compare.profile")
+    k, k_source = cfg.pick_with_source(args.k, compare.get("k"), 3.0, flag="--k", key="compare.k")
+    min_rounds, min_source = cfg.pick_with_source(args.min_rounds, compare.get("min_rounds"), 3, flag="--min-rounds",
+                                                  key="compare.min_rounds")
+    return ({"profile": profile, "k": k, "min_rounds": min_rounds},
+            [("compare.profile", profile, profile_source), ("compare.k", k, k_source),
+             ("compare.min_rounds", min_rounds, min_source)])
 
 
 def _profile_flags(args, profile):
@@ -430,7 +648,13 @@ def _view_flags(args):
         raise UsageError("--all goes with --tables")
 
 
-def _read(cfg, args, policy):
+def _read(cfg, args, policy, sources):
+    # A read stores nothing, so its records join the run's own log when the run folder exists (plan R29);
+    # and a log that cannot be opened there is skipped, not refused, unless a flag named it.
+    run_dir = session.run_directory(cfg.results_dir, args.run)
+    if (cfg := _start_logging(cfg, args, run_dir if run_dir.is_dir() else None, "compare", lenient=True)) is None:
+        return EXIT_REFUSED
+    _log_settings(sources)
     if args.results:
         with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
             store = Store(Path(tmp) / "store.parquet")
@@ -441,31 +665,46 @@ def _read(cfg, args, policy):
     return _compare(Store(cfg.store_path), args, policy)
 
 
-def _measure(cfg, args, policy):
+def _measure(cfg, args, policy, sources):
     """The workbench's session loop: run both sides, deliver, compare."""
     store = Store(cfg.store_path)
-    print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
-    try:
+    say.info(f"{store.path}")  # stderr, so --json output stays clean
+    try:  # the check phase: nothing has run, and no folder exists yet
         settings = _common(cfg, args)
+        session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
+                              settings["quantities"])
         _needs_provider(cfg, *args.targets)
-        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
-        rounds = cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds", key="compare.rounds")
-        progress = lambda message: print(message, file=sys.stderr)  # noqa: E731
+        rounds, rounds_source = cfg.pick_with_source(args.rounds, cfg.section("compare").get("rounds"),
+                                                     flag="--rounds", key="compare.rounds")
+        label = session.parse_label(args.label) if args.label else None
+    except (UsageError, config_mod.ConfigError) as e:
+        say.error(f"bx compare: error: {e}")
+        return EXIT_REFUSED
+    except session.SessionError as e:
+        say.error(f"cannot compare: {e}")
+        return EXIT_REFUSED
+    run_key = args.run_key or orders.default_run_key("compare")
+    out = Path(args.out) if args.out else session.run_directory(cfg.results_dir, run_key)
+    if (cfg := _start_logging(cfg, args, out, "compare")) is None:
+        return EXIT_REFUSED
+    _log_settings([*sources, *settings.pop("sources"), ("compare.rounds", rounds, rounds_source)])
+    settings["run_key"], settings["out"] = run_key, out
+    snapshot.ignore(*cfg.own_paths, *([args.out] if args.out else []))
+    try:
         if policy["profile"] == "variants":
             doc = session.compare_variants(
                 *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
-                progress=progress, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
+                progress=say.info, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
         else:
-            label = session.parse_label(args.label) if args.label else None
-            doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=progress,
+            doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=say.info,
                                           **policy, **settings)
     except runner.Refused as e:
         return _refused(e)
     except (UsageError, config_mod.ConfigError) as e:
-        print(f"bx compare: error: {e}", file=sys.stderr)
+        say.error(f"bx compare: error: {e}")
         return EXIT_REFUSED
     except (session.SessionError, compare_mod.CompareError) as e:
-        print(f"cannot compare: {e}", file=sys.stderr)
+        say.error(f"cannot compare: {e}")
         return EXIT_REFUSED
     _show(doc, args, store.documents(doc["run_key"]) if args.tables else None)
     return EXIT_OK
@@ -488,25 +727,28 @@ def _compare(store, args, policy):
         if policy["profile"] == "variants":
             parameter = args.vary or compare_mod.infer_parameter(documents, args.run)
             if not args.vary:  # the choice is recorded in the document's `varying`, and said here too
-                print(f"varying: {parameter} (the only parameter)", file=sys.stderr)
+                say.info(f"varying: {parameter} (the only parameter)")
         doc = compare_mod.compare(documents, run_key=args.run, profile=policy["profile"],
                                   baseline=args.baseline, label=args.label, parameter=parameter, k=policy["k"],
                                   min_rounds=policy["min_rounds"])
     except compare_mod.CompareError as e:
-        print(f"cannot compare: {e}", file=sys.stderr)
+        say.error(f"cannot compare: {e}")
         return EXIT_REFUSED
     _show(doc, args, documents)
     return EXIT_OK
 
 
 def cmd_validate(args):
+    # `validate` does not read the config file: the logging settings come from the flags and the environment.
+    if _start_logging(_no_config(), args, None, "validate", read_config=False) is None:
+        return EXIT_REFUSED
     valid = 0
     for path in args.files:
         inspection = core.inspect(path, args.kind)
         for error in inspection.errors:
-            print(f"{path}: {error}", file=sys.stderr)
+            say.warning(f"{path}: {error}")
         valid += inspection.valid
-    print(f"{valid}/{len(args.files)} valid", file=sys.stderr)
+    say.info(f"{valid}/{len(args.files)} valid")
     return EXIT_OK if valid == len(args.files) else EXIT_INVALID
 
 
@@ -545,11 +787,34 @@ def _add_target_options(parser, command):
     parser.add_argument("--source-uri", help="the source's URI (default: source.uri, else the checkout's origin remote)")
 
 
+def _logging_options() -> argparse.ArgumentParser:
+    """The options every subcommand takes: where the log goes, how much it keeps, and how much
+    the terminal shows (logging_plan.md §3). The three switch flags share one destination, so
+    `--no-log`, `--log` and `--log-file PATH` exclude each other. None means not given, so
+    any flag beats the environment and the file."""
+    parent = argparse.ArgumentParser(add_help=False)
+    group = parent.add_mutually_exclusive_group()
+    group.add_argument("--no-log", dest="log", action="store_const", const=False, default=None,
+                       help="write no log (the default is bx.log in the run's output folder)")
+    group.add_argument("--log", dest="log", action="store_const", const=True, default=None,
+                       help="send the whole log to stderr instead of a file")
+    group.add_argument("--log-file", dest="log", metavar="PATH",
+                       help="append the log to PATH ({out} is the run's output folder, {root} the project root)")
+    parent.add_argument("--log-level", type=str.lower, choices=list(log.LEVELS), metavar="LEVEL",
+                        help=f"what the log keeps: {', '.join(log.LEVELS)} (default debug; ${LOG_LEVEL_ENV})")
+    parent.add_argument("-v", "--verbose", action="count", default=None,
+                        help=f"show more on the terminal: -v every INFO record, -vv DEBUG too (${VERBOSE_ENV})")
+    parent.add_argument("-q", "--quiet", action="count", default=None,
+                        help="show less on the terminal: -q warnings and errors, -qq errors only")
+    return parent
+
+
 def main(argv=None):
+    options = _logging_options()
     ap = argparse.ArgumentParser(prog="bx", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("run", help="execute one work order (schemas/work-order/0.1.0)")
+    p = sub.add_parser("run", parents=[options], help="execute one work order (schemas/work-order/0.1.0)")
     p.add_argument("order")
     p.add_argument("--out", help="directory for result files (default ./results)")
     p.add_argument("--no-ingest", action="store_true",
@@ -558,7 +823,7 @@ def main(argv=None):
                    help="run the order's context collectors: commands the order names (otherwise refused)")
     p.set_defaults(fn=cmd_run)
 
-    p = sub.add_parser("bench", help="benchmark one target: the single-target form of bx compare",
+    p = sub.add_parser("bench", parents=[options], help="benchmark one target: the single-target form of bx compare",
                        description="bx bench TARGET --suite S [FUNCTION ...]: run one target once and print a table "
                                    "per case. TARGET and the options are those of bx compare: @CONFIG[=SOURCE_REF] "
                                    "(the project's target provider) or a path, which the harness reads (pyperf: a "
@@ -596,7 +861,7 @@ def main(argv=None):
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
-    p = sub.add_parser("config", help="write or show benchx.conf.json")
+    p = sub.add_parser("config", parents=[options], help="write or show benchx.conf.json")
     p.add_argument("action", choices=["init", "show"],
                    help="init: write a benchx.conf.json stating a harness's defaults; show: what the file and the defaults give")
     p.add_argument("--dir", default=".", help="init: where to write benchx.conf.json (default .)")
@@ -604,20 +869,20 @@ def main(argv=None):
                    help="init: the harness (default %(default)s)")
     p.set_defaults(fn=cmd_config)
 
-    p = sub.add_parser("ingest", help="sweep result files and work orders into the local store")
+    p = sub.add_parser("ingest", parents=[options], help="sweep result files and work orders into the local store")
     p.add_argument("paths", nargs="+")
     p.set_defaults(fn=cmd_ingest)
 
-    p = sub.add_parser("series", help="list series")
+    p = sub.add_parser("series", parents=[options], help="list series")
     p.add_argument("--workload")
     p.add_argument("--quantity")
     p.set_defaults(fn=cmd_series)
 
-    p = sub.add_parser("history", help="one series' points (a query; history mode is deferred)")
+    p = sub.add_parser("history", parents=[options], help="one series' points (a query; history mode is deferred)")
     p.add_argument("series", help="series fingerprint or prefix")
     p.set_defaults(fn=cmd_history)
 
-    p = sub.add_parser("head", help="the latest results in the store, newest first")
+    p = sub.add_parser("head", parents=[options], help="the latest results in the store, newest first")
     p.add_argument("-n", type=int, default=10, help="how many (default 10)")
     p.add_argument("--project", help="only this store project's results (e.g. numpy, local/HOST)")
     p.add_argument("--workload", help="only results whose benchmark name contains this")
@@ -627,7 +892,7 @@ def main(argv=None):
                        help="the `bx bench` table (median, mean ± sd, range, n, status) with revision, run and project")
     p.set_defaults(fn=cmd_head)
 
-    p = sub.add_parser("target", help="ask for a target's description (schemas/target-description/0.1.0)",
+    p = sub.add_parser("target", parents=[options], help="ask for a target's description (schemas/target-description/0.1.0)",
                        description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
                                    "benchx.conf.json, or a build directory holding .benchx-target.json. "
                                    "describe only reports a target that exists; prepare may build it.")
@@ -635,7 +900,7 @@ def main(argv=None):
     p.add_argument("target")
     p.set_defaults(fn=cmd_target)
 
-    p = sub.add_parser("compare", help="compare two sides: read mode (--run) or measure mode (two targets)",
+    p = sub.add_parser("compare", parents=[options], help="compare two sides: read mode (--run) or measure mode (two targets)",
                        description="Read mode compares results already measured: --run KEY --baseline VALUE. "
                                    "Measure mode runs two prepared targets, alternating them over "
                                    "--rounds rounds, delivers the results to the local store, then compares: "
@@ -673,7 +938,7 @@ def main(argv=None):
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
-    p = sub.add_parser("validate", help="check documents against their schema and rules",
+    p = sub.add_parser("validate", parents=[options], help="check documents against their schema and rules",
                        description="Report every problem in each document, or nothing when all are valid.")
     p.add_argument("files", type=Path, nargs="+")
     p.add_argument("--kind", choices=get_args(Kind), default="measurement-result",
@@ -687,7 +952,35 @@ def main(argv=None):
         args.functions += extra
     elif extra:
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
-    return args.fn(args)
+    args.argv = list(sys.argv[1:] if argv is None else argv)  # the header records the command as given
+    try:
+        args.verbosity, args.verbosity_source = _verbosity(args)
+    except UsageError as e:
+        log.start_console(0)
+        say.error(f"bx {args.cmd}: error: {e}")
+        log.stop()
+        return EXIT_REFUSED
+    log.start_console(args.verbosity)  # first, so that a broken config file is still reported
+    outcome, code = "crashed", None
+    try:
+        code = args.fn(args)
+        outcome = OUTCOMES.get(code, "crashed")
+        return code
+    except SystemExit as e:  # argparse, or a command that exits: let it through
+        code = e.code if isinstance(e.code, int) else 0 if e.code is None else 1
+        outcome = OUTCOMES.get(code, "crashed")
+        raise
+    except KeyboardInterrupt:
+        logger.warning("interrupted")
+        outcome = "interrupted"
+        raise  # Python prints its traceback and exits by the signal, as it does without a log
+    except Exception:  # what Python's own handler would print, and its exit status
+        say.error(traceback.format_exc().rstrip("\n"))
+        code = 1
+        return code
+    finally:
+        log.footer(outcome, code)
+        log.stop()
 
 
 if __name__ == "__main__":

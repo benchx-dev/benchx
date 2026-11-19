@@ -1,0 +1,226 @@
+"""benchx's diagnostics: what `bx` decided, warned about and failed at, kept in a log.
+
+    logging_plan.md
+
+Every module logs through the standard library: `log = logging.getLogger(__name__)`, so the
+logger names are `benchx.runner`, `benchx.cli`, and so on. `benchx/__init__.py` gives the
+`benchx` logger a `NullHandler`: a library caller sees nothing unless it configures logging
+itself. The `bx` command installs two kinds of handler (cli.main):
+
+* the console handler (`start_console`), which writes to stderr exactly what `print` wrote
+  before logging existed: the bare message, for the records that carry `console=True` (the
+  messages `bx` shows its user, made with `console()`), or for every record under `-v`;
+* a file, or with `--log` stderr, for the whole log (`configure`), in one line format.
+
+Nothing here changes what a command prints at the default verbosity, what it stores, or its
+exit status (plan §7, rule 1).
+"""
+
+import datetime
+import logging
+import os
+import shlex
+import sys
+import time
+from pathlib import Path
+
+PACKAGE = "benchx"
+LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR}
+# What the terminal shows at each verbosity (-qq to -vv): its level, and whether it shows only
+# the messages meant for the user (console=True) or every record.
+_CONSOLE = {-2: (logging.ERROR, True), -1: (logging.WARNING, True), 0: (logging.INFO, True),
+            1: (logging.INFO, False), 2: (logging.DEBUG, False)}
+# The log's own line: UTC to the millisecond, as provenance.started_at and ended_at are written,
+# then the process id, so two `bx` processes given one file stay apart.
+_FORMAT = "%(asctime)s %(process)d %(name)s %(levelname)s %(message)s"
+_CONTINUATION = "    "
+
+
+class _Stderr(logging.StreamHandler):
+    """A stderr handler that finds `sys.stderr` each time it writes. The tests call `cli.main`
+    many times in one process under `capsys`; a stream taken once would be stale."""
+
+    def __init__(self):
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+
+class _Full(logging.Formatter):
+    """`2026-11-02T22:36:12.345Z 48211 benchx.runner INFO message`. A message of several lines
+    keeps the prefix on the first and indents the others, so that a reader that goes by line
+    (`grep` for a pid, `sort`) loses none of it (plan R18)."""
+
+    def __init__(self):
+        super().__init__(_FORMAT)
+
+    def formatTime(self, record, datefmt=None):
+        moment = datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc)
+        return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(record.msecs):03d}Z"
+
+    def format(self, record):
+        first, *rest = super().format(record).split("\n")
+        return "\n".join([first, *(_CONTINUATION + line for line in rest)])
+
+
+class _OnlyConsole(logging.Filter):
+    def filter(self, record):
+        return bool(getattr(record, "console", False))
+
+
+class _State:
+    verbosity = 0
+    console = None  # the console handler, or None
+    destination = None  # the file handler, or the --log stderr handler, or None
+    level = logging.DEBUG  # the level the destination keeps
+    configured = False  # a destination is on, so a header was written and a footer is due
+    started = None  # time.monotonic() at the header
+    degraded: list = []
+    once: set = set()
+
+
+_state = _State()
+
+
+def _logger() -> logging.Logger:
+    return logging.getLogger(PACKAGE)
+
+
+def _apply_level() -> None:
+    """The `benchx` logger passes the lowest level any handler wants, so a record nobody reads
+    costs nothing (and `isEnabledFor(DEBUG)` is false when nothing wants DEBUG)."""
+    wanted = []
+    if _state.console is not None:
+        wanted.append(_CONSOLE[_state.verbosity][0])
+    if _state.destination is not None:
+        wanted.append(_state.level)
+    _logger().setLevel(min(wanted) if wanted else logging.WARNING)
+
+
+def _remove(handler) -> None:
+    if handler is not None:
+        _logger().removeHandler(handler)
+        handler.close()
+
+
+def console(name: str) -> logging.LoggerAdapter:
+    """The logger of a module that shows the user something: its records carry `console=True`,
+    so the console handler writes them at the default verbosity. Used by `cli.py`, and by the
+    prints of `adapters/asv.py` that logging replaces."""
+    return logging.LoggerAdapter(logging.getLogger(name), {"console": True})
+
+
+def start_console(verbosity: int = 0) -> None:
+    """Install the console handler: stderr, the bare message. `verbosity` is -2 to 2 (`-qq` to
+    `-vv`). Idempotent: it replaces its own handler and leaves any other alone."""
+    _remove(_state.console)
+    _state.verbosity = verbosity
+    level, only_console = _CONSOLE[verbosity]
+    handler = _Stderr()
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    if only_console:
+        handler.addFilter(_OnlyConsole())
+    _logger().addHandler(handler)
+    _state.console = handler
+    _apply_level()
+
+
+def configure(setting, *, level: int = logging.DEBUG, argv=None) -> None:
+    """Turn the log on or off: `setting` is False (the console handler only), True (stderr
+    carries the whole log, in the full format) or a resolved `Path` (appended to, never
+    truncated). Writes the header record. Idempotent: it replaces what an earlier call set up
+    and closes the file it had open. OSError when a file cannot be opened."""
+    _remove(_state.destination)
+    _state.destination = None
+    _state.configured = False
+    _state.degraded = []
+    _state.once = set()
+    if setting is False or setting is None:
+        _apply_level()
+        return
+    if setting is True:
+        # One stderr handler: the log stream, which `-v` and `-q` do not touch.
+        _remove(_state.console)
+        _state.console = None
+        handler = _Stderr()
+    else:
+        handler = logging.FileHandler(Path(setting), mode="a", encoding="utf-8", errors="backslashreplace")
+    handler.setLevel(level)
+    handler.setFormatter(_Full())
+    _logger().addHandler(handler)
+    _state.destination, _state.level, _state.configured = handler, level, True
+    _state.started = time.monotonic()
+    _apply_level()
+    _header(argv)
+
+
+def stop() -> None:
+    """Remove every handler this module installed, and close the file. `cli.main` calls it
+    on the way out, so a library call that follows in the same process is silent again."""
+    _remove(_state.console)
+    _remove(_state.destination)
+    _state.console = _state.destination = None
+    _state.configured = False
+    _apply_level()
+
+
+def configured() -> bool:
+    """A destination is on: a header was written, and a footer is due."""
+    return _state.configured
+
+
+def _header(argv) -> None:
+    from . import __version__
+
+    command = "bx " + shlex.join(argv) if argv is not None else "bx"
+    logging.getLogger(f"{PACKAGE}.cli").info("start: benchx %s, pid %d, in %s: %s", __version__, os.getpid(),
+                                             Path.cwd(), command)
+
+
+def footer(outcome: str, code: int | None = None) -> None:
+    """The record that ends an invocation: its outcome word, exit code and elapsed time, then
+    what it left undone, if anything (`degraded`). A missing footer is itself the evidence of a
+    process that was killed."""
+    if not _state.configured:
+        return
+    elapsed = time.monotonic() - _state.started
+    took = f"{elapsed:.1f} s" if elapsed < 10 else f"{elapsed:.0f} s"
+    where = f"{outcome} (exit {code})" if code is not None else outcome
+    phrases = "".join(f", {phrase}" for phrase in _state.degraded)
+    logging.getLogger(f"{PACKAGE}.cli").info("end: %s, %s%s", where, took, phrases)
+
+
+def degraded(text: str) -> None:
+    """A command that exits 0 but did less than asked says so: the phrase ends the footer, and
+    is logged now at WARNING, so `--log-level warning` keeps it."""
+    _state.degraded.append(text)
+    logging.getLogger(f"{PACKAGE}.cli").warning("%s", text)
+
+
+def once(key) -> bool:
+    """True the first time it is called with `key` since `configure()`, False after: for a
+    record that is the same in every order of a command (the first gets INFO, the rest DEBUG)."""
+    if key in _state.once:
+        return False
+    _state.once.add(key)
+    return True
+
+
+def command(args, *, scripts=None, temporary=()) -> str:
+    """A command line as the log shows it, pastable into a shell (`shlex.join`). Inline code
+    after `-c` that is one of `scripts` ({name: text}) is shortened to `<NAME: N lines>`; paths
+    in `temporary` are marked as gone once the call returns. No environment is added (rule 3)."""
+    shown = [str(a) for a in args]
+    for i in range(1, len(shown)):
+        if shown[i - 1] == "-c":
+            for name, script in (scripts or {}).items():
+                if shown[i] == script:
+                    shown[i] = f"<{name}: {len(script.strip().splitlines())} lines>"
+    text = shlex.join(shown)
+    gone = [str(p) for p in temporary if any(str(p) in a for a in shown)]
+    if gone:
+        text += f"  (temporary, removed after the call: {', '.join(gone)})"
+    return text

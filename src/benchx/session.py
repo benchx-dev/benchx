@@ -141,6 +141,13 @@ def _benchmark(found: dict | None) -> dict | None:
             **({"revision": found["revision"]} if "revision" in found else {})}
 
 
+def run_directory(results_dir, run_key: str) -> Path:
+    """Where a run's orders, artifacts and result files go when `--out` names no folder: its
+    run key, `/` made `_`, under the results directory. The one place that builds it, so the CLI
+    can name the folder (and put the log in it) before the session starts."""
+    return Path(results_dir or "results") / run_key.replace("/", "_")
+
+
 def _order(side: dict, *, harness, suite, filter, quantities, precision, environment_variables, project, run_key,
            source_uri, round_=None, slot=None, labels=None, case_s=orders.CASE_TIMEOUT_S,
            order_s=orders.ORDER_TIMEOUT_S, collectors=None) -> dict:
@@ -174,6 +181,13 @@ def _harness(adapter, flags, file_precision=None, quantities=None) -> tuple:
     if unknown:
         raise SessionError(f"{harness.name} does not report {', '.join(unknown)}")
     return harness, precision
+
+
+def check_harness(adapter, flags, file_precision=None, quantities=None) -> None:
+    """SessionError for a flag the harness does not take, or a precision or quantity it cannot
+    apply. The CLI calls it in its check phase, so such a refusal comes before the log is
+    started and leaves no output folder (the session repeats it, at no cost)."""
+    _harness(adapter, flags, file_precision, quantities)
 
 
 def _source_uri(sides, source_uri) -> str:
@@ -220,7 +234,7 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
                  timeout=order_s)
     source_uri = _source_uri([side], source_uri)
     run_key = run_key or orders.default_run_key("bench")
-    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
+    out = Path(out) if out else run_directory(results_dir, run_key)
     if progress:
         progress(f"precision: {harness.describe_precision(precision, config_path)}")
     order_file = "order.json" if slot is None else f"order-{slot:04d}.json"  # one per slot, as compare_targets
@@ -302,7 +316,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError("the sides' suites come from different sources; give --suite as one absolute path")
 
     run_key = run_key or orders.default_run_key("compare")
-    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
+    out = Path(out) if out else run_directory(results_dir, run_key)
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
 
     slot = 0
@@ -451,7 +465,7 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
         progress(f"not run on either side (no parameter {parameter}): {', '.join(without)}")
 
     run_key = run_key or orders.default_run_key("compare")
-    out = Path(out) if out else Path(results_dir or "results") / run_key.replace("/", "_")
+    out = Path(out) if out else run_directory(results_dir, run_key)
     filters = {value: harnesses.exact_filter(by_value[value], arguments=True) for value in values}
 
     slot = 0
