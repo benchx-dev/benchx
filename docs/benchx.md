@@ -78,6 +78,9 @@ bx target describe|prepare TARGET        # a target's description (a provider's 
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
 bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
 bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
+
+# every command also takes: -v/-q (what the terminal shows), --log-level LEVEL,
+# and --no-log | --log | --log-file PATH (where the log goes; the default is bx.log in the run's folder)
 ```
 
 # Technical details
@@ -87,8 +90,8 @@ bx config show                           # what benchx.conf.json and the default
 working directory; its directory is the root) says how the project is measured: the
 `provider`, the `project` name and `source`, an `adapter` block (`name`, `suite`,
 `quantities`, `precision`), `environment_variables`, `timeouts`, `paths` for the store
-and the results (by default `store.parquet` and `results/` in the root), and the
-comparator's `compare` policy. Every value is the command line's, else the file's, else a
+and the results (by default `store.parquet` and `results/` in the root), the
+comparator's `compare` policy, and the log (`logging`, `log_level`: see "The log" below). Every value is the command line's, else the file's, else a
 built-in default; a required one (`adapter.name`, `adapter.suite`, the target, and for
 `bx compare` the profile and `--rounds`) that has none is a hard failure that names the
 flag and the key. `--no-project` makes one run ad hoc whatever the file's `project` says.
@@ -96,6 +99,30 @@ The schema is `schemas/config/0.1.0`, whose `examples/` hold recommended setting
 pyperf and for Google Benchmark. The store and the results directory are left out of a
 measured tree's identity when they sit inside it. `.benchx/setup.json` (declared
 environment facts) is a separate file, written by whoever prepares an environment.
+
+**The log.** `bx bench` and `bx compare` write `bx.log` in the run's output folder
+(`--out`, else `RESULTS/RUN_KEY`), and `bx run --out DIR` writes `DIR/bx.log`. Each
+invocation appends a header (the benchx version, its pid, the working directory and the
+command line as given), the config file it found, the settings it resolved with where each
+came from (flag, environment variable, file or default), and then what it decided, and ends
+with a footer: `end: ok (exit 0), 41 s`. The word is `ok`, `invalid` (exit 1), `refused`
+(exit 2), `crashed` or `interrupted` (Ctrl-C); a log that ends without a footer is the
+trace of a process that was killed (`SIGTERM`, `SIGHUP` or `SIGKILL`). A refusal for a bad
+flag or value leaves no folder; a run refused later, by the session, leaves `RUN_KEY/`
+holding only `bx.log`, which says why. What
+`bx` prints to the terminal does not change: the log is the full record, and `-v` shows its
+INFO records on the terminal (`-vv` DEBUG too), `-q` only warnings and errors, `-qq` only
+errors (`$BENCHX_VERBOSE` sets it, from -2 to 2). The log's own level is `--log-level`
+(`debug`, the default, `info`, `warning`, `error`; `$BENCHX_LOG_LEVEL`, or `log_level` in the
+file). `--no-log` turns it off, `--log` sends it to stderr instead, `--log-file PATH` appends it
+to a file (`{out}` is the run's output folder, `{root}` the project root); the file's key
+`logging` takes `false`, `true` or such a path, and is honoured by the commands that have an
+output folder, while a flag works for any command. A file named `*.json` is refused, since
+`bx ingest` reads such files in a directory. **A `bx.log` records the command line as given,
+`-e` values and credentials in a `--source-uri` included, and a command's output as it was
+printed. It does not claim to hide secrets: like `workorder-….json` in the same folder, it can
+contain them, and a results folder that is archived or shared carries it.** It never holds the
+environment `bx` inherited, only names of variables.
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets (one for
 `--profile variants`) select measure mode and `--run` selects read mode; mixing them is an error.
