@@ -124,7 +124,13 @@ def _found_benchmark(harness, path: Path, suite: str, subject_source: str) -> di
     snapshot.benchmark_identity), else None. A suite that is a built binary is the subject's own."""
     if not adapters.get(harness.name).SUITE_IS_SOURCE:
         return None
-    return snapshot.benchmark_identity(path / suite, subject_source)
+    found = snapshot.benchmark_identity(path / suite, subject_source)
+    if found is not None and not found.get("tree"):
+        # Outside the checkout a suite is identified by one file (its blob id); an asv suite is a directory.
+        raise SessionError(f"cannot record the suite {(path / suite).resolve()}: it is outside the subject's "
+                           f"checkout ({subject_source}), where a suite is identified by one file, which a "
+                           "directory is not; put it inside the checkout")
+    return found
 
 
 def _benchmark(found: dict | None) -> dict | None:
