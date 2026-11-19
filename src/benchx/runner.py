@@ -349,6 +349,12 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             artifacts += [_artifact(kind, media_type, path) for kind, media_type, path in run_.get("artifacts", [])]
             artifacts += [_artifact(kind, media_type, path) for kind, media_type, path in collected.artifacts]
             native_system, native_info = adapter.context_facts(run_["native"])
+            scaling = native_system.get("cpu", {}).get("scaling_enabled") is True
+            debug_build = native_info.get("library_build_type") == "debug"
+            if (scaling or debug_build) and log.once("noisy-context"):  # recorded in the result, flagged nowhere else
+                logger.warning("%s: the harness's own context says %s", label, " and ".join(
+                    text for flag, text in ((scaling, "CPU frequency scaling is enabled"),
+                                            (debug_build, "the benchmark library is a debug build")) if flag))
             case_system, case_warnings = snapshot.merge(system, native_system), []
             if hasattr(adapter, "observed_environment"):
                 facts, case_warnings = adapter.observed_environment(run_, case, env_names)

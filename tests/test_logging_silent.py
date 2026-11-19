@@ -216,3 +216,37 @@ def test_a_store_that_cannot_be_written_says_where_the_results_are(session, tmp,
     assert re.search(r" ERROR the order: the results are in \S+/results/fresh, not delivered to the store; "
                      r"bx ingest \S+/results/fresh stores them", text)
     assert " INFO end: crashed (exit 1), " in text
+
+
+def test_a_side_whose_results_disagree_about_their_declarations_is_a_warning_naming_the_field(caplog):
+    docs = run_of(rounds=3)
+    for d in docs[:4]:
+        d["provenance"]["info"] = {"how_built": "cmake -B build"}  # the first results of the baseline say how
+    for d in docs[4:]:
+        d["provenance"]["info"] = {"how_built": "meson setup build"}
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        evaluate(docs)
+    messages = records(caplog)
+    assert any(level == "DEBUG" and m.startswith("the baseline side's declarations come from ") for level, m in messages)
+    assert any(level == "WARNING" and "side's results disagree about how_built" in m for level, m in messages)
+    assert not any("cmake -B build" in m or "meson setup" in m for _, m in messages)  # the field's name, not its text
+
+
+def test_history_says_when_nothing_matches_and_when_several_series_do(session, caplog):
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        assert cli.main(["history", "ffffffffffff"]) == cli.EXIT_OK
+        assert cli.main(["history", ""]) == cli.EXIT_OK  # an empty prefix matches every series
+    messages = records(caplog)
+    assert any(level == "INFO" and m == "no series matches ffffffffffff" for level, m in messages)
+    assert any(level == "WARNING" and " matches " in m and "series, whose points are listed together" in m
+               for level, m in messages)
+
+
+def test_validate_logs_its_kind_and_each_valid_file(tmp):
+    from conftest import EXAMPLES
+    example = next(EXAMPLES.glob("*.json"))
+    log_file = tmp / "v.log"
+    assert cli.main(["validate", str(example), "--log-file", str(log_file)]) == cli.EXIT_OK
+    text = log_file.read_text()
+    assert " INFO validating 1 file(s) as measurement-result" in text
+    assert f" DEBUG {example} is a valid measurement-result" in text

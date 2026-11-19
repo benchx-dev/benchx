@@ -517,6 +517,11 @@ def cmd_history(args):
     if (cfg := _start_logging(cfg, args, None, "history")) is None:
         return EXIT_REFUSED
     points = Store(cfg.store_path).history(args.series)
+    if not points:
+        logger.info("no series matches %s", args.series)
+    elif len(matched := {p["series_fingerprint"] for p in points}) > 1:
+        logger.warning("%s matches %d series, whose points are listed together; `changed` is worked out per series: %s",
+                       args.series, len(matched), ", ".join(sorted(f[:12] for f in matched)))
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
@@ -777,10 +782,13 @@ def cmd_validate(args):
     if _start_logging(_no_config(), args, None, "validate", read_config=False) is None:
         return EXIT_REFUSED
     valid = 0
+    logger.info("validating %d file(s) as %s", len(args.files), args.kind)
     for path in args.files:
         inspection = core.inspect(path, args.kind)
         for error in inspection.errors:
             say.warning(f"{path}: {error}")
+        if inspection.valid:
+            logger.debug("%s is a valid %s", path, args.kind)
         valid += inspection.valid
     say.info(f"{valid}/{len(args.files)} valid")
     return EXIT_OK if valid == len(args.files) else EXIT_INVALID

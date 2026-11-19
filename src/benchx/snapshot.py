@@ -153,6 +153,7 @@ def ignore(*paths) -> None:
     or changes its tree id. Replaces the previous set; no arguments clears it."""
     global _IGNORED
     _IGNORED = tuple(Path(p).resolve() for p in paths)
+    logger.debug("left out of every tree identity from now on: %s", ", ".join(map(str, _IGNORED)) or "nothing")
 
 
 def _ignored_in(root: Path) -> list[str]:

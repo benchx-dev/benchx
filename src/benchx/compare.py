@@ -268,6 +268,7 @@ def _compare(documents, *, run_key, profile, baseline, label=None, parameter=Non
     logger.info("baseline %s (asked: %s, matched by %s), contender %s", names[base], baseline, how, names[contender])
     doc["sides"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == side))
                     for role, side in (("baseline", base), ("contender", contender))}
+    _log_declarations(documents, sides, base, contender)
 
     # Run-level invariants (schema §5.5, comparator.md §3), as the profile names them.
     check = set(projection.invariants)
@@ -382,6 +383,10 @@ def _compare(documents, *, run_key, profile, baseline, label=None, parameter=Non
         if caveats := _caveats(by_side, base, contender):
             unit_doc["caveats"] = caveats
         doc["units"].append(unit_doc)
+    ignored = collections.Counter(p for u in doc["units"] for p in u.get("unmatched_differences", []))
+    if ignored:
+        logger.debug("facts that differ between the sides but that the identity policy ignores, so no invariant "
+                     "fails: %s", ", ".join(f"{pointer} ({n} unit(s))" for pointer, n in sorted(ignored.items())))
     return doc
 
 
@@ -461,6 +466,22 @@ _BENCHMARK_VERSION = re.compile(r"/coordinates/protocol/[^/]+/benchmark_version"
 def _differing(facts: list[dict]) -> list[str]:
     """Pointers whose value is not the same in every one of `facts` (pointer -> value)."""
     return sorted(p for key in set().union(*facts) for p in _diff(key, [f.get(key, _ABSENT) for f in facts]))
+
+
+def _log_declarations(documents, sides, base, contender) -> None:
+    """`sides` takes each side's declarations (how built, activation, shell, provider) from its first result in
+    sort order and never looks at the others: say which result that was, and warn when the others disagree
+    (the fields' names: never their values, which are the user's text and the inherited environment)."""
+    for role, side in (("baseline", base), ("contender", contender)):
+        ours = [d for d, x in zip(documents, sides) if x == side]
+        first = _declared(ours[0])
+        logger.debug("the %s side's declarations come from %s %s", role, ours[0]["producer"]["name"],
+                     ours[0]["ingest_key"])
+        differing = sorted({k for d in ours[1:] for k in set(first) | set(_declared(d))
+                            if first.get(k) != _declared(d).get(k)} - {"observed_env"})
+        if differing:
+            logger.warning("the %s side's results disagree about %s: the comparison shows the first result's",
+                           role, ", ".join(differing))
 
 
 def _declared(document) -> dict:
