@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -141,7 +141,8 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
                         env=env)
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
+        raise Unsupported(f"pyperf is not importable by {python}: "
+                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
     return {"python": python, "module": module.resolve(), "root": root.resolve()}
 
 
@@ -176,6 +177,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     `benchmark_*`, with one any function, by a regex searched in the name (and, for a
     function with `params`, in `name(p0, p1)`, once per combination; see
     `benchx_params.expand`). A combination is the case `function-INDEX`."""
+    check_filter(case_filter)
     try:
         where = runnable["module"].relative_to(runnable["root"])
     except ValueError:  # a suite outside the target, named by its absolute path
@@ -186,7 +188,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
     cases, unmatched = [], []
     for info in listing:

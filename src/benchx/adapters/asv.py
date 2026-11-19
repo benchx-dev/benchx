@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params, pyperf
-from .base import Unsupported, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -168,7 +168,8 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
                         env=env)
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: {probe.stderr.strip().splitlines()[-1:]}")
+        raise Unsupported(f"pyperf is not importable by {python}: "
+                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
     return {"python": python, "benchmark_dir": benchmark_dir, "root": root,
             "project": _project(benchmark_dir, root), "benchmarks": {}}
 
@@ -179,6 +180,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     searched once per combination, as `name(p0, p1)`, and only the matching
     combinations run. Modules that fail to import and benchmarks of other types
     are reported on stderr, never run."""
+    check_filter(case_filter)
     with tempfile.TemporaryDirectory() as scratch:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
@@ -189,7 +191,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     if out.returncode != 0:
         raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
-    listing = json.loads(out.stdout.strip().splitlines()[-1])
+    listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
         print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
     cases, other, unmatched = [], {}, []
