@@ -98,11 +98,12 @@ def test_a_failed_invariant_names_the_parameters_in_the_declared_order_too():
     docs = run_of()
     for d in docs:
         if d["coordinates"]["workload"]["parameters"]["dtype"] == "'int16'":
-            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+            d["coordinates"]["environment"]["system"]["runtime"] = {
+                "python": "3.13" if d["revision"]["key"] == HEAD else "3.12"}
     doc = evaluate(docs)
     assert [list(f["workload"]["parameters"]) for f in doc["failed_invariants"]] == [DECLARED] * 2
     assert compare.render(doc).splitlines()[-1] == (
-        "  sides-agree: /coordinates/protocol/asv/benchmark_version differ  (2 units: "
+        "  sides-agree: /coordinates/environment/system/runtime/python differ  (2 units: "
         f"{NAME} [dtype='int16', array_type=('ordered',), k=10], {NAME} [dtype='int16', array_type=('random',), k=10])")
 
 

@@ -158,7 +158,7 @@ def test_an_asv_result_has_its_own_version_and_no_pyperf_one(tmp_path):
 FLAGS = {"processes": 2, "values": 2, "loops": 50, "warmups": 0}
 
 
-def compare(tmp_path, module, run_key):
+def compare(tmp_path, module, run_key, names=("f",)):
     pytest.importorskip("pyperf")
     from benchx import harnesses, session
     from benchx.store import Store
@@ -167,13 +167,23 @@ def compare(tmp_path, module, run_key):
     return session.compare_targets(
         str(trees["base"]), str(trees["head"]), profile="revisions", suite="mod.py", rounds=2,
         store=Store(tmp_path / "s.parquet"), adapter="pyperf", flags=FLAGS,
-        filter=harnesses.exact_filter(["f"]), out=tmp_path / "out", run_key=run_key)
+        filter=harnesses.exact_filter(list(names)), out=tmp_path / "out", run_key=run_key)
 
 
-def test_two_revisions_whose_function_differs_do_not_agree(tmp_path):
+def test_two_revisions_whose_function_differs_are_not_comparable(tmp_path):
     doc = compare(tmp_path, "def f():\n    sum(range({work}))\n", "edited")
-    assert [f["invariant"] for f in doc["failed_invariants"]] == ["sides-agree"]
-    assert "/coordinates/protocol/pyperf/benchmark_version differ" in doc["failed_invariants"][0]["detail"]
+    assert doc["failed_invariants"] == []
+    assert [(u["workload"]["name"], u["reason"]) for u in doc["units"]] == [("f", "benchmark-changed")]
+
+
+def test_editing_one_function_leaves_the_others_compared(tmp_path):
+    """As in asv: only the edited function is not comparable, the comparison goes on for the rest."""
+    module = "def f():\n    sum(range({work}))\n\n\ndef g():\n    sum(range(500))\n"
+    doc = compare(tmp_path, module, "two", names=("f", "g"))
+    assert doc["failed_invariants"] == []
+    units = {u["workload"]["name"]: u for u in doc["units"]}
+    assert units["f"]["reason"] == "benchmark-changed" and units["f"]["rounds"] == 0
+    assert units["g"]["rounds"] == 2 and units["g"].get("reason") != "benchmark-changed"  # paired, not set aside
 
 
 def test_two_revisions_that_differ_outside_the_function_agree(tmp_path):

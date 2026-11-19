@@ -185,6 +185,8 @@ def _pipe(headers, rows, right=()) -> str:
 
 def _verdict(unit) -> str:
     """The comparator's verdict in the words of its summary, with the reason when there is no verdict."""
+    if unit.get("reason") == "benchmark-changed":  # as asv words it
+        return "not comparable (benchmark-changed)"
     return unit["verdict"].replace("-", " ") + (f" ({unit['reason']})" if unit.get("reason") else "")
 
 
@@ -194,8 +196,8 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
     by_workload = {(_c(u["workload"]), u["quantity"]["name"]): u for u in units}
     rows = []
     for verdict_unit in doc["units"]:
-        mark = MARKS[verdict_unit["verdict"]]
-        if mark not in CHANGED.values() and not all_rows:
+        mark = "x" if verdict_unit.get("reason") == "benchmark-changed" else MARKS[verdict_unit["verdict"]]
+        if mark not in (*CHANGED.values(), "x") and not all_rows:  # asv lists "not comparable" by default
             continue
         unit = by_workload[(_c(verdict_unit["workload"]), verdict_unit["quantity"])]
         before, after = unit["baseline"], unit["contender"]

@@ -641,19 +641,47 @@ def by_name(doc):
     return {u["workload"]["name"]: u for u in doc["units"]}
 
 
-def test_an_edited_benchmark_fails_its_own_unit_only():
-    """A benchmark whose code differs between the sides (asv's benchmark version) is a new series and is
-    not comparable; the other benchmark is compared."""
+def test_an_edited_benchmark_is_not_comparable_and_the_others_are_compared():
+    """A benchmark whose code differs between the sides (asv's benchmark version) is a new series: as in
+    `asv compare` it is "not comparable", is no failed invariant, and the other benchmark is compared."""
     docs = run_two()
     for d in docs:
         if d["coordinates"]["workload"]["name"] == "BM_B":
             version = "v2" if d["revision"]["key"] == HEAD else "v1"
             d["coordinates"]["protocol"]["asv"] = {"benchmark_version": version}
     doc = evaluate(docs)
-    assert invariants(doc) == ["sides-agree"]
-    failure = doc["failed_invariants"][0]
-    assert failure["workload"] == {"name": "BM_B"} and "benchmark_version differ" in failure["detail"]
-    assert list(by_name(doc)) == ["BM_A"] and by_name(doc)["BM_A"]["verdict"] == "regressed"
+    assert invariants(doc) == []
+    edited = by_name(doc)["BM_B"]
+    assert (edited["verdict"], edited["reason"], edited["rounds"]) == ("indeterminate", "benchmark-changed", 0)
+    assert edited["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
+    assert "effect" not in edited
+    assert by_name(doc)["BM_A"]["verdict"] == "regressed"
+    text = compare.render(doc)
+    assert "\nNOT COMPARABLE (1)\n  BM_B" in text and "(benchmark-changed: its version differs" in text
+    assert "INDETERMINATE" not in text
+
+
+def test_a_benchmark_edited_during_the_run_is_not_comparable_either():
+    """The version differs between the rounds of one side, not only between the sides."""
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["procedure"]["round"] else "v1"}
+    doc = evaluate(docs)
+    assert invariants(doc) == [] and by_name(doc)["BM_B"]["reason"] == "benchmark-changed"
+
+
+def test_a_version_and_another_fact_that_differ_together_are_still_a_failed_invariant():
+    """Only the benchmark's own version is "not comparable": a runtime that differs as well is the sides
+    disagreeing about more than the benchmark."""
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            head = d["revision"]["key"] == HEAD
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if head else "v1"}
+            d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.13" if head else "3.12"}
+    doc = evaluate(docs)
+    assert invariants(doc) == ["sides-agree"] and list(by_name(doc)) == ["BM_A"]
 
 
 def test_a_failed_attempt_is_excluded_before_the_facts_are_matched():
@@ -733,19 +761,21 @@ def test_a_failed_invariant_of_one_unit_names_the_unit_in_words():
     docs = run_two()
     for d in docs:
         if d["coordinates"]["workload"]["name"] == "BM_B":
-            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+            d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark",
+                                                       "version": "1.9" if d["revision"]["key"] == HEAD else "1.8"}
     text = compare.render(evaluate(docs))
-    assert text.endswith("\nfailed invariants (1)\n  BM_B: sides-agree: /coordinates/protocol/asv/benchmark_version differ")
+    assert text.endswith("\nfailed invariants (1)\n  BM_B: sides-agree: /coordinates/protocol/harness/version differ")
     assert "'invariant'" not in text
 
 
 def test_units_that_failed_an_invariant_alike_are_one_line():
     docs = run_two()
     for d in docs:
-        d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+        d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark",
+                                                   "version": "1.9" if d["revision"]["key"] == HEAD else "1.8"}
     text = compare.render(evaluate(docs))
     assert text.endswith("\nfailed invariants (2)\n"
-                         "  sides-agree: /coordinates/protocol/asv/benchmark_version differ  (2 units: BM_A, BM_B)")
+                         "  sides-agree: /coordinates/protocol/harness/version differ  (2 units: BM_A, BM_B)")
 
 
 def test_a_failed_invariant_of_the_run_is_in_words_too():
