@@ -1,9 +1,11 @@
 """asv-style tables for `bx compare --tables` (TABLES_PLAN.md): one table per side, then the changes.
 
 Display only. The per-side numbers are recomputed here from the run's stored results, with the
-projection that made the comparison document, so the document and its schema are unchanged. A
-side's value is the median of its per-round medians (the estimator the verdict uses) and its `±`
-the sd of those medians: benchx's own meaning, not asv's.
+projection that made the comparison document, so this module adds nothing to the document. (The
+document gains, in compare.py, an optional `attempts` for each unit and the reason `not-measured`,
+which the change table shows; see comparator.md.) A side's value is the median of its per-round
+medians (the estimator the verdict uses) and its `±` the sd of those medians: benchx's own meaning,
+not asv's.
 """
 
 import math
