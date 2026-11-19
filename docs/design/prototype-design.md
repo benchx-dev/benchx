@@ -465,7 +465,8 @@ apart, so adding an estimator never renames the policy:
   point (schema §1). It does record a computed version of each benchmark function in
   `protocol` (asv, pyperf: a hash of the function's source, or its `version` attribute),
   which changes only when the function does and is matched like the rest of protocol: an
-  edited benchmark is not compared with its old self and starts a new series.
+  edited benchmark is not compared with its old self and starts a new series. The comparison lists
+  it as not comparable (`benchmark-changed`), as `asv compare` does, and compares the others.
   Being ignored, its change is flagged on each point where it happens. A thin
   result's identity carries its implicit project.
 - **Estimators** (`ESTIMATORS`): `median`, derived from observations, plus
@@ -526,7 +527,10 @@ affect every unit; `sides-agree` looks at the attempts that succeeded); under `r
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
 both sides and in every round (`one-benchmark-tree`, schema §5.5), as it does
-under `variants`. A side that
+under `variants`. A unit whose only differing matched fact is a benchmark's recorded
+version (`protocol.<harness>.benchmark_version`, between the sides or between a side's rounds) is not
+a failed invariant: it is indeterminate with reason `benchmark-changed`, no pair is used, and it is
+listed as not comparable, as `asv compare` lists a benchmark whose version changed. A side that
 is not clean does not fail the run: it makes the comparison local-only. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
 listed. Under `variants` a failed attempt (`partial`, `censored` or `error`) on either side also makes

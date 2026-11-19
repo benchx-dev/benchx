@@ -134,8 +134,9 @@ A function has a version, as an asv benchmark does: its `version` attribute, els
 its source (as asv_runner hashes a plain function: comments and docstrings count; what it
 calls, its `params` and the library under test do not). Each result records it in
 `protocol.pyperf.benchmark_version`, and protocol is what the two sides of a comparison must
-agree on, so two revisions whose function differs fail `sides-agree`. That suits a function
-that exercises code elsewhere in the tree. When the function body is what changes, declare a
+agree on. As `asv compare` does, a function whose version differs between the two revisions is
+listed as not comparable (reason `benchmark-changed`) and the other functions are compared. That
+suits a function that exercises code elsewhere in the tree. When the function body is what changes, declare a
 `version` (`bench_a.version = "1"`). A function without readable source has no version.
 
 `bx bench MODULE.py [FUNCTION …]` is the shorthand for the quickest case, timing a few
