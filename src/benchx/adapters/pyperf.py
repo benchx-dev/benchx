@@ -205,22 +205,36 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
     listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
-    cases, unmatched = [], []
+    cases, unmatched, left_out, unversioned = [], [], 0, []
     for info in listing:
         name = info["name"]
         if not case_filter and not name.startswith(DEFAULT_CASE_PREFIXES):
+            left_out += 1
             continue
         selected = benchx_params.expand(name, info["params"], case_filter)
         if not selected:
+            if "error" in info:  # not selected, so not refused: the log is the only place that says so
+                logger.debug("%s: its params could not be read, and it was not selected: %s", name, info["error"])
             if benchx_params.matches_name_only(name, info["params"], case_filter):
                 unmatched.append(info)
             continue
         if "error" in info:
             raise Unsupported(f"cannot read the params of {name} in {where}: {info['error']}")
+        if info.get("version") is None:
+            unversioned.append(name)
         runnable["benchmarks"][name] = info
         for case, index in selected:
             runnable["cases"][case] = (name, index)
             cases.append(case)
+    if left_out:
+        logger.debug("with no filter only bench_* and benchmark_* functions are cases: %d other callable(s) of %s "
+                     "were left out", left_out, where)
+    if unversioned:  # no `version` attribute, and its source cannot be read: no benchmark_version in its results
+        logger.debug("no version for %s: an edit to it starts no new series and is not caught as a failed "
+                     "`sides-agree`", ", ".join(unversioned[:40]))
+    if unmatched:
+        logger.debug("a filter that matches the name but not the arguments of %d parametrized benchmark(s): %s",
+                     len(unmatched), ", ".join(info["name"] for info in unmatched[:3]))
     if not cases:
         defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
         raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],

@@ -112,14 +112,18 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         source = source or snapshot.cmake_source_dir(path)
         identity = source and snapshot.git_identity(source)
         if not identity:
-            raise SessionError(f"cannot locate the checkout {path} was built from; give BUILD_DIR:SOURCE_DIR")
+            raise SessionError(f"cannot locate the checkout {path} was built from "
+                               f"({snapshot.why_no_checkout(path, source)}); give BUILD_DIR:SOURCE_DIR")
     else:
         identity = snapshot.git_identity(source) or snapshot.directory_identity(source)
         if not identity:
             raise SessionError(f"cannot identify the working tree {source}")
+        snapshot.note_identity_fallback(identity)
     found = _found_benchmark(harness, path, suite, identity["path"])
-    logger.debug("%s: %s, a %s at %s, source %s, revision %s, tree %s, %s; benchmark %s", name or "target", spec, kind,
-                 path, identity["path"], identity["revision"][:12], (identity.get("tree") or "none")[:12],
+    how = ("a provider (the project's target provider) answered " + operation if spec.startswith("@")
+           else "a sidecar in the build directory" if description else "a bare path, read by the harness")
+    logger.debug("%s: %s, found by %s: a %s at %s, source %s, revision %s, tree %s, %s; benchmark %s", name or "target",
+                 spec, how, kind, path, identity["path"], identity["revision"][:12], (identity.get("tree") or "none")[:12],
                  identity["dirty"], f"{found['type']} {found['uri']}, {found['dirty']}" if found else "in the subject's tree")
     return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
             "benchmark": _benchmark(found),
@@ -202,12 +206,15 @@ def check_harness(adapter, flags, file_precision=None, quantities=None) -> None:
 def _source_uri(sides, source_uri) -> str:
     """The one URI the sides' source is known by; SessionError if they disagree."""
     if source_uri:
-        uris = {normalize_remote(source_uri)}
+        uris, origin = {normalize_remote(source_uri)}, "--source-uri or source.uri"
     else:
         uris = {normalize_remote(side["uri"], base=side["source"]) if side["uri"] else snapshot.source_uri(side["source"])
                 for side in sides}
+        origin = ("a side's description, or the origin remote of its checkout (else the git directory's parent, "
+                  "else a file:// URI of the directory)")
     if len(uris) != 1:
         raise SessionError(f"the sides report different source URIs {sorted(uris)}; pass --source-uri")
+    logger.debug("the source URI is %s, from %s", next(iter(uris)), origin)
     return uris.pop()
 
 

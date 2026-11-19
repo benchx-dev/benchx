@@ -14,8 +14,10 @@ it, which is atomic. The acknowledgment therefore means validated and durable
 """
 
 import json
+import logging
 import os
 import statistics
+import time
 from pathlib import Path
 
 import pyarrow as pa
@@ -25,6 +27,9 @@ from . import core, identity, parquet
 from .core import loader
 from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, ReadError, UnitConflict
 from .projection import Projection
+
+logger = logging.getLogger(__name__)
+MAX_LOGGED = 40  # the log's cap on a list, like its other lists
 
 # Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
 _ATTEMPT_FIELDS = ("project", "source", "revision", "benchmark")
@@ -58,7 +63,14 @@ class Store:
     # -- reading -------------------------------------------------------------
 
     def _table(self, columns=None) -> pa.Table | None:
-        return pq.read_table(self.path, columns=columns) if self.path.exists() else None
+        if not self.path.exists():
+            logger.debug("%s: absent, read as an empty store", self.path)
+            return None
+        started = time.monotonic()
+        table = pq.read_table(self.path, columns=columns)
+        logger.debug("%s: read %d row(s), %s, in %.2f s", self.path, table.num_rows,
+                     ", ".join(columns) if columns else "all columns", time.monotonic() - started)
+        return table
 
     def _index(self) -> list[dict]:
         table = self._table(["producer", "ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
@@ -77,8 +89,10 @@ class Store:
         if table is None:
             return []
         run_keys = table.column("provenance").combine_chunks().field("run_key").to_pylist()
-        return [json.loads(text) for r, text in zip(run_keys, table.column("document").to_pylist())
-                if run_key is None or r == run_key]
+        found = [json.loads(text) for r, text in zip(run_keys, table.column("document").to_pylist())
+                 if run_key is None or r == run_key]
+        logger.debug("documents(%s): %d of %d stored document(s)", run_key, len(found), len(run_keys))
+        return found
 
     def documents(self, run_key: str) -> list[dict]:
         """The stored documents of one run, exactly as ingested (canonical form)."""
@@ -188,6 +202,8 @@ class Store:
                 unreadable.append(_rejection(f.name, errors[0]))
             else:
                 orders[core.order_ref(order)] = order
+        logger.debug("swept %d file(s): %d result document(s), %d work order(s), %d unreadable or malformed", len(files),
+                     len(documents), len(orders), len(unreadable))
         outcome = self.ingest(documents, orders)
         outcome["rejected"] = unreadable + outcome["rejected"]
         return outcome
@@ -202,12 +218,19 @@ class Store:
 
         accepted, derived = [], []
         outcome = {"ingested": 0, "duplicate": 0, "rejected": []}
+        used_orders, without_order = set(), 0
         for name, text in documents:
             doc, errors = loader.parse(text)
             if doc is not None:
                 errors = core.check(doc, "measurement-result")
             if errors:
                 outcome["rejected"].append(_rejection(name, errors[0]))
+                logger.debug("%s: rejected with %d error(s)", name, len(errors))  # the rejection keeps the first
+                for error in errors[:MAX_LOGGED]:
+                    logger.debug("%s: %s at %s: %s%s", name, error.code, error.location or "the document", error.message,
+                                 f" (rule {error.rule})" if getattr(error, "rule", None) else "")
+                if len(errors) > MAX_LOGGED:
+                    logger.debug("%s: and %d more error(s)", name, len(errors) - MAX_LOGGED)
                 continue
 
             project = store_project(doc)
@@ -231,12 +254,24 @@ class Store:
                 conflict = None
             if conflict is not None:
                 outcome["rejected"].append(_rejection(name, conflict))
+                if isinstance(conflict, IdempotencyConflict):  # the error does not carry what makes it one
+                    logger.warning("%s: idempotency-conflict: %s already holds payload %s for %s, and this one is %s",
+                                   name, self.path, existing[key][:16], doc["ingest_key"], payload[:16])
+                else:
+                    logger.warning("%s: %s: %s", name, conflict.code, conflict.message)
                 continue
 
             existing[key] = payload
+            if not known:
+                logger.debug("%s: a new quantity %s [%s] in %s: the first result defines its unit", name,
+                             quantity["name"], quantity["unit"], project)
             units[(project, quantity["name"])] = quantity["unit"]  # first sight defines the unit
             ref = doc["provenance"].get("info", {}).get("workorder_ref")
             order = orders.get(ref)
+            if order is None:
+                without_order += 1
+            else:
+                used_orders.add(ref)
             accepted.append(doc)
             derived.append({
                 "store_project": project,
@@ -249,22 +284,52 @@ class Store:
             })
             outcome["ingested"] += 1
 
+        unused = [ref for ref in orders if ref not in used_orders]
+        logger.debug("ingest: %d ingested, %d duplicate, %d rejected; %d work order(s) attached, %d in the sweep "
+                     "that no result references (neither stored nor reported), %d result(s) with no order in the sweep "
+                     "(an order delivered by an earlier ingest is not attached)", outcome["ingested"],
+                     outcome["duplicate"], len(outcome["rejected"]), len(used_orders), len(unused), without_order)
         if accepted:
             self._write(parquet.results_table(accepted, derived))
         return outcome
 
     def _write(self, new: pa.Table) -> None:
         """Rewrite the file with the new rows appended, atomically."""
+        started = time.monotonic()
         old = self._table()
         # Rows written under an older message schema are carried over, with
         # nulls in any column or nested field the schema has since gained.
         table = new if old is None else pa.concat_tables([old, new], promote_options="permissive")
+        if old is not None and logger.isEnabledFor(logging.DEBUG):
+            before, after = _fields(old.schema), _fields(table.schema)
+            added = sorted(set(after) - set(before))
+            widened = sorted(f"{path}: {before[path]} to {after[path]}" for path in before if before[path] != after[path])
+            if added or widened:  # permissive promotion adds nested fields and widens types, not only columns
+                logger.debug("%s: the schema was promoted: added %s; widened %s", self.path, ", ".join(added) or "nothing",
+                             ", ".join(widened) or "nothing")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(f".{self.path.name}.tmp")
         pq.write_table(table.replace_schema_metadata(new.schema.metadata), tmp, compression="zstd")
         with open(tmp, "rb") as f:
             os.fsync(f.fileno())
         os.replace(tmp, self.path)
+        logger.debug("wrote %s: %d row(s) added to %d, %.2f s", self.path, new.num_rows, old.num_rows if old else 0,
+                     time.monotonic() - started)
+
+
+def _fields(schema: pa.Schema) -> dict[str, str]:
+    """Every leaf of a schema by dotted path, with its type: what a schema promotion can change."""
+    found = {}
+
+    def walk(prefix, kind):
+        if pa.types.is_struct(kind):
+            for child in kind:
+                walk(f"{prefix}.{child.name}", child.type)
+        else:
+            found[prefix] = str(kind)
+    for field in schema:
+        walk(field.name, field.type)
+    return found
 
 
 def _rejection(name: str, error: DocumentError) -> dict:

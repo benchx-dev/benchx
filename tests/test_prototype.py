@@ -419,7 +419,8 @@ def test_missing_build_is_refused_for_every_reason(tmp):
     assert all(type(problem) is core.Refusal for problem in problems)
     assert [str(problem).split(":")[0] for problem in problems] == [
         "suite binary not found",
-        "cannot locate the checkout the target was built from; set target.source_dir",
+        f"cannot locate the checkout the target was built from (there is no CMakeCache.txt in {tmp / 'absent'}); "
+        "set target.source_dir",  # the refusal says why (logging plan R31)
     ]
 
 

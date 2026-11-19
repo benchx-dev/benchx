@@ -186,6 +186,7 @@ def _log_identity(runnable, source, benchmark, source_dir):
     python = runnable.get("python") if isinstance(runnable, dict) else None
     if python:
         logger.log(level("interpreter"), "the benchmarks run under %s", python)
+    snapshot.note_identity_fallback(source)
     method = "directory-hash" if source["revision"].startswith("directory-") else "git"
     logger.debug("subject: %s, found by %s: revision %s, tree %s, %s", source_dir, method, source["revision"][:12],
                  (source.get("tree") or "none")[:12], source["dirty"])
@@ -266,7 +267,8 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
         configuration = snapshot.cmake_configuration(target_path)
     if source is None:
         # runner.md §2: a result that cannot state its revision is a defect.
-        refusals.append(Refusal("cannot locate the checkout the target was built from; set target.source_dir"))
+        refusals.append(Refusal("cannot locate the checkout the target was built from "
+                                f"({snapshot.why_no_checkout(target_path, source_dir)}); set target.source_dir"))
     benchmark = None
     if source is not None and getattr(adapter, "SUITE_IS_SOURCE", False):
         # The suite's own code, when it is not in the subject's checkout (runner-schema.md §3.3):

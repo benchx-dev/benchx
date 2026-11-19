@@ -170,7 +170,8 @@ def _log_config(cfg):
 def _log_settings(sources):
     """The settings a command resolved, each with its value and where it came from (DEBUG)."""
     for name, value, source in sources:
-        logger.debug("setting %s: %s (%s)", name, value, source)
+        # the project decides where the results are filed: worth a line at INFO
+        logger.log(logging.INFO if name == "project" else logging.DEBUG, "setting %s: %s (%s)", name, value, source)
 
 
 def cmd_run(args):
@@ -247,13 +248,16 @@ def _bench_target(args) -> tuple[str, str | None, str | None]:
     `--adapter asv` it is an asv suite instead (`bx bench PATH --adapter asv`): PATH
     holds asv.conf.json or is the benchmark directory."""
     if not args.suite and args.adapter == "asv":
+        logger.debug("the asv shorthand: --adapter asv on the command line, and no --suite")
         return (*bench_mod.asv_target(args.target, args.tree), "asv")
     if args.suite or not args.target.endswith(".py"):
         if args.tree:
             raise UsageError("--tree belongs to the shorthands; give the tree as the TARGET with --suite")
+        logger.debug("a plain target: %s, with the suite from --suite or the file's adapter.suite", args.target)
         return args.target, None, None
     if args.adapter not in (None, "pyperf"):
         raise UsageError(f"a Python file is benchmarked with pyperf, not {args.adapter}")
+    logger.debug("the Python-module shorthand: %s is benchmarked with pyperf", args.target)
     target, suite = bench_mod.module_target(args.target, args.tree)
     return target, suite, "pyperf"
 
@@ -669,7 +673,11 @@ def _read(cfg, args, policy, sources):
         with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
             store = Store(Path(tmp) / "store.parquet")
             outcome = store.ingest_paths(args.results)
+            # The throwaway store is deleted on exit: its path would say nothing, so the count does.
+            logger.debug("read mode with --results: %d document(s) ingested into a throwaway store",
+                         outcome["ingested"])
             if outcome["rejected"]:
+                logger.warning("%d document(s) were rejected: the comparison was not run", len(outcome["rejected"]))
                 return _report(outcome)
             return _compare(store, args, policy)
     return _compare(Store(cfg.store_path), args, policy)
@@ -739,7 +747,11 @@ def _show(doc, args, documents):
         return
     print(compare_mod.render(doc))
     if args.tables:
-        print(tables_mod.render(doc, documents, all_rows=args.all))
+        shown = tables_mod.render(doc, documents, all_rows=args.all)
+        if not shown:
+            logger.warning("tables skipped: no units, or no contender (%d failed invariant(s))",
+                           len(doc.get("failed_invariants", [])))
+        print(shown)
 
 
 def _compare(store, args, policy):

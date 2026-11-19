@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from . import log
@@ -60,7 +61,9 @@ def _run(args, cwd=None):
 def _read(path):
     try:
         return Path(path).read_text().strip()
-    except OSError:
+    except OSError as e:
+        if log.once(("unreadable", str(path))):  # read for every order: say it once per command
+            logger.debug("cannot read %s: %s", path, e.strerror or e)
         return None
 
 
@@ -69,6 +72,9 @@ def _cpu_model():
         return _run(["sysctl", "-n", "machdep.cpu.brand_string"])
     text = _read("/proc/cpuinfo") or ""
     match = re.search(r"^model name\s*:\s*(.+)$", text, re.MULTILINE)
+    if not match and log.once("no-cpu-model"):
+        logger.debug("no CPU model found (no `model name` in /proc/cpuinfo, as on ARM Linux): left out of the "
+                     "environment identity")
     return match.group(1).strip() if match else None
 
 
@@ -94,6 +100,9 @@ def system_facts(child_env: dict, env_names=None) -> dict:
         facts["libc"] = {"name": libc, "version": version}
     if governor := _read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"):
         facts["cpu"] = {"governor": governor}
+    left_out = [name for name, found in (("libc", libc), ("cpu governor", "cpu" in facts)) if not found]
+    if left_out and log.once("facts-left-out"):
+        logger.debug("system facts left out, because they could not be read: %s", ", ".join(left_out))
     env = {k: child_env[k] for k in (env_names or env_allowlist(child_env)) if k in child_env}
     if env:
         facts["process"] = {"environment": env}
@@ -105,6 +114,8 @@ def load_average() -> float | None:
     try:
         return round(os.getloadavg()[0], 2)
     except (OSError, AttributeError):
+        if log.once("no-load-average"):  # asked for every case: said once per command, the case line shows `load n/a`
+            logger.debug("the load average is unavailable on this system")
         return None
 
 
@@ -164,8 +175,14 @@ def git_identity(path) -> dict | None:
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    excludes = [_PYCACHE_EXCLUDE, *([_OUT_EXCLUDE] if _out_is_untracked(top) else []),
-                *(f":(top,exclude){rel}" for rel in _ignored_in(top) if not _git_ignores(top, rel))]
+    out_left_out = _out_is_untracked(top)
+    own = [(rel, _git_ignores(top, rel)) for rel in _ignored_in(top)]
+    excludes = [_PYCACHE_EXCLUDE, *([_OUT_EXCLUDE] if out_left_out else []),
+                *(f":(top,exclude){rel}" for rel, git_does in own if not git_does)]
+    logger.debug("tree id of %s leaves out __pycache__, %s, and benchx's own paths %s (git's own ignore rules already "
+                 "cover %s)", top, "`**/out/**`" if out_left_out else "nothing under out/ (a tracked file is under an "
+                 "out/, or `git ls-files` failed)", [r for r, g in own if not g] or "(none inside it)",
+                 [r for r, g in own if g] or "none")
     status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
@@ -189,6 +206,31 @@ def git_identity(path) -> dict | None:
         identity["dirty"] = "unknown"
         identity["why_unknown"] = "git status failed" if status is None else "git add or write-tree failed"
     return identity
+
+
+def note_identity_fallback(identity: dict) -> None:
+    """A working tree identified by a content hash because git could not: INFO when the directory has no
+    `.git`, WARNING when it has one and git failed. Its revision is `directory-<hash>` and its state always
+    dirty, which the record says. Once per directory and command."""
+    if not identity["revision"].startswith("directory-") or not log.once(("fallback", identity["path"])):
+        return
+    has_git = (Path(identity["path"]) / ".git").exists()
+    logger.log(logging.WARNING if has_git else logging.INFO,
+               "%s is identified by a hash of its files (method directory-hash), as %s: its revision is %s and its "
+               "state is always dirty", identity["path"], "git could not read it" if has_git else "it is not under git",
+               identity["revision"][:28])
+
+
+def why_no_checkout(build_dir, source_dir=None) -> str:
+    """Why the checkout a build was made from cannot be found, for the refusal that says so."""
+    cache = Path(build_dir) / "CMakeCache.txt"
+    if not cache.exists():
+        return f"there is no CMakeCache.txt in {build_dir}"
+    if not source_dir:
+        return "CMakeCache.txt has no CMAKE_HOME_DIRECTORY"
+    if not Path(source_dir).is_dir():
+        return f"the recorded source directory {source_dir} is gone"
+    return f"git could not read {source_dir}"
 
 
 def source_uri(source_dir) -> str:
@@ -224,14 +266,19 @@ def benchmark_identity(suite_file, subject_source) -> dict | None:
     """
     suite = Path(suite_file).resolve()
     if suite.is_relative_to(Path(subject_source).resolve()):
+        logger.debug("the suite %s is in the subject's checkout: its identity is the subject's", suite)
         return None
     tree = blob_id(suite)
+    if tree is None:
+        logger.warning("the suite file %s cannot be read, so its identity has no blob id", suite)
     top = _run(["git", "rev-parse", "--show-toplevel"], cwd=suite.parent)
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if head:
         committed = _run(["git", "rev-parse", f"HEAD:{suite.relative_to(Path(top).resolve()).as_posix()}"], cwd=top)
         return {"uri": source_uri(top), "type": "git", "revision": head, "tree": tree,
                 "dirty": "clean" if committed == tree else "dirty"}
+    logger.debug("the suite %s is under no version control: a file:// source, always dirty; its series does not "
+                 "follow the suite to another machine", suite)
     return {"uri": suite.parent.as_uri(), "type": "directory", "tree": tree, "dirty": "dirty"}
 
 
@@ -249,6 +296,7 @@ def directory_identity(path) -> dict | None:
     root = Path(path)
     if not root.is_dir():
         return None
+    started, files, size = time.monotonic(), 0, 0
     digest = hashlib.sha1()
     ignored = tuple(_IGNORED)
     for file in sorted(p for p in root.rglob("*") if p.is_file()
@@ -256,10 +304,14 @@ def directory_identity(path) -> dict | None:
                        and not any(p.resolve().is_relative_to(i) for i in ignored)):
         try:
             content = file.read_bytes()
-        except OSError:
+        except OSError as e:
+            logger.warning("cannot read %s, so the tree %s cannot be identified: %s", file, root, e.strerror or e)
             return None
         name = file.relative_to(root).as_posix().encode()
         digest.update(b"%d:%s:%d:" % (len(name), name, len(content)) + content)
+        files, size = files + 1, size + len(content)
+    logger.debug("hashed %d file(s), %d byte(s) of %s in %.2f s; left out: %s (always), and benchx's own paths",
+                 files, size, root, time.monotonic() - started, ", ".join(sorted(_SKIPPED_DIRS)))
     tree = digest.hexdigest()
     return {"path": str(root.resolve()), "revision": f"directory-{tree}", "dirty": "dirty", "tree": tree}
 
@@ -276,6 +328,8 @@ def _cmake_cache(build_dir) -> dict:
 
 def cmake_source_dir(build_dir) -> str | None:
     entry = _cmake_cache(build_dir).get("CMAKE_HOME_DIRECTORY")
+    if not entry and log.once(("no-source-dir", str(build_dir))):
+        logger.debug("%s has no CMakeCache.txt, or no CMAKE_HOME_DIRECTORY in it: no source directory", build_dir)
     return entry[1] if entry else None
 
 
@@ -289,10 +343,16 @@ def cmake_configuration(build_dir) -> dict:
     """
     cache = _cmake_cache(build_dir)
     config = {}
+    if not cache:
+        _once_warn(("no-cache", str(build_dir)), "no CMakeCache.txt in %s: no build configuration is recorded, so "
+                   "`build-config-unverified` has nothing behind it", build_dir)
     for key, name in (("CMAKE_BUILD_TYPE", "build_type"), ("CMAKE_CXX_FLAGS", "cxx_flags")):
         if cache.get(key, (None, ""))[1]:
             config[name] = cache[key][1]
     compiler_file = next(Path(build_dir).glob("CMakeFiles/*/CMakeCXXCompiler.cmake"), None)
+    if cache and compiler_file is None:
+        _once_warn(("no-compiler-file", str(build_dir)), "no CMakeCXXCompiler.cmake under %s/CMakeFiles: the compiler "
+                   "is not recorded", build_dir)
     text = _read(compiler_file) if compiler_file else None
     if text:
         found = dict(re.findall(r'set\(CMAKE_CXX_COMPILER_(ID|VERSION) "([^"]*)"\)', text))
@@ -305,7 +365,16 @@ def cmake_configuration(build_dir) -> dict:
                    if k.startswith(prefix) and kind in ("BOOL", "STRING") and "/" not in v}
         if options:
             config["options"] = options
+    if log.once(("cmake", str(build_dir))):
+        logger.debug("CMake configuration of %s: recorded %s; from %d cache entries, %d option(s) with the prefix of "
+                     "the project %r kept", build_dir, ", ".join(sorted(config)) or "nothing", len(cache),
+                     len(config.get("options", {})), cache.get("CMAKE_PROJECT_NAME", (None, ""))[1])
     return config
+
+
+def _once_warn(key, message, *args) -> None:
+    """A WARNING the first time, DEBUG after: what is the same for every order of a command."""
+    logger.log(logging.WARNING if log.once(key) else logging.DEBUG, message, *args)
 
 
 def setup_facts(suite_root, env) -> tuple[dict | None, str | None]:
@@ -314,11 +383,22 @@ def setup_facts(suite_root, env) -> tuple[dict | None, str | None]:
     Returns (facts, warning). An absent file is not an error; an unreadable
     one contributes nothing and yields the warning collector-failed.
     """
-    path = Path(env.get("BENCHX_SETUP_FILE") or Path(suite_root) / ".benchx" / "setup.json")
+    named = env.get("BENCHX_SETUP_FILE")
+    path = Path(named or Path(suite_root) / ".benchx" / "setup.json")
+    # An environment variable's value is not logged (rule 3): the file is named by the variable then.
+    shown = "the file named by BENCHX_SETUP_FILE" if named else str(path)
     if not path.exists():
+        if named:
+            _once_warn("setup-missing", "BENCHX_SETUP_FILE names a file that does not exist: no setup facts")
         return None, None
     try:
         facts = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        _once_warn(("setup-unreadable", shown), "the setup file (%s) could not be read, so it gives the results the "
+                   "warning collector-failed: %s", shown, e)
         return None, "collector-failed"
-    return (facts, None) if isinstance(facts, dict) else (None, "collector-failed")
+    if not isinstance(facts, dict):
+        _once_warn(("setup-not-object", shown), "the setup file (%s) holds JSON that is not an object, so it gives the "
+                   "results the warning collector-failed", shown)
+        return None, "collector-failed"
+    return facts, None

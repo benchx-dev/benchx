@@ -160,6 +160,12 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
     good = [r for r in iterations if not r.get("error_occurred") and not r.get("skipped")]
     aggregates = {r.get("aggregate_name"): r for r in rows if r.get("run_type") == "aggregate"}
 
+    if good and len(good) < attempted and not run["timed_out"]:
+        first = (failed or skipped or [{}])[0]
+        logger.warning("%s: %d of %d repetition(s) were not measured (%d errored, %d skipped)%s", case,
+                       attempted - len(good), attempted, len(failed), len(skipped),
+                       f"; the first said: {first.get('error_message') or first.get('skip_message')}"
+                       if first.get("error_message") or first.get("skip_message") else "")
     outputs = []
     for name in quantities:
         field, quantity = QUANTITIES[name]

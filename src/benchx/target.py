@@ -127,6 +127,8 @@ def resolve(spec: str, *, operation="prepare", provider=None) -> dict | None:
         if provider is None:
             raise TargetError(f"{spec} needs a provider")
         command, directory = provider
+        if not source_ref:
+            logger.debug("%s has no SOURCE_REF: WORKSPACE is used", spec)
         return call_provider(command, directory, operation, source_ref or "WORKSPACE", configuration)
     build = spec.partition(":")[0]
     return sidecar(build) if build else None
