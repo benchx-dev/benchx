@@ -117,8 +117,12 @@ strict (UC-02 §10): a unit with an attempt of status `partial`, `censored` or
 the other rounds show. Otherwise a variant that times out in the slow rounds is
 judged on the fast ones. The other profiles drop the failed attempt's pair and
 keep the verdict from the rest, and a `skipped` attempt is dropped in every
-profile. The schema's §5.5 table is not touched, since this is a status rule,
-not an invariant.
+profile. A unit in which a side has no successful attempt at all (every attempt
+skipped, or failed under a profile that drops failed pairs) leaves no pair, and
+more rounds would not help: it is indeterminate with reason `not-measured`, not
+`insufficient-rounds`, and the unit carries how each side's attempts ended
+(`attempts`, counts by status). The schema's §5.5 table is not touched, since
+this is a status rule, not an invariant.
 
 In history mode it additionally checks that:
 

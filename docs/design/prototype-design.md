@@ -554,8 +554,11 @@ Per comparison unit (one workload variant and quantity), the method
   direction when known; otherwise *no change detected*;
 - is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
   never with fewer than two, since the noise is a standard error
-  (`insufficient-rounds`), when a baseline value is zero, when the guard
-  excluded the unit, or, under `variants`, when an attempt failed (`side-failed`).
+  (`insufficient-rounds`), when a side has no successful attempt at all, its
+  attempts skipped or failed and their pairs dropped (`not-measured`; the unit
+  carries `attempts`, the count of each side's attempts by status), when a
+  baseline value is zero, when the guard excluded the unit, or, under
+  `variants`, when an attempt failed (`side-failed`).
 
 Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with

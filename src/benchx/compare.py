@@ -9,6 +9,7 @@ on the input results, so the same results give the same document from any
 store.
 """
 
+import collections
 import json
 import math
 import re
@@ -389,12 +390,21 @@ def _caveats(by_side, base, contender) -> list[str]:
 def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False):
     first = {s: by_side[s][0] for s in (base, contender)}
     quantity = first[base]["measurement"]["quantity"]
+    # The evidence behind `rounds`: how each side's attempts ended, by status.
+    attempts = {role: dict(sorted(collections.Counter(d["measurement"]["status"] for d in by_side[s]).items()))
+                for role, s in (("baseline", base), ("contender", contender))}
     unit = {**where, "series": {name: identity.series_fingerprint(first[s], store_project(first[s]), identity.MEDIAN)
                                 for name, s in (("baseline", base), ("contender", contender))},
-            "rounds": len(pairs), "noise_source": "paired-rounds", "verdict": "indeterminate"}
+            "rounds": len(pairs), "attempts": attempts, "noise_source": "paired-rounds",
+            "verdict": "indeterminate"}
     if side_failed:
         # UC-02 §10: if either side fails to run, the benchmark has failed; no effect is reported.
         unit["reason"] = "side-failed"
+        return unit
+    if any("success" not in statuses for statuses in attempts.values()):
+        # A side that never measured it (every attempt skipped, or failed where a failed pair is dropped)
+        # leaves no pair: more rounds would not help, so this is not `insufficient-rounds`.
+        unit["reason"] = "not-measured"
         return unit
     estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
     estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
@@ -463,6 +473,20 @@ def _failed(items) -> list[str]:
     return lines
 
 
+def _reason(unit) -> str:
+    """The unit's reason; for `not-measured`, which side measured nothing, and how its attempts ended:
+    `not-measured: contender skipped`, or `baseline error 2, skipped 1` when the statuses differ."""
+    if unit["reason"] != "not-measured":
+        return unit["reason"]
+    sides = []
+    for role, statuses in unit["attempts"].items():
+        if "success" not in statuses:
+            many = len(statuses) > 1
+            sides.append(f"{role} " + ", ".join(f"{status} {n}" if many else status
+                                               for status, n in sorted(statuses.items(), key=lambda x: (-x[1], x[0]))))
+    return f"not-measured: {', '.join(sides)}"
+
+
 def _excluded(items) -> list[str]:
     """Results left out, one line for each reason (which has what the result said): `reason  (K results)`.
     Which results is in the document (`--json`), not here."""
@@ -507,7 +531,7 @@ def render(doc: dict) -> str:
         for u in rows:
             effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
             noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
-            reason = f"  ({u['reason']})" if "reason" in u else ""
+            reason = f"  ({_reason(u)})" if "reason" in u else ""
             lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} effect {effect}  noise {noise}"
                          f"  rounds={u['rounds']}{reason}")
     for title, items, say in (("missing", doc["missing"], _missing), ("failed invariants", doc["failed_invariants"], _failed),

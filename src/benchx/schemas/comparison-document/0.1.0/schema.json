@@ -284,6 +284,17 @@
         ]
       }
     },
+    "attempts": {
+      "description": "Attempt counts by status, for one side of a unit.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/token"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
     "runUnit": {
       "description": "One workload variant and quantity, its two sides paired by round.",
       "allOf": [
@@ -300,6 +311,23 @@
           "description": "Paired rounds used as evidence.",
           "type": "integer",
           "minimum": 0
+        },
+        "attempts": {
+          "description": "How each side's attempts at this unit ended, by status. The evidence behind `rounds`: a side with no `success` was not measured (reason `not-measured`).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseline",
+            "contender"
+          ],
+          "properties": {
+            "baseline": {
+              "$ref": "#/$defs/attempts"
+            },
+            "contender": {
+              "$ref": "#/$defs/attempts"
+            }
+          }
         },
         "series": {
           "description": "The series each side's results belong to, when the store assigns them one. Run mode reads no history from them.",

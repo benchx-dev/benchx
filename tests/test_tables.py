@@ -154,7 +154,7 @@ def test_a_benchmark_that_raises_on_one_side_leaves_the_others_compared():
     rows = [line for line in shown.splitlines() if line.startswith("| ")]
     assert sum("| regressed " in line for line in rows) == 2
     assert any("bench_b.Plain.time_x" in line and "| ?" in line and "error" in line and "n/a" in line
-               and "indeterminate (insufficient-rounds)" in line for line in rows)
+               and "indeterminate (not-measured)" in line for line in rows)
 
 
 def test_an_edited_benchmark_has_no_row_but_the_others_do():

@@ -140,12 +140,12 @@ def test_one_pair_has_no_noise_whatever_min_rounds_says(min_rounds):
 
 
 def test_no_pair_at_all_is_indeterminate_too():
-    """Every head attempt failed, so no round pairs; `min_rounds=0` must not reach the mean of nothing."""
+    """Every head attempt failed, so no round pairs, and the reason says the head was not measured; `min_rounds=0` must not reach the mean of nothing."""
     docs = run()
     for d in docs[1::2]:
         d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
     unit = evaluate(docs, min_rounds=0)["units"][0]
-    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "insufficient-rounds", 0)
+    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
 
 
 def test_two_pairs_are_enough_when_min_rounds_allows():
@@ -659,7 +659,7 @@ def test_an_edited_benchmark_fails_its_own_unit_only():
 def test_a_failed_attempt_is_excluded_before_the_facts_are_matched():
     """A benchmark that raises reports no harness version or runtime, so its attempts differ from the other
     side's in those facts. They are excluded and listed, not matched: the benchmark has no verdict
-    (`insufficient-rounds`) and the other one is compared."""
+    (`not-measured`) and the other one is compared."""
     docs = run_two()
     failing = of_head(docs, "BM_B")
     for d in docs:
@@ -673,7 +673,7 @@ def test_a_failed_attempt_is_excluded_before_the_facts_are_matched():
     assert doc["failed_invariants"] == []
     assert by_name(doc)["BM_A"]["verdict"] == "regressed"
     failed = by_name(doc)["BM_B"]
-    assert failed["verdict"] == "indeterminate" and failed["reason"] == "insufficient-rounds"
+    assert failed["verdict"] == "indeterminate" and failed["reason"] == "not-measured"
     assert [e["reason"] for e in doc["exclusions"]] == ["error: harness.error"] * 3
     assert by_name(doc)["BM_B"].get("unmatched_differences", []) == []  # what it did not report is no difference
     assert by_name(doc)["BM_A"].get("unmatched_differences", []) == []
@@ -764,3 +764,45 @@ def test_missing_results_are_one_line_for_each_side_with_a_few_names():
     assert compare.render(doc).endswith(
         "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)")
 
+
+
+def skip(docs, indexes, status="skipped", reason="harness.skipped"):
+    for i in indexes:
+        docs[i]["measurement"] = {"quantity": docs[i]["measurement"]["quantity"], "status": status,
+                                  "reason": reason}
+    return docs
+
+
+def test_a_side_that_skipped_every_round_was_not_measured_not_short_of_rounds():
+    """A setup that raises on the contender leaves no pair at all. More rounds would not help, so the
+    reason is not `insufficient-rounds`; the unit carries how each side's attempts ended."""
+    doc = evaluate(skip(run(), [1, 3, 5]))
+    unit = doc["units"][0]
+    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 3}}
+    assert "reference_estimate" not in unit and "effect" not in unit
+    assert "rounds=0  (not-measured: contender skipped)" in compare.render(doc)
+    assert [e["reason"] for e in doc["exclusions"]] == ["skipped: harness.skipped"] * 3
+
+
+def test_the_render_names_every_side_that_was_not_measured_and_how_its_attempts_ended():
+    docs = skip(skip(run(), [0, 2, 4], "error", "harness.error"), [1, 3], "skipped")
+    docs = skip(docs, [5], "error", "harness.error")
+    doc = evaluate(docs)
+    unit = doc["units"][0]
+    assert unit["reason"] == "not-measured"
+    assert unit["attempts"] == {"baseline": {"error": 3}, "contender": {"error": 1, "skipped": 2}}
+    assert "(not-measured: baseline error, contender skipped 2, error 1)" in compare.render(doc)
+
+
+def test_some_rounds_measured_on_both_sides_is_still_insufficient_rounds():
+    """One skipped round leaves two pairs: the sides were measured, there are too few rounds."""
+    unit = evaluate(skip(run(), [5]))["units"][0]
+    assert (unit["reason"], unit["rounds"]) == ("insufficient-rounds", 2)
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 1, "success": 2}}
+    assert "(insufficient-rounds)" in compare.render(evaluate(skip(run(), [5])))
+
+
+def test_every_unit_carries_how_its_attempts_ended():
+    unit = evaluate(run())["units"][0]
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
