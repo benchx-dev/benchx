@@ -31,6 +31,7 @@ passed, and warns `env-mismatch` when the two differ.
 
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -39,8 +40,10 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
-                   kill_group, stop_group)
+from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
+                   note_case_ended, note_cases, parametrized_workload, run_bounded, stop_group)
+
+logger = logging.getLogger(__name__)
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -196,7 +199,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         where = runnable["module"]
     out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), str(PARAMS)],
                       timeout=timeout, what=f"importing {runnable['module'].name} to list its benchmarks",
-                      env=env, cwd=runnable["root"])
+                      env=env, cwd=runnable["root"], scripts={"LISTER": LISTER})
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
@@ -222,7 +225,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
         raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],
                        [name_only_note(unmatched)] if unmatched else [])
-    return cases
+    return note_cases(logger, cases, case_filter)
 
 
 workload = parametrized_workload  # the function, and its parameters as value strings
@@ -291,6 +294,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
     # Absolute: the child runs in the tree, not where the output directory was named.
     args = [runnable["python"], str(driver.resolve()), *flags, "-o", str(native_path.resolve())]
     # Its own process group, so a timeout takes the workers down with the manager.
+    note_case(logger, args, cwd=runnable["root"], timeout=timeout)
     proc = subprocess.Popen(args, env=env, cwd=runnable["root"], text=True, start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
@@ -309,6 +313,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
             native_path.write_text(json.dumps(native, indent=1) + "\n")
         except ValueError:
             native = None
+    note_case_ended(logger, status, timeout, native_path, parsed=native is not None)
     captured = None
     if worker_env.exists():
         try:

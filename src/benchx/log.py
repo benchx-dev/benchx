@@ -70,8 +70,24 @@ class _OnlyConsole(logging.Filter):
         return bool(getattr(record, "console", False))
 
 
+class _Buffer(logging.Handler):
+    """Keeps the records made before the log is on (the config loaded, the shorthand's tree found, an
+    `asv.conf.json` read in the command's own checks) until `configure` knows where they go. Bounded."""
+
+    LIMIT = 1000
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        if len(self.records) < self.LIMIT:
+            self.records.append(record)
+
+
 class _State:
     verbosity = 0
+    buffer = None  # records made before configure()
     console = None  # the console handler, or None
     destination = None  # the file handler, or the --log stderr handler, or None
     level = logging.DEBUG  # the level the destination keeps
@@ -91,7 +107,7 @@ def _logger() -> logging.Logger:
 def _apply_level() -> None:
     """The `benchx` logger passes the lowest level any handler wants, so a record nobody reads
     costs nothing (and `isEnabledFor(DEBUG)` is false when nothing wants DEBUG)."""
-    wanted = []
+    wanted = [logging.DEBUG] if _state.buffer is not None else []
     if _state.console is not None:
         wanted.append(_CONSOLE[_state.verbosity][0])
     if _state.destination is not None:
@@ -116,6 +132,9 @@ def start_console(verbosity: int = 0) -> None:
     """Install the console handler: stderr, the bare message. `verbosity` is -2 to 2 (`-qq` to
     `-vv`). Idempotent: it replaces its own handler and leaves any other alone."""
     _remove(_state.console)
+    _remove(_state.buffer)
+    _state.buffer = _Buffer()
+    _logger().addHandler(_state.buffer)
     _state.verbosity = verbosity
     level, only_console = _CONSOLE[verbosity]
     handler = _Stderr()
@@ -138,6 +157,10 @@ def configure(setting, *, level: int = logging.DEBUG, argv=None) -> None:
     _state.configured = False
     _state.degraded = []
     _state.once = set()
+    earlier, shown = (_state.buffer.records if _state.buffer else []), _state.console is not None
+    if _state.buffer is not None:  # from here on the destination, if any, takes the records
+        _remove(_state.buffer)
+        _state.buffer = None
     if setting is False or setting is None:
         _apply_level()
         return
@@ -155,6 +178,11 @@ def configure(setting, *, level: int = logging.DEBUG, argv=None) -> None:
     _state.started = time.monotonic()
     _apply_level()
     _header(argv)
+    # What happened before the log was on, in order. The console handler has shown what it shows, so a
+    # console message is not repeated on a stderr that is now the log itself.
+    for record in earlier:
+        if record.levelno >= level and not (setting is True and getattr(record, "console", False)):
+            handler.handle(record)
 
 
 def stop() -> None:
@@ -162,7 +190,8 @@ def stop() -> None:
     on the way out, so a library call that follows in the same process is silent again."""
     _remove(_state.console)
     _remove(_state.destination)
-    _state.console = _state.destination = None
+    _remove(_state.buffer)
+    _state.console = _state.destination = _state.buffer = None
     _state.configured = False
     _apply_level()
 
@@ -207,6 +236,32 @@ def once(key) -> bool:
         return False
     _state.once.add(key)
     return True
+
+
+def harness_output(logger, label, stream, text, *, failed, kept_at=None, limit=40) -> None:
+    """A process's output in the log, after it has exited: a header record that names the stream
+    and its size, then the last `limit` lines, one record each (`label| line`). DEBUG when the
+    process did well, WARNING when it `failed`. `kept_at` is where the full text is kept, if
+    anywhere. An empty stream is skipped. The text is the program's own, logged as written."""
+    level = logging.WARNING if failed else logging.DEBUG
+    if not text or not text.strip() or not logger.isEnabledFor(level):
+        return
+    lines = text.splitlines()
+    kept = lines[-limit:]
+    where = f"all in {kept_at}" if kept_at else "the full text is not kept"
+    if len(kept) < len(lines):
+        header = f"{label}: {stream}, {len(lines)} lines (last {limit}; {where})"
+    else:
+        header = f"{label}: {stream}, {len(lines)} lines" + (f" (also in {kept_at})" if kept_at else "")
+    logger.log(level, "%s", header)
+    for line in kept:
+        logger.log(level, "%s: %s| %s", label, stream, line)
+
+
+def as_text(data) -> str:
+    """What a timed-out process had printed, which `subprocess` hands back as bytes, as text: decoding for the log
+    never raises."""
+    return data.decode(errors="backslashreplace") if isinstance(data, bytes) else data or ""
 
 
 def command(args, *, scripts=None, temporary=()) -> str:

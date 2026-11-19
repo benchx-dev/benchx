@@ -9,6 +9,7 @@ the target and the module's path in it as the suite, its asv counterpart
 """
 
 import json
+import logging
 import statistics
 from pathlib import Path
 
@@ -17,13 +18,20 @@ from .errors import SessionError
 from .projection import declared_workload, said, workload_label
 from .store import warning_codes
 
+logger = logging.getLogger(__name__)
+
 
 def tree_of(module: Path, tree=None) -> Path:
     """The tree being measured: --tree, else the module's git checkout, else its directory."""
     if tree:
+        logger.debug("the shorthand's tree is %s, from --tree", Path(tree).resolve())
         return Path(tree).resolve()
     top = snapshot._run(["git", "rev-parse", "--show-toplevel"], cwd=module.parent)
-    return Path(top).resolve() if top else module.parent.resolve()
+    if top:
+        logger.debug("the shorthand's tree is %s, the git checkout of %s", Path(top).resolve(), module)
+        return Path(top).resolve()
+    logger.info("no git checkout: the directory %s is the tree", module.parent.resolve())
+    return module.parent.resolve()
 
 
 def module_target(module, tree=None) -> tuple[str, str]:
@@ -33,9 +41,11 @@ def module_target(module, tree=None) -> tuple[str, str]:
         raise SessionError(f"no such module: {module}")
     root = tree_of(module, tree)
     try:
-        return str(root), module.relative_to(root).as_posix()
+        suite = module.relative_to(root).as_posix()
     except ValueError:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
+    logger.debug("the shorthand's suite is %s", suite)
+    return str(root), suite
 
 
 def asv_target(path, tree=None) -> tuple[str, str]:
@@ -47,6 +57,7 @@ def asv_target(path, tree=None) -> tuple[str, str]:
     for name in asv.CONF_NAMES:
         if (benchmark_dir / name).is_file():
             conf = asv._read_conf(benchmark_dir / name)
+            logger.debug("read %s: benchmark_dir %s", benchmark_dir / name, conf.get("benchmark_dir", "benchmarks"))
             benchmark_dir = (benchmark_dir / conf.get("benchmark_dir", "benchmarks")).resolve()
             break
     if not benchmark_dir.is_dir():

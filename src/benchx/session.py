@@ -16,8 +16,11 @@ of one workload parameter of the benchmark (UC-02), so each round runs the cases
 of one value, then the other's.
 """
 
+import contextlib
 import json
+import logging
 import os
+import time
 from pathlib import Path
 
 from . import adapters, harnesses, orders, runner, snapshot, target as target_mod
@@ -58,9 +61,12 @@ def parse_label(text: str) -> tuple[str, str, str]:
 
 KINDS = ("build", "working_tree")
 
+logger = logging.getLogger(__name__)
+MAX_LOGGED = 40  # the log's cap on a list, like its other lists
+
 
 def _side(spec: str, suite: str, operation: str, harness, environment_variables=None, provider=None,
-          timeout=None) -> dict:
+          timeout=None, name=None) -> dict:
     """Locate and identify one side before anything runs.
 
     `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or a
@@ -112,6 +118,9 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         if not identity:
             raise SessionError(f"cannot identify the working tree {source}")
     found = _found_benchmark(harness, path, suite, identity["path"])
+    logger.debug("%s: %s, a %s at %s, source %s, revision %s, tree %s, %s; benchmark %s", name or "target", spec, kind,
+                 path, identity["path"], identity["revision"][:12], (identity.get("tree") or "none")[:12],
+                 identity["dirty"], f"{found['type']} {found['uri']}, {found['dirty']}" if found else "in the subject's tree")
     return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
             "benchmark": _benchmark(found),
             # As the runner records it: a benchmark in the subject's tree is dirty as the subject is.
@@ -202,15 +211,47 @@ def _source_uri(sides, source_uri) -> str:
     return uris.pop()
 
 
-def _run_side(side: dict, path: Path, store=None, **order) -> tuple[dict, dict | None]:
+def _run_side(side: dict, path: Path, store=None, *, title="the order", **order) -> tuple[dict, dict | None]:
     """Write one side's order to `path`, run it (results go beside `orders/`),
     and deliver them to `store` unless it is None. The runner's summary, and the
-    store's outcome (None without a store)."""
+    store's outcome (None without a store). `title` names the slot in the log."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_order(side, **order), indent=1) + "\n")
+    logger.info("%s: order %s", title, path)  # before the wait it describes
+    started = time.monotonic()
     # The order is this session's own, built from the user's configuration: its collectors may run.
     summary = runner.run(path, path.parent.parent, allow_collectors=True)
-    return summary, store.ingest_paths(summary["files"]) if store else None
+    logger.debug("%s: work order %s; output %s; artifacts %s", title, summary["files"][0], summary["out"],
+                 Path(summary["out"]) / "artifacts")  # the work order holds the -e values: the path, never the content
+    outcome = store.ingest_paths(summary["files"]) if store else None
+    delivered = (f"; store: ingested {outcome['ingested']}, duplicate {outcome['duplicate']}, rejected "
+                 f"{len(outcome['rejected'])}") if outcome else ""
+    logger.info("%s: %d case(s), %d result(s)%s, %.1f s", title, summary["cases"], summary["results"], delivered,
+                time.monotonic() - started)
+    return summary, outcome
+
+
+def _rejected(outcome, where) -> None:
+    """The store refused results during a comparison: each rejection (at most MAX_LOGGED), where `bx bench`
+    prints them, with the round and side."""
+    for r in outcome["rejected"][:MAX_LOGGED]:
+        logger.warning("%s: rejected %s: %s: %s", where, r["document"], r["code"], r["message"])
+    if len(outcome["rejected"]) > MAX_LOGGED:
+        logger.warning("%s: and %d more rejected", where, len(outcome["rejected"]) - MAX_LOGGED)
+
+
+@contextlib.contextmanager
+def _stopped(slot, run_key, store, where):
+    """A round that is interrupted or fails after an earlier slot was ingested: say how much is in the
+    store and how to compare it. The exception goes on."""
+    try:
+        yield
+    except BaseException as error:
+        if slot:
+            logger.log(logging.ERROR if isinstance(error, Exception) else logging.WARNING,
+                       "stopped in %s after %d slot(s) were ingested into %s; bx compare --run %s compares what is there",
+                       where, slot, store.path, run_key)
+        raise
 
 
 def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=None, file_precision=None,
@@ -235,10 +276,14 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
     source_uri = _source_uri([side], source_uri)
     run_key = run_key or orders.default_run_key("bench")
     out = Path(out) if out else run_directory(results_dir, run_key)
+    placed = "".join([f", round {round_}" if round_ is not None else "", f", slot {slot}" if slot is not None else "",
+                      f", labels {labels}" if labels else ""])
+    logger.info("run key %s, output %s%s", run_key, out, placed)
     if progress:
         progress(f"precision: {harness.describe_precision(precision, config_path)}")
     order_file = "order.json" if slot is None else f"order-{slot:04d}.json"  # one per slot, as compare_targets
-    summary, outcome = _run_side(side, out / "orders" / order_file, store, harness=harness, suite=suite,
+    summary, outcome = _run_side(side, out / "orders" / order_file, store, title=f"slot {slot}" if slot is not None else "the order",
+                                 harness=harness, suite=suite,
                                  filter=filter, quantities=quantities, precision=precision,
                                  environment_variables=environment_variables, project=project, run_key=run_key,
                                  source_uri=source_uri, case_s=case_s, order_s=order_s, collectors=collectors,
@@ -252,15 +297,16 @@ def _refuse_unknown_tree(side: dict, name: str | None = None) -> None:
     after R rounds. `name` says which side of a comparison, when there are two."""
     if side["identity"]["dirty"] == "unknown":  # schema §4.1: no tree id exactly when unknown
         who = f"{name} tree" if name else "tree"
+        cause = side["identity"].get("why_unknown")
         raise SessionError(f"{who} {side['source']} has no working-tree id (its dirty state is "
-                           f"{side['identity']['dirty']}): the sides cannot be told apart, or checked for "
-                           "a change during the run. Make every file in the tree readable, or git-ignore "
-                           "it (UC-03 §10)")
+                           f"{side['identity']['dirty']}{f'; {cause}' if cause else ''}): the sides cannot be told "
+                           "apart, or checked for a change during the run. Make every file in the tree readable, "
+                           "or git-ignore it (UC-03 §10)")
 
 
 def _note_local_only(progress, sides) -> None:
     """Say before measuring which (name, side) pairs are not clean: the comparison will be local-only.
-    TODO: log these at logging.WARNING once benchx has logging (plan, Q13)."""
+    The messages are INFO, not WARNING: comparing uncommitted work is the expected case (logging_plan.md §4)."""
     for name, side in sides:
         for what, state in (("tree", side["identity"]["dirty"]),
                             ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):
@@ -304,8 +350,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError("--label names the sides of an environments comparison; revisions are named by their trees")
     harness, precision = _harness(adapter, flags, file_precision, quantities)
     operation = "prepare" if build else "describe"
-    sides = [_side(spec, suite, operation, harness, environment_variables, provider,
-                   timeout=order_s) for spec in (baseline, contender)]
+    sides = [_side(spec, suite, operation, harness, environment_variables, provider, timeout=order_s, name=name)
+             for name, spec in (("baseline", baseline), ("contender", contender))]
     if profile == "revisions":
         for name, side in zip(("baseline", "contender"), sides):
             _refuse_unknown_tree(side, name)
@@ -313,24 +359,34 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         _note_local_only(progress, zip(("baseline", "contender"), sides))
     source_uri = _source_uri(sides, source_uri)
     if len({json.dumps((side.get("benchmark") or {}).get("source")) for side in sides}) != 1:
+        logger.debug("the sides' benchmark sources: %s", "; ".join(
+            f"{name} {(side.get('benchmark') or {}).get('source') or 'the subject own tree'}"
+            for name, side in zip(("baseline", "contender"), sides)))
         raise SessionError("the sides' suites come from different sources; give --suite as one absolute path")
 
     run_key = run_key or orders.default_run_key("compare")
     out = Path(out) if out else run_directory(results_dir, run_key)
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
+    logger.info("run key %s, output %s, %d round(s)", run_key, out, rounds)
+    logger.debug("the baseline value for the comparison is %s: %s, and the baseline runs first in every round",
+                 label[1] if profile == "environments" else sides[0]["identity"].get("tree"),
+                 "the first label value" if profile == "environments" else "the first target's tree id")
 
     slot = 0
     for round_ in range(rounds):
         for name, side, side_labels in zip(("baseline", "contender"), sides, labels):
-            summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store,
-                                         harness=harness, suite=suite, filter=filter, quantities=quantities,
-                                         precision=precision, environment_variables=environment_variables,
-                                         project=project, run_key=run_key, source_uri=source_uri,
-                                         round_=round_, slot=slot, labels=side_labels, case_s=case_s, order_s=order_s,
-                                         collectors=collectors)
-            if outcome["rejected"]:
-                codes = sorted({r["code"] for r in outcome["rejected"]})
-                raise SessionError(f"the store rejected results of round {round_} ({name}): {', '.join(codes)}")
+            title = f"slot {slot + 1}/{rounds * 2}, round {round_ + 1}/{rounds}, {name}"
+            with _stopped(slot, run_key, store, title):
+                summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store, title=title,
+                                             harness=harness, suite=suite, filter=filter, quantities=quantities,
+                                             precision=precision, environment_variables=environment_variables,
+                                             project=project, run_key=run_key, source_uri=source_uri,
+                                             round_=round_, slot=slot, labels=side_labels, case_s=case_s,
+                                             order_s=order_s, collectors=collectors)
+                if outcome["rejected"]:
+                    _rejected(outcome, title)
+                    codes = sorted({r["code"] for r in outcome["rejected"]})
+                    raise SessionError(f"the store rejected results of round {round_} ({name}): {', '.join(codes)}")
             if progress:
                 progress(f"round {round_ + 1}/{rounds} {name}: {summary['results']} result(s)")
             slot += 1
@@ -467,20 +523,33 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
     run_key = run_key or orders.default_run_key("compare")
     out = Path(out) if out else run_directory(results_dir, run_key)
     filters = {value: harnesses.exact_filter(by_value[value], arguments=True) for value in values}
+    logger.info("run key %s, output %s, %d round(s)", run_key, out, rounds)
+    logger.info("varying %s: baseline %s, contender %s; %s", parameter, baseline, contender,
+                ", ".join(f"{len(by_value[value])} case(s) with {value}" for value in values))
+    if logger.isEnabledFor(logging.DEBUG):
+        declared = _declared_by(runnable, environment_variables)
+        logger.debug("parameters declared: %s", "; ".join(f"{name}: {', '.join(who)}" for name, who in declared.items()))
+        for value in values:
+            shown = by_value[value][:MAX_LOGGED]
+            more = f", and {len(by_value[value]) - len(shown)} more" if len(by_value[value]) > len(shown) else ""
+            logger.debug("%s=%s runs filter %s: %s%s", parameter, value, filters[value], ", ".join(shown), more)
 
     slot = 0
     for round_ in range(rounds):
         for value in (baseline, contender):
-            summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store,
-                                         harness=harness, suite=suite, filter=filters[value], quantities=quantities,
-                                         precision=precision, environment_variables=environment_variables,
-                                         project=project, run_key=run_key, source_uri=source_uri,
-                                         round_=round_, slot=slot, case_s=case_s, order_s=order_s,
-                                         collectors=collectors)
-            if outcome["rejected"]:
-                codes = sorted({r["code"] for r in outcome["rejected"]})
-                raise SessionError(f"the store rejected results of round {round_} ({parameter}={value}): "
-                                   f"{', '.join(codes)}")
+            title = f"slot {slot + 1}/{rounds * 2}, round {round_ + 1}/{rounds}, {parameter}={value}"
+            with _stopped(slot, run_key, store, title):
+                summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store, title=title,
+                                             harness=harness, suite=suite, filter=filters[value],
+                                             quantities=quantities, precision=precision,
+                                             environment_variables=environment_variables, project=project,
+                                             run_key=run_key, source_uri=source_uri, round_=round_, slot=slot,
+                                             case_s=case_s, order_s=order_s, collectors=collectors)
+                if outcome["rejected"]:
+                    _rejected(outcome, title)
+                    codes = sorted({r["code"] for r in outcome["rejected"]})
+                    raise SessionError(f"the store rejected results of round {round_} ({parameter}={value}): "
+                                       f"{', '.join(codes)}")
             if progress:
                 progress(f"round {round_ + 1}/{rounds} {parameter}={value}: {summary['results']} result(s)")
             slot += 1

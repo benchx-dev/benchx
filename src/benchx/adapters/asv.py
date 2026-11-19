@@ -44,6 +44,7 @@ is part of the protocol, so editing a benchmark starts a new series.
 """
 
 import json
+import logging
 import math
 import shutil
 import statistics
@@ -53,12 +54,13 @@ from pathlib import Path
 
 from .. import log, snapshot
 from . import benchx_params, pyperf
-from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
-                   kill_group, stop_group)
+from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
+                   note_case_ended, note_cases, parametrized_workload, run_bounded, stop_group)
 
 # asv's skip warnings are shown to the user, as `bx` shows its other messages (plan §4): the one
 # library module that makes console messages, until `list_cases` returns them as data.
 say = log.console(__name__)
+logger = logging.getLogger(__name__)
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -138,12 +140,15 @@ def _which_python(env: dict) -> str | None:
     return shutil.which("python", path=path) or shutil.which("python3", path=path)
 
 
-def _read_conf(path: Path) -> dict:
-    """asv.conf.json allows // comments; drop whole-line ones, as asv does."""
+def _read_conf(path: Path, level=logging.WARNING) -> dict:
+    """asv.conf.json allows // comments; drop whole-line ones, as asv does. A file that is not JSON gives
+    `{}` and a record at `level`: WARNING from the shorthand, which reads it once per command, DEBUG from
+    `_project`, which reads it again for every order."""
     lines = [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("//")]
     try:
         return json.loads("\n".join(lines))
-    except ValueError:
+    except ValueError as e:
+        logger.log(level, "%s is not valid JSON, so its settings are not applied: %s", path, e)
         return {}
 
 
@@ -152,7 +157,7 @@ def _project(benchmark_dir: Path, root: Path) -> str | None:
     for directory in [benchmark_dir, *benchmark_dir.parents]:
         for name in CONF_NAMES:
             if (directory / name).is_file():
-                return _read_conf(directory / name).get("project")
+                return _read_conf(directory / name, logging.DEBUG).get("project")
         if directory == root:
             break
     return None
@@ -189,7 +194,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         shutil.copy(PARAMS, scratch)
         out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
                           timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
-                          env=env, cwd=scratch)
+                          env=env, cwd=scratch, temporary=[scratch])
     if out.returncode != 0:
         raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
@@ -233,7 +238,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                        {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
         say.warning(f"asv: not run (only time benchmarks map to wall-time): {not_run}")
-    return cases
+    return note_cases(logger, cases, case_filter)
 
 
 def _describe(target: tuple[str, int | None]) -> str:
@@ -378,6 +383,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             skipped=str(skipped), facts=str(facts), project=runnable["project"] or ""))
         args = [runnable["python"], str(driver.resolve()), *_flags(plan), "-o", str(native_path.resolve())]
         # Its own process group, so a timeout takes the workers down with the manager.
+        note_case(logger, args, cwd=scratch, timeout=timeout)
         proc = subprocess.Popen(args, env=env, cwd=scratch, text=True, start_new_session=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
@@ -392,6 +398,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
         skip = _read_json(skipped)
         observed = _read_json(facts) or {}
     native = _read_json(native_path)
+    note_case_ended(logger, status, timeout, native_path, parsed=native is not None, skipped=skip is not None)
     if native is not None:
         native_path.write_text(json.dumps(native, indent=1) + "\n")
     asv = {"benchmark": info, "case": case, "plan": plan, "skipped": skip, **observed}

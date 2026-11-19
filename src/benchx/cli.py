@@ -185,6 +185,7 @@ def cmd_run(args):
     if (cfg := _start_logging(cfg, args, Path(args.out) if args.out else None, "run")) is None:
         return EXIT_REFUSED
     snapshot.ignore(*cfg.own_paths, out)
+    logger.info("order file %s; output %s", Path(args.order).resolve(), out)
     try:
         summary = runner.run(args.order, out, allow_collectors=args.allow_collectors)
     except runner.Refused as e:
@@ -192,10 +193,11 @@ def cmd_run(args):
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
     if args.no_ingest:
+        logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
     store = Store(cfg.store_path)
     print(f"{store.path}: ", end="")
-    return _report(store.ingest_paths(summary["files"]))
+    return _report(store.ingest_paths(summary["files"]), store.path)
 
 
 def _environment(items) -> dict:
@@ -370,6 +372,8 @@ def cmd_bench(args):
     out = Path(args.out) if args.out else session.run_directory(cfg.results_dir, run_key)
     if (cfg := _start_logging(cfg, args, out, "bench")) is None:
         return EXIT_REFUSED
+    logger.info("run key %s (%s); output folder %s (%s)", run_key, "given" if args.run_key else "generated", out,
+                "--out" if args.out else "the results directory")
     _log_settings(settings.pop("sources"))
     settings["run_key"], settings["out"] = run_key, out
     settings["filter"] = names or settings["filter"]
@@ -387,10 +391,14 @@ def cmd_bench(args):
     if failed := bench_mod.failures(rows):
         print(failed)
     print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
+    cases = {row["case"] for row in rows}
+    if unmeasured := {row["case"] for row in rows if not row["status"].startswith(("success", "skipped"))}:
+        log.degraded(f"{len(unmeasured)} of {len(cases)} cases not measured")  # the exit status stays 0
     if store is None:
+        logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
     print(f"{store.path}: ", end="")
-    return _report(summary["outcome"])
+    return _report(summary["outcome"], store.path)
 
 
 def cmd_config(args):
@@ -466,14 +474,15 @@ def _resolved(cfg):
     yield row("compare.min_rounds", compare.get("min_rounds"), 3)
 
 
-def _report(outcome):
+def _report(outcome, store_path=None):
     for r in outcome["rejected"]:
         say.warning(f"  rejected {r['document']}: {r['code']} — {r['message']}")
     counts = f"ingested {outcome['ingested']}, duplicate {outcome['duplicate']}"
     if outcome["rejected"]:
         codes = sorted({r["code"] for r in outcome["rejected"]})
         counts += f", rejected {len(outcome['rejected'])} ({', '.join(codes)})"
-    print(counts)
+    print(counts)  # the command's answer, on stdout; the log has it too
+    logger.info("%s: %s", store_path or "store", counts)
     return EXIT_INVALID if outcome["rejected"] else EXIT_OK
 
 
@@ -482,7 +491,8 @@ def cmd_ingest(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "ingest")) is None:
         return EXIT_REFUSED
-    return _report(Store(cfg.store_path).ingest_paths(args.paths))
+    logger.info("ingesting %d path(s): %s", len(args.paths), ", ".join(str(Path(p).resolve()) for p in args.paths))
+    return _report(Store(cfg.store_path).ingest_paths(args.paths), cfg.store_path)
 
 
 def cmd_series(args):
@@ -710,8 +720,20 @@ def _measure(cfg, args, policy, sources):
     return EXIT_OK
 
 
+def _degraded(doc):
+    """What a comparison that exited 0 left undone, for the footer: nothing is added for a clean one."""
+    units, failed = doc["units"], doc.get("failed_invariants", [])
+    if failed and not units:
+        log.degraded(f"0 units compared, {len(failed)} invariant(s) failed")
+    elif failed:
+        log.degraded(f"{len(failed)} invariant(s) failed")
+    if indeterminate := [u for u in units if u["verdict"] == "indeterminate"]:
+        log.degraded(f"{len(indeterminate)} of {len(units)} units indeterminate")
+
+
 def _show(doc, args, documents):
     """The comparison as JSON, or as text; with --tables, the asv-style tables follow the summary."""
+    _degraded(doc)
     if args.json:
         print(json.dumps(doc, indent=1))
         return

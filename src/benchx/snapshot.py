@@ -6,6 +6,7 @@ never a placeholder (§3.1). Nothing here changes the machine.
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
@@ -14,7 +15,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import log
 from .identity import normalize_remote
+
+logger = logging.getLogger(__name__)
 
 # §3.1: never the whole environment; only variables that shape execution: the
 # thread and device variables, and the dynamic loader's search variables. No
@@ -43,7 +47,12 @@ def env_allowlist(env: dict, adapter_names=()) -> tuple:
 def _run(args, cwd=None):
     try:
         out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True)
-    except (OSError, subprocess.CalledProcessError):
+    except OSError as e:
+        logger.debug("%s failed in %s: %s", log.command(args), cwd or Path.cwd(), e)
+        return None
+    except subprocess.CalledProcessError as e:
+        logger.debug("%s failed in %s: exit %d: %s", log.command(args), cwd or Path.cwd(), e.returncode,
+                     " | ".join((e.stderr or "").strip().splitlines()[:3]))
         return None
     return out.stdout.strip()
 
@@ -167,13 +176,18 @@ def git_identity(path) -> dict | None:
             subprocess.run(["git", "add", "-A", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True)
             tree = subprocess.run(["git", "write-tree"], cwd=top, env=env, check=True,
                                   capture_output=True, text=True).stdout.strip()
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError) as e:
+            why_tree = " | ".join((getattr(e, "stderr", None) or b"").decode(errors="replace").strip().splitlines()[:2]) or str(e)
+            logger.debug("git add or write-tree failed in %s: %s", top, why_tree)
             tree = None
     identity = {"path": top, "revision": head}
     if tree is not None and status is not None:
         identity.update(dirty="dirty" if status else "clean", tree=tree)
+        if status:
+            identity["changes"] = status.splitlines()  # why the tree is dirty, for the log
     else:
         identity["dirty"] = "unknown"
+        identity["why_unknown"] = "git status failed" if status is None else "git add or write-tree failed"
     return identity
 
 
