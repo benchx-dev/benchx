@@ -83,7 +83,7 @@ def test_revisions_profile(revisions_run, repo, tmp):
     # criterion 5: +2% on a quiet benchmark flags, +3% on a noisy one does not
     assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
     assert doc["local_only"] is False
-    assert all(u["rounds"] == 6 for u in doc["units"])
+    assert all(u["details"]["rounds"] == 6 for u in doc["units"])
 
 
 def test_environments_profile(environments_run, tmp):
@@ -91,7 +91,7 @@ def test_environments_profile(environments_run, tmp):
     store.ingest_paths([environments_run])
     doc = compare.compare(store.documents("env-1"), run_key="env-1", profile="environments", label="build",
                           baseline="plain")
-    assert doc["varying"] == "provenance.labels.build"
+    assert doc["sides"]["varying"] == "provenance.labels.build"
     assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
 

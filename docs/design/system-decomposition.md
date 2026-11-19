@@ -348,7 +348,9 @@ Not components of this system:
 ## 6. Open questions
 
 1. *Resolved:* comparator and change detector are two components sharing a
-   statistics library, not a shape (see `comparator.md`).
+   statistics library and one result record, the Assessment, but not a pipeline:
+   a method sees evidence for one target, a detector scans a whole series (see
+   `comparator.md` §4.6).
 2. *Resolved:* the store records identity; the comparator enforces
    comparability (see `comparator.md` §3).
 3. Is the workbench a distinct deliverable or a thin skin over runner +

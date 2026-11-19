@@ -241,27 +241,30 @@ criterion 1 holds by construction.
 ```json
 {
   "schema_version": "benchx/comparison-document/0.1.0",
-  "mode": "run",
-  "run_key": "urn:uuid:9b2e4f1a-…",
-  "profile": "environments",
-  "varying": "provenance.labels.build",
-  "baseline": "plain",
-  "contender": "hardened",
+  "selector": {"name": "benchx/run-profile", "version": "v1",
+               "params": {"run_key": "urn:uuid:9b2e4f1a-…", "profile": "environments",
+                          "baseline": "plain", "label": "build"}},
   "method": {"name": "benchx/paired-relative", "version": "v1",
-             "estimator": "median", "k": 3.0, "min_rounds": 3},
+             "configuration": {"k": 3.0, "min_rounds": 3}},
+  "estimator": {"name": "median", "method_version": "benchx/median/v1", "input_level": "observations"},
   "identity_schema": "benchx/profile/environments/v1+benchx/benchx-identity/v1",
   "local_only": true,
+  "sides": {"varying": "provenance.labels.build", "baseline": "plain", "contender": "hardened"},
   "units": [
-    {"workload": {"name": "TakeChunked…/4194304/2", "parameters": {}},
+    {"workload": {"name": "TakeChunked…/4194304/2"},
      "quantity": "wall-time",
-     "series": {"baseline": "…", "contender": "…"},
-     "rounds": 10,
-     "reference_estimate": 0.0455, "effect": 0.024,
-     "noise": 0.0021, "noise_source": "paired-rounds",
-     "verdict": "regressed", "reason": null,
+     "series": "…",
+     "method": {"name": "benchx/paired-relative", "version": "v1"},
+     "verdict": "regressed",
+     "effect": {"measure": "relative", "value": 0.024},
+     "used": [{"producer": "benchx/gbench-adapter", "ingest_key": "…"}],
+     "excluded": [],
+     "details": {"rounds": 10, "reference_estimate": 0.0455, "noise": 0.0021,
+                 "noise_kind": "standard-error", "noise_source": "paired-rounds",
+                 "degrees_of_freedom": 9, "threshold": 0.0063},
      "unmatched_differences": ["/coordinates/subject/configuration/options/ARROW_HARDENED"]}
   ],
-  "missing": [{"workload": "…", "quantity": "wall-time", "side": "contender"}],
+  "missing": [{"workload": {"name": "…"}, "quantity": "wall-time", "side": "contender"}],
   "failed_invariants": [],
   "exclusions": [],
   "inputs": [{"producer": "benchx/gbench-adapter", "ingest_key": "…"}]
@@ -509,11 +512,12 @@ every fact the policy matches must agree across both sides.
 | `variants` | the workload parameter `--vary` names, else the only one | that parameter's recorded value, quotes included (`'baseline'`) | everything else the identity policy matches, including subject revision and tree, and every other parameter |
 
 A side is one whole axis value, so one label covering two builds is three
-sides, not one. Before any verdict, the eligibility guard (§3) checks that the
-matched facts agree (`sides-agree`) and the invariants the profile names over
-the run: exactly two sides, which for `environments` differ in more than their
-label, equal attempt counts per side, and sides alternating by
-`procedure.slot`. Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
+sides, not one. Before any verdict, the eligibility guard (`comparator.md` §3) checks
+what the selector owns, that the matched facts agree (`sides-agree`) and that there are
+exactly two sides, which for `environments` differ in more than their label; and what
+the method asks for, for `paired-relative` equal attempt counts per side, sides
+alternating by `procedure.slot`, and no two usable results at one round and side
+(`duplicate-points`). Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
 verdict; under `revisions` the same happens to a side with no tree id (the
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
@@ -546,16 +550,18 @@ Per comparison unit (one workload variant and quantity), the method
   direction when known; otherwise *no change detected*;
 - is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
   never with fewer than two, since the noise is a standard error
-  (`insufficient-rounds`), when a baseline value is zero, when the guard
-  excluded the unit, or, under `variants`, when an attempt failed (`side-failed`).
+  (`insufficient-rounds`), when a baseline value is zero, or, under `variants`,
+  when an attempt failed (`side-failed`, a rule of the selector that every method
+  follows). A unit whose rounds cannot line the sides up, because it has none or no
+  round is on both sides, fails the `layout` invariant instead.
 
 Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with
 reason `deterministic-deferred` rather than compared exactly (comparator §4).
 Default
 *k* = 3 and `min_rounds` = 3, overridable per invocation; per-project
-configuration is deferred. Choosing a paired method for run mode is the
-the implementation's answer to `comparator.md` §7 question 1, open until reviewed.
+configuration is deferred. `bx compare` uses this method; which method a project
+configures is `comparator.md` §7 question 1, open until reviewed.
 
 Comparison documents are recomputed on demand and not stored
 (`comparator.md` §5); the store keeps their inputs.

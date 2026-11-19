@@ -131,8 +131,8 @@ def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, prov
     assert "activation" not in results["plain"]["provenance"]["info"]
 
     assert core.check(doc, "comparison-document") == []
-    assert doc["sides"]["baseline"] == {"how_built": "cmake plain", "target_provider": info["target_provider"]}
-    assert doc["sides"]["contender"]["activation"] == "source env.sh"
+    assert doc["sides"]["declared"]["baseline"] == {"how_built": "cmake plain", "target_provider": info["target_provider"]}
+    assert doc["sides"]["declared"]["contender"]["activation"] == "source env.sh"
     assert "hardened: activation: source env.sh" in compare.render(doc)
 
 
@@ -152,7 +152,7 @@ def test_sidecar_route_needs_no_provider(repo, tmp):
                                   rounds=3, label=("build", "plain", "hardened"),
                                   store=Store(tmp / "store.parquet"), run_key="t3", out=tmp / "out",
                                   source_uri=SOURCE_URI)  # one side has no description to name it
-    assert doc["sides"] == {"baseline": {}, "contender": {"how_built": "by hand"}}
+    assert doc["sides"]["declared"] == {"baseline": {}, "contender": {"how_built": "by hand"}}
 
 
 def test_a_declared_build_is_refused_before_anything_runs(repo, tmp):

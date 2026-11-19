@@ -154,7 +154,7 @@ def build_of(worktrees, ref):
 def check(doc, probed, worktrees, *, local_only=False):
     assert doc["failed_invariants"] == [] and doc["missing"] == []
     assert doc["local_only"] is local_only  # two tags, clean trees, unless a checkout was made dirty
-    assert [u["rounds"] for u in doc["units"]] == [3]
+    assert [u["details"]["rounds"] for u in doc["units"]] == [3]
     expected = {ref.removeprefix("v"): build_of(worktrees, ref) for ref in REVISIONS}
     seen = {}
     for line in probed:

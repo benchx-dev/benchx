@@ -224,8 +224,8 @@ def measurands(store, run_key="v"):
 def test_variants_run_one_order_per_value_and_round_with_that_values_cases_only(tmp):
     pytest.importorskip("pyperf")
     doc, store, said = run_variants(tmp, variants_tree(tmp, SIZED), parameter="role")
-    assert doc["failed_invariants"] == [] and doc["missing"] == [] and doc["varying"].endswith("parameters.role")
-    assert (doc["baseline"], doc["contender"]) == ("'baseline'", "'variant'")
+    assert doc["failed_invariants"] == [] and doc["missing"] == [] and doc["sides"]["varying"].endswith("parameters.role")
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == ("'baseline'", "'variant'")
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "bench_truncate", "parameters": {"size": "10"}},
         {"name": "bench_truncate", "parameters": {"size": "100"}}]
@@ -253,12 +253,12 @@ def test_variants_the_baseline_is_the_first_declared_value_and_can_be_swapped(tm
     pytest.importorskip("pyperf")
     tree = variants_tree(tmp, VARIANTS)
     doc, _, said = run_variants(tmp, tree)
-    assert doc["failed_invariants"] == [] and (doc["baseline"], doc["contender"]) == ("'baseline'", "'variant'")
+    assert doc["failed_invariants"] == [] and (doc["sides"]["baseline"], doc["sides"]["contender"]) == ("'baseline'", "'variant'")
     assert "varying: role (the only parameter)" in said
-    assert doc["units"][0]["workload"] == {"name": "bench_truncate"} and doc["units"][0]["effect"] > 0
+    assert doc["units"][0]["workload"] == {"name": "bench_truncate"} and doc["units"][0]["effect"]["value"] > 0
     swapped, _, _ = run_variants(tmp, tree, baseline="'variant'", out=tmp / "out2", run_key="v2")
-    assert swapped["failed_invariants"] == [] and (swapped["baseline"], swapped["contender"]) == ("'variant'", "'baseline'")
-    assert swapped["units"][0]["effect"] < 0
+    assert swapped["failed_invariants"] == [] and (swapped["sides"]["baseline"], swapped["sides"]["contender"]) == ("'variant'", "'baseline'")
+    assert swapped["units"][0]["effect"]["value"] < 0
     # Slot 0 of the swapped run is the variant.
     assert next(d for d in measurands(Store(tmp / "s.parquet"), "v2") if d["procedure"]["slot"] == 0)[
         "coordinates"]["workload"]["parameters"] == {"role": "'variant'"}
