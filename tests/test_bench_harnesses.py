@@ -132,7 +132,8 @@ def test_what_does_not_fit_is_refused_before_anything_runs(argv, message, build,
 def test_a_suite_the_adapter_cannot_find_is_refused(build, tmp, capsys):
     assert cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone"]) == cli.EXIT_REFUSED
     assert "suite binary not found" in capsys.readouterr().err
-    assert not (tmp / "results").exists()
+    # refused inside the session, after the log was started: the run folder holds only the log, which says why
+    assert [p.name for p in (tmp / "results").glob("*/*")] == ["bx.log"]
 
 
 def test_a_provider_target_is_resolved_like_compare_does(repo, build, tmp, monkeypatch, capsys):

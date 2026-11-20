@@ -244,7 +244,7 @@ def test_measure_mode_refuses_a_baseline_that_is_not_a_value_before_running(tree
     code, doc, err = measure(capsys, "--baseline", "variant")  # the recorded value has its quotes
     assert code == cli.EXIT_REFUSED and doc is None
     assert "baseline 'variant' is not a value of role; use one of: 'baseline', 'variant'" in err
-    assert not (tree / "results").exists()  # nothing ran
+    assert [p.name for p in (tree / "results").glob("*/*")] == ["bx.log"]  # nothing ran: only the log, which says why
 
 
 def test_tables_name_the_sides_by_the_parameter_value(tree, capsys):

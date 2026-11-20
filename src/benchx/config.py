@@ -54,6 +54,7 @@ class Config:
     root: Path
     path: Path | None  # None: no file was found, and root is the working directory
     data: dict
+    log_file: Path | None = None  # the log's file, once cli._start_logging has resolved it
 
     @property
     def where(self) -> str:
@@ -66,15 +67,24 @@ class Config:
     def adapter(self) -> dict:
         return self.section("adapter")
 
-    def pick(self, flag_value, file_value, default=REQUIRED, *, flag, key):
-        """The command-line value, else the file's, else `default`; ConfigError when
-        none is given and the value is required."""
-        for value in (flag_value, file_value):
-            if value is not None:
-                return value
+    def pick_with_source(self, flag_value, file_value, default=REQUIRED, *, flag, key, env=None):
+        """The value and where it came from: the command line (`flag`), else the environment
+        variable named `env` (`env`; an empty one counts as unset), else the file's (`file`),
+        else `default` (`default`); ConfigError when none is given and the value is required."""
+        if flag_value is not None:
+            return flag_value, "flag"
+        if env and (from_env := os.environ.get(env)):
+            return from_env, "env"
+        if file_value is not None:
+            return file_value, "file"
         if default is REQUIRED:
             raise ConfigError(f"{flag} is required: give it, or set {key} in {self.where}")
-        return default
+        return default, "default"
+
+    def pick(self, flag_value, file_value, default=REQUIRED, *, flag, key, env=None):
+        """The command-line value, else the file's, else `default`; ConfigError when
+        none is given and the value is required."""
+        return self.pick_with_source(flag_value, file_value, default, flag=flag, key=key, env=env)[0]
 
     def _path(self, value) -> Path:
         path = Path(value).expanduser()
@@ -91,6 +101,12 @@ class Config:
     @property
     def results_dir(self) -> Path:
         return self._path(self.section("paths").get("results", DEFAULT_RESULTS))
+
+    @property
+    def own_paths(self) -> tuple[Path, ...]:
+        """Everything benchx itself writes that may lie inside a measured tree: the store, the
+        results directory and the log file. The tree's identity leaves them out (snapshot.ignore)."""
+        return (self.store_path, self.results_dir, *([self.log_file] if self.log_file else []))
 
     @property
     def collectors(self) -> list[dict]:
