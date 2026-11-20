@@ -18,34 +18,20 @@ import os
 import statistics
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+except ModuleNotFoundError as exc:
+    if exc.name and exc.name.split(".")[0] == "pyarrow":
+        raise ModuleNotFoundError(
+            "Parquet store support requires pyarrow; install it with `pip install 'benchx[parquet]'`.",
+            name="pyarrow",
+        ) from exc
+    raise
 
 from . import core, identity, parquet
-from .core import loader
-from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, ReadError, UnitConflict
 from .projection import Projection
-
-# Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
-_ATTEMPT_FIELDS = ("project", "source", "revision", "benchmark")
-_ATTEMPT_COORDINATES = ("workload", "subject", "environment")
-_ATTEMPT_PROVENANCE = ("run_key", "subject_dirty", "subject_tree", "benchmark_dirty", "benchmark_tree")
-
-
-def _attempt_signature(doc: dict) -> str:
-    facts = {k: doc.get(k) for k in _ATTEMPT_FIELDS}
-    facts.update({k: doc["coordinates"][k] for k in _ATTEMPT_COORDINATES})
-    facts["environment"] = {k: facts["environment"][k] for k in ("schema_version", "identity")}
-    facts.update({k: doc["provenance"].get(k) for k in _ATTEMPT_PROVENANCE})
-    return core.sha256_hex(core.canonical(facts))
-
-
-def store_project(doc: dict) -> str:
-    """The project, or local/<hostname> for a thin result (schema §4.1)."""
-    if "project" in doc:
-        return doc["project"]
-    ident = doc["coordinates"]["environment"]["identity"]
-    return f"local/{ident.get('runner') or ident.get('hostname') or 'unknown'}"
+from .results import ingest_documents, store_project, sweep_paths, warning_codes
 
 
 class Store:
@@ -170,85 +156,20 @@ class Store:
     def ingest_paths(self, paths) -> dict:
         """Sweep files and directories of JSON documents in transit: work orders
         are attached to the results that reference them, results ingested."""
-        files = []
-        for path in map(Path, paths):
-            files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
-        orders, documents, unreadable = {}, [], []
-        for f in files:
-            # A file that cannot be read is one rejection, not the end of the sweep (§5.4).
-            text = loader.read_text(f)
-            if isinstance(text, ReadError):
-                unreadable.append(_rejection(f.name, text))
-                continue
-            if not f.name.startswith("workorder-"):
-                documents.append((f.name, text))
-                continue
-            order, errors = loader.parse(text)
-            if order is None:
-                unreadable.append(_rejection(f.name, errors[0]))
-            else:
-                orders[core.order_ref(order)] = order
+        documents, orders, unreadable = sweep_paths(paths)
         outcome = self.ingest(documents, orders)
         outcome["rejected"] = unreadable + outcome["rejected"]
         return outcome
 
     def ingest(self, documents: list[tuple[str, str]], orders: dict | None = None) -> dict:
         """Per-result outcomes; a batch is N independent documents (§5.4)."""
-        orders = orders or {}
         index = self._index()
         existing = {(r["producer"], r["ingest_key"]): r["payload_sha256"] for r in index}
         attempts = {r["attempt_key"]: r["attempt_signature"] for r in index}
         units = {(r["store_project"], r["quantity"]): r["unit"] for r in index}
-
-        accepted, derived = [], []
-        outcome = {"ingested": 0, "duplicate": 0, "rejected": []}
-        for name, text in documents:
-            doc, errors = loader.parse(text)
-            if doc is not None:
-                errors = core.check(doc, "measurement-result")
-            if errors:
-                outcome["rejected"].append(_rejection(name, errors[0]))
-                continue
-
-            project = store_project(doc)
-            canonical = core.canonical(doc)
-            payload = core.sha256_hex(canonical)
-            key = (doc["producer"]["name"], doc["ingest_key"])
-            quantity = doc["measurement"]["quantity"]
-            known = units.get((project, quantity["name"]))
-            signature = _attempt_signature(doc)
-            if key in existing and existing[key] == payload:
-                outcome["duplicate"] += 1
-                continue
-            if key in existing:
-                conflict = IdempotencyConflict()
-            elif known and known != quantity["unit"]:
-                conflict = UnitConflict(quantity=quantity["name"], project=project,
-                                        known=known, reported=quantity["unit"])
-            elif attempts.setdefault(doc["attempt_key"], signature) != signature:
-                conflict = AttemptConflict(attempt_key=doc["attempt_key"])
-            else:
-                conflict = None
-            if conflict is not None:
-                outcome["rejected"].append(_rejection(name, conflict))
-                continue
-
-            existing[key] = payload
-            units[(project, quantity["name"])] = quantity["unit"]  # first sight defines the unit
-            ref = doc["provenance"].get("info", {}).get("workorder_ref")
-            order = orders.get(ref)
-            accepted.append(doc)
-            derived.append({
-                "store_project": project,
-                "reported_coordinates_fingerprint": identity.reported_coordinates_fingerprint(doc),
-                "payload_sha256": payload,
-                "attempt_signature": signature,
-                "document": canonical.decode(),
-                "work_order_ref": ref,
-                "work_order": core.canonical(order).decode() if order is not None else None,
-            })
-            outcome["ingested"] += 1
-
+        accepted, derived, outcome = ingest_documents(
+            documents, orders, existing=existing, attempts=attempts, units=units
+        )
         if accepted:
             self._write(parquet.results_table(accepted, derived))
         return outcome
@@ -267,11 +188,6 @@ class Store:
         os.replace(tmp, self.path)
 
 
-def _rejection(name: str, error: DocumentError) -> dict:
-    where = f"at {error.location}: " if error.location else ""
-    return {"document": name, "code": str(error.code), "message": where + error.message}
-
-
 _ENTITY_KEYS = {
     "project": lambda r: r["key"],
     "source": lambda r: (r["project"], r["uri"]),
@@ -282,12 +198,6 @@ _ENTITY_KEYS = {
     "series": lambda r: r["fingerprint"],
     "series_point": lambda r: (r["series_fingerprint"], r["producer"], r["ingest_key"]),
 }
-
-
-def warning_codes(document: dict) -> list[str]:
-    """A result's quality warnings by code: a warning is a token, or an object that has a `code`."""
-    return [w.get("code", str(w)) if isinstance(w, dict) else str(w)
-            for w in document.get("quality", {}).get("warnings", [])]
 
 
 def _add_entities(entities: dict, doc: dict, project: str, projection: Projection) -> None:

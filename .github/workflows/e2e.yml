@@ -102,7 +102,7 @@ jobs:
         working-directory: benchx
         run: |
           uv python install 3.12
-          uv sync --extra test --python 3.12
+          uv sync --extra parquet --extra test --python 3.12
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install NumPy's build tools
@@ -208,7 +208,7 @@ jobs:
         working-directory: benchx
         run: |
           uv python install 3.13
-          uv sync --extra test --python 3.13
+          uv sync --extra parquet --extra test --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # cmake and a C++ compiler are preinstalled on the runner; CMake fetches
@@ -270,7 +270,7 @@ jobs:
         working-directory: benchx
         run: |
           uv python install 3.13
-          uv sync --extra test --python 3.13
+          uv sync --extra parquet --extra test --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Show what is under test
@@ -325,7 +325,7 @@ jobs:
         working-directory: benchx
         run: |
           uv python install 3.13
-          uv sync --extra test --python 3.13
+          uv sync --extra parquet --extra test --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # The README's install lines. torch comes from PyTorch's CPU index: the default

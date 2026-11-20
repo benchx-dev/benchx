@@ -5,9 +5,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
 
-from jsonpointer import JsonPointer
-
 PathParts = tuple[str | int, ...]
+
+
+def _json_pointer(parts: PathParts) -> str:
+    """Format path components as an RFC 6901 JSON Pointer, or '/' for the root."""
+    if not parts:
+        return "/"
+    return "/" + "/".join(
+        str(part).replace("~", "~0").replace("/", "~1") for part in parts
+    )
 
 
 class Code(StrEnum):
@@ -31,7 +38,7 @@ class DocumentError:
 
     @property
     def location(self) -> str | None:
-        return JsonPointer.from_parts(self.path).path or "/"
+        return _json_pointer(self.path)
 
     def __str__(self) -> str:
         if self.location is None:

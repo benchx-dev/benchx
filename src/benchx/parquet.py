@@ -9,7 +9,15 @@ writes it); the store adds the columns it derives at ingest beside it
 
 from datetime import datetime
 
-import pyarrow as pa
+try:
+    import pyarrow as pa
+except ModuleNotFoundError as exc:
+    if exc.name and exc.name.split(".")[0] == "pyarrow":
+        raise ModuleNotFoundError(
+            "Parquet support requires pyarrow; install it with `pip install 'benchx[parquet]'`.",
+            name="pyarrow",
+        ) from exc
+    raise
 import rfc8785
 
 from .core import catalog

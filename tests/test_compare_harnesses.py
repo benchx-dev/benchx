@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import cli, core, harnesses, runner, session
 from benchx.store import Store
 from conftest import SOURCE_URI, git

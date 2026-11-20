@@ -8,6 +8,7 @@ import pytest
 from benchx.identity import normalize_remote
 
 pytest.importorskip("pyperf")
+pytest.importorskip("pyarrow")
 
 from benchx import cli, config, core, harnesses, session
 from benchx.errors import SessionError

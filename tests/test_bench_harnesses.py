@@ -11,6 +11,8 @@ import textwrap
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import bench, cli, core
 from benchx.store import Store
 from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build

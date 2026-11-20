@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pyperf")
+pytest.importorskip("pyarrow")
 
 from benchx import bench, cli, core, harnesses
 from benchx.adapters import asv, asv_runtime

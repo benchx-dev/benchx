@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import get_args
 
@@ -21,7 +20,7 @@ from . import core, harnesses, orders, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
 from .core.validation import Kind
-from .store import Store, warning_codes
+from .results import MemoryStore, warning_codes
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -47,12 +46,34 @@ def _load(command):
     return cfg
 
 
+def _open_store(path, command: str, *, hint: str | None = None):
+    """Open the local Parquet store, or explain how to install pyarrow and return None."""
+    try:
+        from .store import Store
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".")[0] == "pyarrow":
+            suffix = f", or {hint}" if hint else ""
+            print(
+                f"bx {command}: error: Parquet store requires pyarrow; "
+                f"install it with `pip install 'benchx[parquet]'`{suffix}",
+                file=sys.stderr,
+            )
+            return None
+        raise
+    return Store(path)
+
+
 def cmd_run(args):
     """Run one order, write its result files, and deliver them to the local
     store. The runner itself stays store-unaware (runner.md §2 principle 6);
     this command composes it with ingest, as the workbench does."""
     if (cfg := _load("run")) is None:
         return EXIT_REFUSED
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "run", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     out = Path(args.out) if args.out else cfg.results_dir
     snapshot.ignore(cfg.store_path, cfg.results_dir, out)
     try:
@@ -61,9 +82,8 @@ def cmd_run(args):
         return _refused(e)
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
-    if args.no_ingest:
+    if store is None:
         return EXIT_OK
-    store = Store(cfg.store_path)
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
 
@@ -195,7 +215,11 @@ def cmd_bench(args):
         return EXIT_REFUSED
     settings["filter"] = names or settings["filter"]
     snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
-    store = None if args.no_ingest else Store(cfg.store_path)
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "bench", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     try:
         summary = session.bench_target(target, store=store, progress=lambda message: print(message, file=sys.stderr),
                                        **settings)
@@ -276,13 +300,17 @@ def _report(outcome):
 def cmd_ingest(args):
     if (cfg := _load("ingest")) is None:
         return EXIT_REFUSED
-    return _report(Store(cfg.store_path).ingest_paths(args.paths))
+    if (store := _open_store(cfg.store_path, "ingest")) is None:
+        return EXIT_REFUSED
+    return _report(store.ingest_paths(args.paths))
 
 
 def cmd_series(args):
     if (cfg := _load("series")) is None:
         return EXIT_REFUSED
-    for s in Store(cfg.store_path).series(args.workload, args.quantity):
+    if (store := _open_store(cfg.store_path, "series")) is None:
+        return EXIT_REFUSED
+    for s in store.series(args.workload, args.quantity):
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
@@ -292,7 +320,9 @@ def cmd_series(args):
 def cmd_history(args):
     if (cfg := _load("history")) is None:
         return EXIT_REFUSED
-    points = Store(cfg.store_path).history(args.series)
+    if (store := _open_store(cfg.store_path, "history")) is None:
+        return EXIT_REFUSED
+    points = store.history(args.series)
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
@@ -305,7 +335,8 @@ def cmd_history(args):
 def cmd_head(args):
     if (cfg := _load("head")) is None:
         return EXIT_REFUSED
-    store = Store(cfg.store_path)
+    if (store := _open_store(cfg.store_path, "head")) is None:
+        return EXIT_REFUSED
     total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
     if args.json:
         for row in rows:
@@ -432,18 +463,26 @@ def _view_flags(args):
 
 def _read(cfg, args, policy):
     if args.results:
-        with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
-            store = Store(Path(tmp) / "store.parquet")
-            outcome = store.ingest_paths(args.results)
-            if outcome["rejected"]:
-                return _report(outcome)
-            return _compare(store, args, policy)
-    return _compare(Store(cfg.store_path), args, policy)
+        store = MemoryStore()  # the ad hoc path: validated in memory without PyArrow
+        outcome = store.ingest_paths(args.results)
+        if outcome["rejected"]:
+            return _report(outcome)
+        return _compare(store, args, policy)
+    store = _open_store(cfg.store_path, "compare", hint="pass --results DIR to compare JSON results directly")
+    if store is None:
+        return EXIT_REFUSED
+    return _compare(store, args, policy)
 
 
 def _measure(cfg, args, policy):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = Store(cfg.store_path)
+    store = _open_store(
+        cfg.store_path,
+        "compare",
+        hint="run sides with `bx bench --no-ingest` and compare with `bx compare --run ... --results DIR`",
+    )
+    if store is None:
+        return EXIT_REFUSED
     print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
     try:
         settings = _common(cfg, args)
@@ -666,7 +705,7 @@ def main(argv=None):
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
     read.add_argument("--results", nargs="+",
-                      help="compare these result directories through a throwaway store, not the local one")
+                      help="compare these result files or directories directly, without using the local store")
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
                          help="alternation rounds; each runs both sides once (default: compare.rounds)")
