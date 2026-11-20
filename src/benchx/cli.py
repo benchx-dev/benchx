@@ -245,17 +245,17 @@ def cmd_run(args):
         return EXIT_REFUSED
     snapshot.ignore(*cfg.own_paths, out)
     logger.info("order file %s; output %s", Path(args.order).resolve(), out)
+    say.progress(f"running the order {Path(args.order).name}")
     try:
         summary = runner.run(args.order, out, allow_collectors=args.allow_collectors)
     except runner.Refused as e:
         return _refused(e)
-    print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
-          f"  (order {summary['order'][:19]})")
+    say.out(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
+            f"  (order {summary['order'][:19]})", log.SUMMARY)
     if args.no_ingest:
         logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
     store = Store(cfg.store_path)
-    print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]), store.path)
 
 
@@ -272,10 +272,27 @@ def _environment(items) -> dict:
     return env
 
 
-def _session_position(args) -> tuple[dict, int | None, int | None]:
-    """Where `bx bench` sits in a session that other calls join through the same
-    `--run-key`: its `--label NAME=VALUE`s, `--round` and `--slot`. UsageError when
-    they could not join one."""
+def _parse_round(text) -> tuple[int | None, int | None]:
+    """`--round R` or `--round R/N`: the round, numbered from 0, and how many rounds the session has when the
+    caller says (only the start line shows it: the work order records the round alone). UsageError."""
+    if text is None:
+        return None, None
+    first, slash, last = text.partition("/")
+    try:
+        round_, rounds = int(first), int(last) if slash else None
+    except ValueError:
+        raise UsageError(f"--round wants R, or R/N for a session of N rounds, whole numbers, not {text!r}") from None
+    if round_ < 0:
+        raise UsageError(f"--round wants a number from 0, not {round_}")
+    if rounds is not None and not round_ < rounds:
+        raise UsageError(f"--round {text}: with {rounds} round(s) they are numbered 0 to {rounds - 1}")
+    return round_, rounds
+
+
+def _session_position(args) -> tuple[dict, int | None, int | None, int | None]:
+    """Where `bx bench` sits in a session that other calls join through the same `--run-key`: its
+    `--label NAME=VALUE`s, `--round` (and, with `--round R/N`, the session's number of rounds) and `--slot`.
+    UsageError when they could not join one."""
     labels = {}
     for item in args.label or []:
         name, eq, value = item.partition("=")
@@ -285,17 +302,17 @@ def _session_position(args) -> tuple[dict, int | None, int | None]:
         if name in labels:
             raise UsageError(f"--label {name} is given twice")
         labels[name] = value
-    for flag, number in (("--round", args.round), ("--slot", args.slot)):
-        if number is not None and number < 0:
-            raise UsageError(f"{flag} wants a number from 0, not {number}")
-    placed = labels or args.round is not None or args.slot is not None
+    round_, rounds = _parse_round(args.round)
+    if args.slot is not None and args.slot < 0:
+        raise UsageError(f"--slot wants a number from 0, not {args.slot}")
+    placed = labels or round_ is not None or args.slot is not None
     if placed and not args.run_key:
         raise UsageError("--label, --round and --slot need an explicit --run-key: the default is a timestamp "
                          "per call, so two calls would never share a run")
-    if (labels or args.round is not None) and args.slot is None:
+    if (labels or round_ is not None) and args.slot is None:
         raise UsageError("--label and --round need --slot: without one, the sides of a run would share an "
                          "ingest key and their results would conflict")
-    return labels, args.round, args.slot
+    return labels, round_, args.slot, rounds
 
 
 def _bench_target(args) -> tuple[str, str | None, str | None]:
@@ -411,6 +428,15 @@ def _needs_provider(cfg, *targets):
             cfg.require_provider(spec)
 
 
+def _placed(settings, rounds=None) -> str:
+    """` (round 1/5, slot 3)`: where a `bx bench` call sits in a session, as the start line says it, with the
+    session's number of rounds when the caller gave it (`--round 1/5`); empty when alone."""
+    parts = [f"round {settings['round_']}{f'/{rounds}' if rounds else ''}" if settings["round_"] is not None else "",
+             f"slot {settings['slot']}" if settings["slot"] is not None else "",
+             ", ".join(f"{name}={value}" for name, value in (settings["labels"] or {}).items())]
+    return f" ({', '.join(part for part in parts if part)})" if any(parts) else ""
+
+
 def cmd_bench(args):
     """Run one target once, as one order of a comparison session: resolve the target,
     build the order from the harness defaults, config file, flags and environment
@@ -422,7 +448,7 @@ def cmd_bench(args):
             raise UsageError("give case names or --filter, not both")
         target, forced_suite, forced_adapter = _bench_target(args)
         settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
-        settings["labels"], settings["round_"], settings["slot"] = _session_position(args)
+        settings["labels"], settings["round_"], settings["slot"], rounds = _session_position(args)
         session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
                               settings["quantities"])
         _needs_provider(cfg, target)
@@ -444,6 +470,9 @@ def cmd_bench(args):
     settings["filter"] = names or settings["filter"]
     snapshot.ignore(*cfg.own_paths, *([args.out] if args.out else []))
     store = None if args.no_ingest else Store(cfg.store_path)
+    # Where a quiet run says it started, before a provider that builds takes its time.
+    say.progress(f"measuring {Path(settings['suite']).name if settings.get('suite') else 'the suite'} on {target}"
+                 + _placed(settings, rounds))
     try:
         summary = session.bench_target(target, store=store, progress=say.info, **settings)
     except (session.SessionError, config_mod.ConfigError) as e:
@@ -451,18 +480,20 @@ def cmd_bench(args):
         return EXIT_REFUSED
     except runner.Refused as e:
         return _refused(e)
+    # What the run reports goes through the marker: stdout, by the tiers `-q` and `-qq` leave, and the log.
     rows = bench_mod.summarize(summary["files"])
-    print(bench_mod.render(rows))
-    if failed := bench_mod.failures(rows):
-        print(failed)
-    print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
+    say.out(bench_mod.render(rows), log.TABLE)
+    failed = bench_mod.failures(rows)
+    if failed:  # the errors: shown at every verbosity
+        say.out(failed, log.ANSWER, level=logging.WARNING)
     cases = {row["case"] for row in rows}
-    if unmeasured := {row["case"] for row in rows if not row["status"].startswith(("success", "skipped"))}:
-        log.degraded(f"{len(unmeasured)} of {len(cases)} cases not measured")  # the exit status stays 0
+    unmeasured = {row["case"] for row in rows if not row["status"].startswith(("success", "skipped"))}
+    if unmeasured:  # the exit status stays 0; a table that is hidden, or that says nothing, leaves this line
+        log.degraded(f"{len(unmeasured)} of {len(cases)} cases not measured", shown=bool(log.quiet() and not failed))
+    say.out(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})", log.SUMMARY)
     if store is None:
         logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
-    print(f"{store.path}: ", end="")
     return _report(summary["outcome"], store.path)
 
 
@@ -542,14 +573,19 @@ def _resolved(cfg):
 
 
 def _report(outcome, store_path=None):
+    """The ingest counts. After a run (`store_path` names the store) they are a progress message,
+    `STORE: ingested 3, duplicate 0`, on stderr as every progress message is: `-q` does not show it. For the
+    command that ingests they are its answer, on stdout, whatever the verbosity."""
     for r in outcome["rejected"]:
         say.warning(f"  rejected {r['document']}: {r['code']} — {r['message']}")
     counts = f"ingested {outcome['ingested']}, duplicate {outcome['duplicate']}"
     if outcome["rejected"]:
         codes = sorted({r["code"] for r in outcome["rejected"]})
         counts += f", rejected {len(outcome['rejected'])} ({', '.join(codes)})"
-    print(counts)  # the command's answer, on stdout; the log has it too
-    logger.info("%s: %s", store_path or "store", counts)
+    if store_path:
+        say.info(f"{store_path}: {counts}")
+    else:
+        say.out(counts, log.ANSWER)
     return EXIT_INVALID if outcome["rejected"] else EXIT_OK
 
 
@@ -559,7 +595,7 @@ def cmd_ingest(args):
     if (cfg := _start_logging(cfg, args, None, "ingest")) is None:
         return EXIT_REFUSED
     logger.info("ingesting %d path(s): %s", len(args.paths), ", ".join(str(Path(p).resolve()) for p in args.paths))
-    return _report(Store(cfg.store_path).ingest_paths(args.paths), cfg.store_path)
+    return _report(Store(cfg.store_path).ingest_paths(args.paths))
 
 
 def cmd_series(args):
@@ -968,9 +1004,10 @@ def main(argv=None):
                    help="name this call's side of a session, such as env=numpy-2.0 (repeatable); the calls of a "
                         "session share --run-key, and bx compare --run reads the label with --label NAME. "
                         "Needs --run-key and --slot")
-    p.add_argument("--round", type=int,
-                   help="this call's round in a session: the sides' attempts are paired by it. "
-                        "Needs --run-key and --slot")
+    p.add_argument("--round", metavar="R[/N]",
+                   help="this call's round in a session, numbered from 0: the sides' attempts are paired by it. "
+                        "R/N also says the session has N rounds, which the start line shows (nothing else uses "
+                        "it). Needs --run-key and --slot")
     p.add_argument("--slot", type=int,
                    help="this call's position in the session's alternation (0, 1, 2, ...), kept by the caller's loop. "
                         "Needs --run-key")
