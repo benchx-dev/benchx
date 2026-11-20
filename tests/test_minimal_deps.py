@@ -158,7 +158,7 @@ def test_canonical_hashes_and_identities_unchanged(adhoc, arrow):
 def test_importing_cli_and_non_store_modules_does_not_import_pyarrow():
     code = (
         "import sys\n"
-        "import benchx.cli, benchx.bench, benchx.compare, benchx.tables, benchx.results, benchx.runner, benchx.store\n"
+        "import benchx.cli, benchx.bench, benchx.compare, benchx.tables, benchx.results, benchx.runner, benchx.store, benchx.views\n"
         "assert 'pyarrow' not in sys.modules, 'pyarrow was imported unexpectedly'\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
