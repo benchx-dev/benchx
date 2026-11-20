@@ -347,3 +347,23 @@ def test_the_logger_passes_only_the_levels_somebody_wants(tmp):
     finally:
         log.stop()
     assert not benchx.isEnabledFor(logging.INFO)  # nothing installed: only the NullHandler
+
+
+def test_the_log_records_the_arguments_as_parsed_and_the_environment_it_consults(build, tmp, monkeypatch):
+    monkeypatch.setenv("BENCHX_ENV_ALLOWLIST", "MY_VAR")
+    monkeypatch.setenv("BENCHX_HOME", str(tmp / "home"))
+    assert bench(build, "-e", "A=1", "--repetitions", "3") == cli.EXIT_OK
+    lines = log_of(tmp, "g1").splitlines()
+    parsed = next(l for l in lines if " DEBUG arguments as parsed: " in l)
+    assert "cmd='bench'" in parsed and "repetitions=3" in parsed and "run_key='g1'" in parsed and "env=['A=1']" in parsed
+    consulted = next(l for l in lines if " DEBUG environment variables consulted: " in l)
+    assert f"BENCHX_HOME={tmp / 'home'};" in consulted and "BENCHX_ENV_ALLOWLIST=MY_VAR;" in consulted
+    assert "BENCHX_VERBOSE not set;" in consulted and "BENCHX_SETUP_FILE not set;" in consulted
+    assert consulted.endswith("PATH is set (the benchmark's python is looked up on it)")
+    assert str(tmp / "home") in next(l for l in lines if " INFO config file: " in l)  # the store the variable moved
+
+
+def test_the_log_names_the_config_file_when_there_is_one(build, tmp):
+    path = write_config(tmp, adapter={"name": "google-benchmark", "suite": "demo-bench"})
+    assert cli.main(["bench", str(build), "--run-key", "g1"]) == cli.EXIT_OK
+    assert f" INFO config file: {path}; project root {tmp}; " in log_of(tmp, "g1")

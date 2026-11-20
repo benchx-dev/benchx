@@ -121,8 +121,7 @@ output folder, while a flag works for any command. A file named `*.json` is refu
 `bx ingest` reads such files in a directory. **A `bx.log` records the command line as given,
 `-e` values and credentials in a `--source-uri` included, and a command's output as it was
 printed. It does not claim to hide secrets: like `workorder-….json` in the same folder, it can
-contain them, and a results folder that is archived or shared carries it.** It never holds the
-environment `bx` inherited, only names of variables.
+contain them, and a results folder that is archived or shared carries it.** It never holds the environment `bx` inherited, only names of variables, with one exception: the variables benchx itself reads (`BENCHX_HOME`, `BENCHX_VERBOSE`, `BENCHX_LOG_LEVEL`, `BENCHX_SETUP_FILE`, `BENCHX_ENV_ALLOWLIST`, `BENCHX_SCHEMAS`) are logged with their values, since they are settings someone typed for benchx and decide what it does.
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets (one for
 `--profile variants`) select measure mode and `--run` selects read mode; mixing them is an error.

@@ -33,6 +33,10 @@ ASV_CASE_TIMEOUT_S = 1800
 VERBOSE_ENV = "BENCHX_VERBOSE"
 LOG_LEVEL_ENV = "BENCHX_LOG_LEVEL"
 DEFAULT_LOG = "{out}/bx.log"
+# benchx's own control variables: every one the code reads. They are settings someone typed for benchx, a fixed
+# list, so the log gives their values; the rest of the inherited environment is never dumped (plan rule 3).
+CONTROL_ENV = ("BENCHX_HOME", "BENCHX_VERBOSE", "BENCHX_LOG_LEVEL", "BENCHX_SETUP_FILE", "BENCHX_ENV_ALLOWLIST",
+               "BENCHX_SCHEMAS")
 OUTCOMES = {EXIT_OK: "ok", EXIT_INVALID: "invalid", EXIT_REFUSED: "refused"}
 
 say = log.console(__name__)  # what `bx` shows its user: console messages (logging_plan.md §4)
@@ -151,10 +155,30 @@ def _start_logging(cfg, args, out, command, *, read_config=True, lenient=False):
     snapshot.ignore(*cfg.own_paths, *([args.out] if getattr(args, "out", None) else []))  # the log is not the tree
     if read_config:
         _log_config(cfg)
+    _log_arguments(args)
+    _log_environment()
     shown = "off" if setting is False else "stderr" if setting is True else str(setting)
     logger.debug("logging: %s (%s); log level: %s (%s); verbosity: %d (%s)", shown, _source_text(source),
                  logging.getLevelName(level).lower(), level_source, args.verbosity, args.verbosity_source)
     return cfg
+
+
+def _log_arguments(args):
+    """The arguments as argparse understood them (DEBUG), beside the command line as given in the header: a
+    prefix spelled out, a case name taken from after the options, an option's value. As given: the log makes no
+    claim to hide a value (plan R6)."""
+    skip = {"fn", "argv", "verbosity", "verbosity_source"}
+    shown = {name: value for name, value in vars(args).items() if name not in skip and value not in (None, False, [], ())}
+    logger.debug("arguments as parsed: %s", ", ".join(f"{name}={value!r}" for name, value in sorted(shown.items())))
+
+
+def _log_environment():
+    """The environment variables `bx` consults that decide what it does (DEBUG): benchx's own, with their values,
+    and whether PATH is set, which the benchmark's `python` is looked up on. The other variables that shape a
+    run are the allowlisted ones, which each order logs by name."""
+    shown = [f"{name}={os.environ[name]}" if os.environ.get(name) else f"{name} not set" for name in CONTROL_ENV]
+    logger.debug("environment variables consulted: %s; PATH is %s", "; ".join(shown),
+                 "set (the benchmark's python is looked up on it)" if os.environ.get("PATH") else "not set")
 
 
 def _log_config(cfg):
