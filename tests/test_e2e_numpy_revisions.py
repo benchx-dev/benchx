@@ -25,15 +25,16 @@ imported the numpy built for that side, with and without a stale PYTHONPATH expo
 A probe suite records `numpy.__file__` on import, so the check does not depend on a
 benchmark's numbers.
 
-With both builds in place it also checks, on a checkout made dirty by an untracked file (removed
-afterwards), that a dirty `WORKSPACE` is compared and labeled local-only, with the dirty side named
+With both builds in place it also checks, on a checkout made dirty by an edit to a tracked file (put
+back afterwards), that a dirty `WORKSPACE` is compared and labeled local-only, with the dirty side named
 before measuring and marked by `bx head`; and that a checkout git cannot hash (an unreadable
-untracked file) is refused before anything runs. If `BENCHX_E2E_SPIN_EXAMPLE` names the `numpy-spin`
+tracked file) is refused before anything runs. An untracked file does not make a tree dirty. If `BENCHX_E2E_SPIN_EXAMPLE` names the `numpy-spin`
 example directory, a single `bx bench` run on the dirty checkout is recorded as dirty and `bx head`
 marks it, while the same run on the clean checkout is not marked. A benchmark file that is not committed
 is compared and labeled local-only, not refused.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -188,18 +189,26 @@ def built(project, worktrees):
     return build_of(worktrees, REVISIONS[1]).parent
 
 
-def test_a_dirty_workspace_is_compared_and_labeled_local_only(project, worktrees, built):
-    """UC-03 §10: the second revision's checkout, with an uncommitted file, is the contender (`WORKSPACE`)."""
-    uncommitted = built / "benchx-e2e-uncommitted.txt"
-    uncommitted.write_text("an uncommitted file\n")
+@contextlib.contextmanager
+def uncommitted_edit(checkout):
+    """A tracked file of the checkout, edited: what makes its tree dirty (an untracked file does not)."""
+    path = checkout / "README.md"
+    original = path.read_bytes()
+    path.write_bytes(original + b"\nan uncommitted edit\n")
     try:
+        yield path
+    finally:
+        path.write_bytes(original)
+
+
+def test_a_dirty_workspace_is_compared_and_labeled_local_only(project, worktrees, built):
+    """UC-03 §10: the second revision's checkout, with an uncommitted edit, is the contender (`WORKSPACE`)."""
+    with uncommitted_edit(built):
         done, probe_out, env = run_compare(project, worktrees, "e2e-dirty", numpy_dir=built,
                                            targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"])
         assert done.returncode == 0, done.stderr[-3000:]
         doc, probed = json.loads(done.stdout), probe_out.read_text().splitlines()
         head = bx(["head", "--table"], project, env)
-    finally:
-        uncommitted.unlink()
     check(doc, probed, worktrees, local_only=True)
     # Only the subject is dirty: the probe suite is a clean file in a repository of its own, recorded
     # apart from the checkout, so no benchmark warning, and the clean tag is not named.
@@ -224,16 +233,15 @@ def test_an_uncommitted_benchmark_file_is_compared_and_labeled_local_only(projec
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
 def test_a_workspace_git_cannot_hash_is_refused_before_anything_runs(project, worktrees, built):
-    """An unreadable untracked file leaves the checkout's dirty state unknown, and with no tree id."""
-    unreadable = built / "benchx-e2e-unreadable.txt"
-    unreadable.write_text("x\n")
+    """An unreadable tracked file leaves the checkout's dirty state unknown, and with no tree id."""
+    unreadable = built / "README.md"
+    mode = unreadable.stat().st_mode & 0o777
     unreadable.chmod(0)
     try:  # --no-build: the provider only describes, so nothing is built either
         done, _, _ = run_compare(project, worktrees, "e2e-unknown", numpy_dir=built, extra=["--no-build"],
                                  targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"])
     finally:
-        unreadable.chmod(0o644)
-        unreadable.unlink()
+        unreadable.chmod(mode)
     assert done.returncode == 2, done.stderr[-3000:]
     assert "has no working-tree id" in done.stderr and "unknown" in done.stderr
     assert [p.name for p in (project / "results" / "e2e-unknown").iterdir()] == ["bx.log"]  # no order was written
@@ -260,12 +268,8 @@ def test_numpy_spin_records_a_dirty_run_and_head_marks_it(tmp_path, built):
         assert done.returncode == 0, done.stderr[-3000:]
 
     run("spin-clean")
-    uncommitted = built / "benchx-e2e-uncommitted.txt"
-    uncommitted.write_text("an uncommitted file\n")
-    try:
+    with uncommitted_edit(built):
         run("spin-dirty")
-    finally:
-        uncommitted.unlink()
     rows = bx(["head", "--table"], spin, env).stdout.splitlines()
     dirty, clean = ([r for r in rows if key in r] for key in ("spin-dirty", "spin-clean"))
     # Only the subject is dirty: the suite is a clean file in the example's own repository.

@@ -79,12 +79,23 @@ def write_outputs(root):
     (root / "store.parquet").write_bytes(b"PAR1")
 
 
-def test_a_runs_own_output_marks_the_tree_dirty_unless_ignored(checkout):
+def test_a_runs_untracked_output_does_not_mark_the_tree_dirty(checkout):
     clean = snapshot.git_identity(checkout)
     assert clean["dirty"] == "clean"
     write_outputs(checkout)
+    again = snapshot.git_identity(checkout)
+    assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
+    assert again["untracked"] == ["results/", "store.parquet"]  # said in the log, and not part of the identity
+
+
+def test_a_tracked_output_marks_the_tree_dirty_unless_ignored(checkout):
+    (checkout / "store.parquet").write_bytes(b"PAR0")
+    git(checkout, "add", "-A")
+    git(checkout, "commit", "-qm", "track the store")
+    clean = snapshot.git_identity(checkout)
+    (checkout / "store.parquet").write_bytes(b"PAR1")  # a run rewrites it
     assert snapshot.git_identity(checkout)["dirty"] == "dirty"
-    snapshot.ignore(checkout / "results", checkout / "store.parquet")
+    snapshot.ignore(checkout / "store.parquet")
     again = snapshot.git_identity(checkout)
     assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
 
@@ -122,5 +133,6 @@ def test_a_results_directory_the_project_git_ignores_still_gives_a_tree_id(check
     snapshot.ignore(checkout / "results", checkout / "store.parquet")
     again = snapshot.git_identity(checkout)
     assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
-    snapshot.ignore(checkout / "results")  # the store file is untracked and not ignored: a real difference
-    assert snapshot.git_identity(checkout)["dirty"] == "dirty"
+    snapshot.ignore(checkout / "results")  # the store file is untracked and not ignored: not part of the identity
+    still = snapshot.git_identity(checkout)
+    assert (still["dirty"], still["tree"], still["untracked"]) == ("clean", clean["tree"], ["store.parquet"])

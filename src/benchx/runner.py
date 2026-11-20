@@ -233,6 +233,13 @@ def _log_identity(runnable, source, benchmark, source_dir):
         elif state == "unknown":  # accepted here, so a result will say nothing about it: say it now
             logger.warning("the %s tree's dirty state is unknown (%s): its results carry no tree id and no warning",
                            what, source.get("why_unknown", "git could not say"))
+    untracked = source.get("untracked")
+    if untracked and log.once(("untracked", source["path"])):  # the identity is the tracked files: say what it leaves out
+        shown = untracked[:10]
+        more = f", and {len(untracked) - len(shown)} more" if len(untracked) > len(shown) else ""
+        logger.info("the subject tree has %d untracked path(s), which its dirty state and tree id leave out (they cover "
+                    "tracked files only): %s%s; `git add` makes one part of the tree", len(untracked),
+                    ", ".join(shown), more)
 
 
 def _log_records(order, adapter, child_env, env_names, environment, system, configuration, setup, source, declared_text):
