@@ -307,6 +307,7 @@ def test_compare_variants_measure_mode_no_ingest_without_pyarrow(tmp, monkeypatc
         "--out", str(tmp / "v-out"),
         "--no-ingest",
         "--tables",
+        "--all",
     ]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert "bench_work" in out and "| Change" in out
