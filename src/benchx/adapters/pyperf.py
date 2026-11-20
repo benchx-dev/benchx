@@ -31,10 +31,8 @@ passed, and warns `env-mismatch` when the two differ.
 
 import hashlib
 import json
-import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +40,7 @@ from pathlib import Path
 from .. import snapshot
 from . import benchx_params
 from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
-                   stop_group)
+                   kill_group, stop_group)
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -299,8 +297,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
         stdout, stderr = proc.communicate(timeout=timeout)
         status = proc.returncode
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        stdout, stderr = proc.communicate()
+        stdout, stderr = kill_group(proc)
         status = None
     except KeyboardInterrupt:
         stop_group(proc)  # the group is a session of its own: the terminal's Ctrl-C did not reach it

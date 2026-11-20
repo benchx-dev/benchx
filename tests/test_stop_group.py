@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from benchx.adapters.base import stop_group
-from processes import HAS_PROC, alive, wait_gone, wait_until
+from benchx.adapters.base import Unsupported, kill_group, run_bounded, stop_group
+from processes import HAS_PROC, alive, running, wait_gone, wait_until
 
 pytestmark = pytest.mark.skipif(not HAS_PROC, reason="needs /proc")
 
@@ -86,3 +86,66 @@ def test_a_group_that_is_already_gone_is_not_an_error(tmp_path):
                             stderr=subprocess.PIPE, text=True)
     proc.wait()
     stop_group(proc)
+
+
+# --- after the group is killed: a process that left it must not hold bx
+
+HOLDER = 17  # seconds the detached process sleeps: far more than the tests allow
+LEFT_ALONE = f"sleep {HOLDER}"
+
+
+def clean_up_holders():
+    for pid in running(LEFT_ALONE):
+        os.kill(pid, signal.SIGKILL)
+
+
+@pytest.fixture
+def no_holders():
+    yield
+    clean_up_holders()
+
+
+def test_a_pyperf_case_that_times_out_returns_although_a_daemon_holds_the_pipes(tmp_path, monkeypatch, no_holders):
+    pytest.importorskip("pyperf")
+    from benchx import cli
+    from conftest import git
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "hang.py").write_text(
+        "import subprocess, time\n\n\ndef bench_hang():\n"
+        f"    subprocess.Popen(['sleep', '{HOLDER}'], start_new_session=True)  # a daemon, with our pipes\n"
+        "    time.sleep(60)\n")
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "m")
+    started = time.monotonic()
+    code = cli.main(["bench", "hang.py", "bench_hang", "--no-ingest", "--case-timeout", "1", "--processes", "1",
+                     "--values", "1", "--loops", "1", "--warmups", "0", "--run-key", "t"])
+    took = time.monotonic() - started
+    assert code == cli.EXIT_OK  # a case that timed out is a result, not a failure of the command
+    assert took < HOLDER / 2, f"bx waited {took:.1f} s: the daemon's {HOLDER} s, not the case's limit of 1 s"
+
+
+def test_kill_group_returns_what_the_group_printed_and_does_not_wait_for_a_holder(tmp_path, no_holders):
+    proc, manager, grandchild, _ = start(tmp_path, "escape")  # the grandchild has a session of its own, and our pipes
+    started = time.monotonic()
+    stdout, stderr = kill_group(proc)
+    assert time.monotonic() - started < 3
+    assert stdout == "partial output\n" and stderr == ""  # what had arrived, as text
+    assert not alive(manager)
+    os.kill(grandchild, signal.SIGKILL)
+
+
+def test_kill_group_of_an_ordinary_group_returns_everything_at_once(tmp_path):
+    proc, manager, grandchild, _ = start(tmp_path, "plain")
+    started = time.monotonic()
+    stdout, _ = kill_group(proc)
+    assert time.monotonic() - started < 1 and stdout == "partial output\n"
+    assert wait_gone([manager, grandchild], 2)
+
+
+def test_a_probe_or_a_listing_that_overruns_does_not_wait_for_a_daemon_either(no_holders):
+    code = f"import subprocess, time; subprocess.Popen(['sleep', '{HOLDER}'], start_new_session=True); time.sleep(60)"
+    started = time.monotonic()
+    with pytest.raises(Unsupported, match="did not finish within 1 s"):
+        run_bounded([sys.executable, "-c", code], timeout=1, what="listing")
+    assert time.monotonic() - started < HOLDER / 2
