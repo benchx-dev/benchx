@@ -106,7 +106,9 @@ built-in default; a required one (`adapter.name`, `adapter.suite`, the target, a
 flag and the key. `--no-project` makes one run ad hoc whatever the file's `project` says.
 The schema is `schemas/config/0.1.0`, whose `examples/` hold recommended settings for
 pyperf and for Google Benchmark. The store and the results directory are left out of a
-measured tree's identity when they sit inside it. `.benchx/setup.json` (declared
+measured tree's identity when they sit inside it. A tree is dirty when a tracked file differs
+from HEAD; untracked files are not part of its identity, and the log names them (INFO, the
+first ten). `.benchx/setup.json` (declared
 environment facts) is a separate file, written by whoever prepares an environment.
 
 **The log.** `bx bench` and `bx compare` write `bx.log` in the run's output folder
