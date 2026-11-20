@@ -240,9 +240,12 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
             units[key]["identities"].append(p.identity)
     run_failed = bool(failed)  # the invariants above are about the run, and no unit is compared
     disagreeing = set()  # `sides-agree` is about one unit: it gets no verdict, and the others are compared
+    changed = set()  # the benchmark itself was edited: not comparable, which is not a failed invariant
     for key, unit in units.items():
         differing = _differing(unit["identities"])
-        if differing:
+        if differing and all(_BENCHMARK_VERSION.fullmatch(p) for p in differing):
+            changed.add(key)
+        elif differing:
             failed.append({"invariant": "sides-agree", "workload": _workload(unit["docs"], projection.axis),
                            "quantity": key[1], "detail": f"{', '.join(differing)} differ"})
             disagreeing.add(key)
@@ -259,6 +262,9 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
         absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
         if absent:
             doc["missing"].extend({**where, "side": role} for role in absent)
+            continue
+        if (variant_key, quantity) in changed:
+            doc["units"].append(_unit(where, [], by_side, base, contender, k, min_rounds, benchmark_changed=True))
             continue
         if "equal-attempts" in check and len(by_side[base]) != len(by_side[contender]):
             failed.append({"invariant": "equal-attempts", **where,
@@ -355,6 +361,11 @@ def _diff(pointer: str, values: list) -> list[str]:
     return [pointer] if len(distinct) > 1 else []
 
 
+# The version a harness records for a benchmark (asv's hash, the pyperf function's): when it differs, the
+# benchmark's own code changed, and the unit is "not comparable" as in `asv compare`, not an invariant failure.
+_BENCHMARK_VERSION = re.compile(r"/coordinates/protocol/[^/]+/benchmark_version")
+
+
 def _differing(facts: list[dict]) -> list[str]:
     """Pointers whose value is not the same in every one of `facts` (pointer -> value)."""
     return sorted(p for key in set().union(*facts) for p in _diff(key, [f.get(key, _ABSENT) for f in facts]))
@@ -387,7 +398,7 @@ def _caveats(by_side, base, contender) -> list[str]:
     return sorted(found)
 
 
-def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False):
+def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=False, benchmark_changed=False):
     first = {s: by_side[s][0] for s in (base, contender)}
     quantity = first[base]["measurement"]["quantity"]
     # The evidence behind `rounds`: how each side's attempts ended, by status.
@@ -397,6 +408,12 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=Fal
                                 for name, s in (("baseline", base), ("contender", contender))},
             "rounds": len(pairs), "attempts": attempts, "noise_source": "paired-rounds",
             "verdict": "indeterminate"}
+    if benchmark_changed:
+        # As in `asv compare`: a benchmark whose version differs between the results (the sides, or the
+        # rounds of one side) was edited, so its results measure different things. No pair is used,
+        # and the other benchmarks are compared.
+        unit["reason"] = "benchmark-changed"
+        return unit
     if side_failed:
         # UC-02 §10: if either side fails to run, the benchmark has failed; no effect is reported.
         unit["reason"] = "side-failed"
@@ -476,6 +493,8 @@ def _failed(items) -> list[str]:
 def _reason(unit) -> str:
     """The unit's reason; for `not-measured`, which side measured nothing, and how its attempts ended:
     `not-measured: contender skipped`, or `baseline error 2, skipped 1` when the statuses differ."""
+    if unit["reason"] == "benchmark-changed":
+        return "benchmark-changed: its version differs between the results"
     if unit["reason"] != "not-measured":
         return unit["reason"]
     sides = []
@@ -523,12 +542,18 @@ def render(doc: dict) -> str:
     caveats = sorted({c for u in doc["units"] for c in u.get("caveats", [])})
     if caveats:
         lines.append(f"  caveats: {', '.join(caveats)}")
-    for section in ("regressed", "improved", "changed", "no-change-detected", "indeterminate"):
-        rows = [u for u in doc["units"] if u["verdict"] == section]
+    for section in ("regressed", "improved", "changed", "no-change-detected", "indeterminate", "not-comparable"):
+        # As asv sorts them: a benchmark that was edited is "not comparable", not indeterminate.
+        rows = [u for u in doc["units"]
+                if (u["verdict"] == section and u.get("reason") != "benchmark-changed")
+                or (section == "not-comparable" and u.get("reason") == "benchmark-changed")]
         if not rows:
             continue
         lines.append(f"\n{section.replace('-', ' ').upper()} ({len(rows)})")
         for u in rows:
+            if section == "not-comparable":  # no effect, noise or rounds to show: say why, as asv does
+                lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} ({_reason(u)})")
+                continue
             effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
             noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
             reason = f"  ({_reason(u)})" if "reason" in u else ""

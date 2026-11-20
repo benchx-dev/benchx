@@ -121,7 +121,10 @@ profile. A unit in which a side has no successful attempt at all (every attempt
 skipped, or failed under a profile that drops failed pairs) leaves no pair, and
 more rounds would not help: it is indeterminate with reason `not-measured`, not
 `insufficient-rounds`, and the unit carries how each side's attempts ended
-(`attempts`, counts by status). The schema's §5.5 table is not touched, since
+(`attempts`, counts by status). A unit whose recorded benchmark version differs, between the sides or
+between a side's rounds, and in nothing else, was edited: it is indeterminate with reason
+`benchmark-changed`, uses no pair, and is listed as not comparable, as `asv compare` does, while the
+other units are compared. The schema's §5.5 table is not touched, since
 this is a status rule, not an invariant.
 
 In history mode it additionally checks that:

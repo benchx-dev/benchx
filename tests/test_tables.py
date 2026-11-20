@@ -157,18 +157,20 @@ def test_a_benchmark_that_raises_on_one_side_leaves_the_others_compared():
                and "indeterminate (not-measured)" in line for line in rows)
 
 
-def test_an_edited_benchmark_has_no_row_but_the_others_do():
-    """Its two sides ran different code, so it is not compared (`sides-agree`): no row in the change table,
-    while the table of each side still shows what it measured."""
+def test_an_edited_benchmark_is_marked_not_comparable_and_the_others_have_their_rows():
+    """Its two sides ran different code, so it has no verdict: as `asv compare` does, the change table lists
+    it with `x` by default, and the table of each side still shows what it measured."""
     docs = make()
     for d in docs:
         if d["coordinates"]["workload"]["name"] == MEAN:
             d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
     doc = evaluate(docs)
-    assert [f["invariant"] for f in doc["failed_invariants"]] == ["sides-agree"] * 2
+    assert doc["failed_invariants"] == []
     shown = tables.render(doc, docs)
     rows = [line for line in shown.splitlines() if line.startswith("| ")]
-    assert len(rows) == 2 and PLAIN in rows[1] and not any(MEAN in line for line in rows)
+    edited = [line for line in rows if MEAN in line]
+    assert edited and all(line.startswith("| x ") and "not comparable (benchmark-changed)" in line for line in edited)
+    assert any(PLAIN in line for line in rows)
     assert shown.count(f"{MEAN}  ok") == 2  # the grid of each side
 
 
