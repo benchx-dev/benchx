@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import traceback
 from pathlib import Path
 from typing import get_args
@@ -24,7 +23,7 @@ from . import core, harnesses, log, orders, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
 from .core.validation import Kind
-from .store import Store, warning_codes
+from .results import MemoryStore, warning_codes
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -262,12 +261,33 @@ def _report_unmeasured(rows) -> None:
                      shown=bool(log.quiet() and (not named or silent)))
 
 
+def _open_store(path, command: str, *, hint: str | None = None):
+    """Open the local Parquet store, or explain how to install pyarrow and return None."""
+    try:
+        from .store import Store
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".")[0] == "pyarrow":
+            suffix = f", or {hint}" if hint else ""
+            say.error(
+                f"bx {command}: error: Parquet store requires pyarrow; "
+                f"install it with `pip install 'benchx[parquet]'`{suffix}"
+            )
+            return None
+        raise
+    return Store(path)
+
+
 def cmd_run(args):
     """Run one order, write its result files, and deliver them to the local
     store. The runner itself stays store-unaware (runner.md §2 principle 6);
     this command composes it with ingest, as the workbench does."""
     if (cfg := _load("run")) is None:
         return EXIT_REFUSED
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "run", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     out = Path(args.out) if args.out else cfg.results_dir
     # `bx run` has no check phase; the log goes in --out, and nowhere without it (the results
     # directory is shared by every run).
@@ -282,10 +302,9 @@ def cmd_run(args):
     _report_unmeasured(bench_mod.summarize(summary["files"]))
     say.out(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
             f"  (order {summary['order'][:19]})", log.SUMMARY)
-    if args.no_ingest:
+    if store is None:
         logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
-    store = Store(cfg.store_path)
     return _report(store.ingest_paths(summary["files"]), store.path)
 
 
@@ -500,7 +519,11 @@ def cmd_bench(args):
     _log_settings(settings.pop("sources"))
     settings["run_key"], settings["out"] = run_key, out
     settings["filter"] = names or settings["filter"]
-    store = None if args.no_ingest else Store(cfg.store_path)
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "bench", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     # Where a quiet run says it started, before a provider that builds takes its time.
     say.progress(f"measuring {Path(settings['suite']).name if settings.get('suite') else 'the suite'} on {target}"
                  + _placed(settings, rounds))
@@ -624,8 +647,10 @@ def cmd_ingest(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "ingest")) is None:
         return EXIT_REFUSED
+    if (store := _open_store(cfg.store_path, "ingest")) is None:
+        return EXIT_REFUSED
     logger.info("ingesting %d path(s): %s", len(args.paths), ", ".join(str(Path(p).resolve()) for p in args.paths))
-    return _report(Store(cfg.store_path).ingest_paths(args.paths))
+    return _report(store.ingest_paths(args.paths))
 
 
 def cmd_series(args):
@@ -633,7 +658,9 @@ def cmd_series(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "series")) is None:
         return EXIT_REFUSED
-    listed = Store(cfg.store_path).series(args.workload, args.quantity)
+    if (store := _open_store(cfg.store_path, "series")) is None:
+        return EXIT_REFUSED
+    listed = store.series(args.workload, args.quantity)
     if not listed:
         logger.info("no series%s", " matches the filter" if args.workload or args.quantity else " in the store")
     for s in listed:
@@ -648,7 +675,9 @@ def cmd_history(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "history")) is None:
         return EXIT_REFUSED
-    points = Store(cfg.store_path).history(args.series)
+    if (store := _open_store(cfg.store_path, "history")) is None:
+        return EXIT_REFUSED
+    points = store.history(args.series)
     if not points:
         logger.info("no series matches %s", args.series)
     elif len(matched := {p["series_fingerprint"] for p in points}) > 1:
@@ -668,7 +697,8 @@ def cmd_head(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "head")) is None:
         return EXIT_REFUSED
-    store = Store(cfg.store_path)
+    if (store := _open_store(cfg.store_path, "head")) is None:
+        return EXIT_REFUSED
     total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
     if args.json:
         for row in rows:
@@ -809,22 +839,30 @@ def _read(cfg, args, policy, sources):
         return EXIT_REFUSED
     _log_settings(sources)
     if args.results:
-        with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
-            store = Store(Path(tmp) / "store.parquet")
-            outcome = store.ingest_paths(args.results)
-            # The throwaway store is deleted on exit: its path would say nothing, so the count does.
-            logger.debug("read mode with --results: %d document(s) ingested into a throwaway store",
-                         outcome["ingested"])
-            if outcome["rejected"]:
-                logger.warning("%d document(s) were rejected: the comparison was not run", len(outcome["rejected"]))
-                return _report(outcome)
-            return _compare(store, args, policy)
-    return _compare(Store(cfg.store_path), args, policy)
+        store = MemoryStore()  # the ad hoc path: validated in memory without PyArrow
+        outcome = store.ingest_paths(args.results)
+        # The throwaway store is discarded on exit: its path would say nothing, so the count does.
+        logger.debug("read mode with --results: %d document(s) ingested into a throwaway store",
+                     outcome["ingested"])
+        if outcome["rejected"]:
+            logger.warning("%d document(s) were rejected: the comparison was not run", len(outcome["rejected"]))
+            return _report(outcome)
+        return _compare(store, args, policy)
+    store = _open_store(cfg.store_path, "compare", hint="pass --results DIR to compare JSON results directly")
+    if store is None:
+        return EXIT_REFUSED
+    return _compare(store, args, policy)
 
 
 def _measure(cfg, args, policy, sources):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = Store(cfg.store_path)
+    store = _open_store(
+        cfg.store_path,
+        "compare",
+        hint="run sides with `bx bench --no-ingest` and compare with `bx compare --run ... --results DIR`",
+    )
+    if store is None:
+        return EXIT_REFUSED
     try:  # the check phase: nothing has run, and no folder exists yet
         settings = _common(cfg, args)
         session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
@@ -1115,7 +1153,7 @@ def main(argv=None):
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
     read.add_argument("--results", nargs="+",
-                      help="compare these result directories through a throwaway store, not the local one")
+                      help="compare these result files or directories directly, without using the local store")
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
                          help="alternation rounds; each runs both sides once (default: compare.rounds)")

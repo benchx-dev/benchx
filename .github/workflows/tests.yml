@@ -46,10 +46,40 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install package and test dependencies
-        run: uv sync --extra test --python ${{ matrix.python-version }}
+        run: uv sync --extra parquet --extra test --python ${{ matrix.python-version }}
 
       - name: Run tests
-        run: uv run --extra test --python ${{ matrix.python-version }} python -m pytest tests -ra
+        run: uv run --extra parquet --extra test --python ${{ matrix.python-version }} python -m pytest tests -ra
+
+  minimal:
+    name: minimal (no pyarrow) / py3.13
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install package without parquet extra
+        run: uv sync --extra test --python 3.13
+
+      - name: Verify pyarrow and jsonpointer are absent
+        run: |
+          uv run --extra test --python 3.13 python -c '
+          import importlib.util
+          for mod in ("pyarrow", "jsonpointer", "fqdn", "idna", "isoduration", "rfc3987_syntax", "uri_template", "webcolors"):
+              assert importlib.util.find_spec(mod) is None, f"unexpected dependency installed: {mod}"
+          '
+
+      - name: Run tests without pyarrow
+        run: |
+          uv run --extra test --python 3.13 bx --help > /dev/null
+          uv run --extra test --python 3.13 python -m pytest tests -ra
 
   # An editable install finds the schemas next to the source, so the matrix above cannot
   # tell whether a wheel carries them. This installs the built wheel (not editable) into a
@@ -74,4 +104,6 @@ jobs:
           # Away from the checkout, so that nothing can import it instead of the installed package.
           cd "$RUNNER_TEMP"
           bx --help
+          python -m pytest --pyargs benchx -ra
+          uv pip install "$(ls "$GITHUB_WORKSPACE"/dist/*.whl)[parquet,test]"
           python -m pytest --pyargs benchx -ra

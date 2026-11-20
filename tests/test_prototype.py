@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import cli, compare, core, identity, runner
 from benchx.core.errors import StructureError
 from benchx.store import Store

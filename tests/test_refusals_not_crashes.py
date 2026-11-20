@@ -7,6 +7,8 @@ import subprocess
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import cli, session
 from benchx.adapters import asv, base, pyperf
 from benchx.store import Store

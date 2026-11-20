@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import compare, config, core, runner, session, snapshot
 from benchx import target as target_mod
 from benchx.store import Store

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pyperf")
+pytest.importorskip("pyarrow")
 
 from benchx import adapters, cli, core, runner, snapshot
 from benchx.store import Store

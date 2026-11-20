@@ -5,6 +5,8 @@ import os
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import cli, runner, session
 from benchx.store import Store
 from conftest import NOISY, QUIET, cases, make_build
