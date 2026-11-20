@@ -3,13 +3,15 @@
 Each is a refusal the user can act on: one line, naming what to change.
 """
 
+import json
 import subprocess
 
 import pytest
 
 from benchx import cli, session
 from benchx.adapters import asv, base, pyperf
-from benchx.store import Store
+from benchx.core import catalog
+from benchx.results import MemoryStore
 
 MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"]
 
@@ -116,7 +118,7 @@ def test_compare_targets_passes_the_configured_order_timeout(profile, tmp, monke
     with pytest.raises(session.SessionError, match="stop here"):
         session.compare_targets("A", "B", profile=profile, suite="s", rounds=1, adapter="pyperf",
                                 label=("env", "x", "y") if profile == "environments" else None,
-                                store=Store(tmp / "s.parquet"), order_s=7)
+                                store=MemoryStore(), order_s=7)
     assert seen == [7]
 
 
@@ -144,3 +146,38 @@ def test_bx_bench_refuses_a_label_name_with_a_slash_as_it_records_it(capsys):
             "--label", "a/b=x"]
     assert cli.main(argv) == cli.EXIT_REFUSED
     assert f"bx bench: error: {expected.value}" in capsys.readouterr().err
+
+
+# ---- missing jsonschema format checker in $BENCHX_SCHEMAS is refused, not a traceback
+
+def test_missing_format_checker_in_custom_schemas_is_refused(tmp_path, adhoc, monkeypatch, capsys):
+    """A custom $BENCHX_SCHEMAS declaring an unavailable format (e.g. `iri`) returns EXIT_REFUSED
+    with a single error line, not a traceback or EXIT_INVALID."""
+    schemas = tmp_path / "schemas"
+    dest = schemas / "measurement-result" / "0.1.0"
+    dest.mkdir(parents=True)
+    schema = json.loads((catalog.SCHEMAS / "measurement-result" / "0.1.0" / "schema.json").read_text())
+    schema["$defs"]["uri"]["format"] = "iri"
+    (dest / "schema.json").write_text(json.dumps(schema))
+
+    doc_dir = tmp_path / "results"
+    doc_dir.mkdir()
+    doc_path = doc_dir / "result.json"
+    doc_path.write_text(json.dumps(adhoc))
+
+    monkeypatch.setattr(catalog, "SCHEMAS", schemas)
+    catalog.clear_cache()
+    try:
+        assert cli.main(["validate", str(doc_path)]) == cli.EXIT_REFUSED
+        err = capsys.readouterr().err
+        assert "bx validate: error:" in err and "iri" in err and "Traceback" not in err
+
+        assert cli.main([
+            "compare", "--run", adhoc["provenance"]["run_key"],
+            "--profile", "revisions", "--baseline", adhoc["revision"]["key"][:8],
+            "--results", str(doc_dir),
+        ]) == cli.EXIT_REFUSED
+        err = capsys.readouterr().err
+        assert "bx compare: error:" in err and "iri" in err and "Traceback" not in err
+    finally:
+        catalog.clear_cache()

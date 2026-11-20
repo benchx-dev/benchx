@@ -15,7 +15,7 @@ from pathlib import Path
 from . import core, snapshot
 from .errors import SessionError
 from .projection import declared_workload, said, workload_label
-from .store import warning_codes
+from .results import warning_codes
 
 
 def tree_of(module: Path, tree=None) -> Path:
