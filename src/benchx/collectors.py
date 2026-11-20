@@ -18,15 +18,20 @@ check refuses the order, or with `on_fail: warn` gives the results the warning
 """
 
 import json
+import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import core
+from . import core, log
 from .core import Refusal, loader
 
 DEFAULT_TIMEOUT_S = 60.0
 MAX_DIFFS = 5
+MAX_LOGGED_DIFFS = 40  # the log's cap, like its other lists; a refusal keeps MAX_DIFFS
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,17 +66,28 @@ def _short(value, limit=80) -> str:
 
 def _collect(spec, cwd, env) -> tuple[dict | None, str | None]:
     """The facts a collector prints, or (None, why not)."""
+    name, limit = spec.get("name", "?"), spec.get("timeout_s", DEFAULT_TIMEOUT_S)
+    logger.debug("collector %s: %s (in %s, limit %g s)", name, log.command(spec["command"]), cwd, limit)
+    started = time.monotonic()
     try:
-        done = subprocess.run(spec["command"], cwd=cwd, env=env, capture_output=True, text=True,
-                              timeout=spec.get("timeout_s", DEFAULT_TIMEOUT_S))
+        done = subprocess.run(spec["command"], cwd=cwd, env=env, capture_output=True, text=True, timeout=limit)
+        status, stdout, stderr = done.returncode, done.stdout, done.stderr
     except OSError as e:
         return None, f"cannot run {spec['command'][0]!r}: {e}"
-    except subprocess.TimeoutExpired:
-        return None, f"timed out after {spec.get('timeout_s', DEFAULT_TIMEOUT_S):g} s"
-    if done.returncode != 0:
-        last = (done.stderr.strip().splitlines() or ["no message"])[-1]
-        return None, f"exit {done.returncode}: {last}"
-    facts, errors = loader.parse(done.stdout)
+    except subprocess.TimeoutExpired as expired:  # the partial output comes back as bytes
+        status, stdout, stderr = None, log.as_text(expired.stdout), log.as_text(expired.stderr)
+    logger.debug("collector %s: %s in %.1f s", name, "timed out" if status is None else f"exit {status}",
+                 time.monotonic() - started)
+    failed = status is None or status != 0
+    log.harness_output(logger, f"collector {name}", "stderr", stderr, failed=failed)
+    if failed:  # on success stdout is the facts, which are kept as the collector-output artifact
+        log.harness_output(logger, f"collector {name}", "stdout", stdout, failed=True)
+    if status is None:
+        return None, f"timed out after {limit:g} s"
+    if status != 0:
+        last = (stderr.strip().splitlines() or ["no message"])[-1]
+        return None, f"exit {status}: {last}"
+    facts, errors = loader.parse(stdout)
     if facts is None:
         return None, "; ".join(str(error) for error in errors)
     return facts, None
@@ -81,19 +97,24 @@ def run_all(specs, *, declared, cwd, env, artifacts_dir, taken=()) -> Collected:
     """Run each collector. `declared` is the target's how_built, `taken` the
     environment.system names already in use."""
     out = Collected()
-    for spec in specs:
+    for number, spec in enumerate(specs, 1):
         name = spec["name"]
         if name in taken or name in out.system:
             out.refusals.append(Refusal(f"collector {name!r}: that name is already in environment.system"))
             continue
         checks = bool(spec.get("verify") or spec.get("expect"))
         refuse = spec.get("on_fail", "refuse") == "refuse"
+        started = time.monotonic()
         facts, why = _collect(spec, cwd, env)
+        took = time.monotonic() - started
         problems = []
         if facts is None:
             out.warnings.append("collector-failed")
             problems.append(f"collector {name!r} failed: {why}")
+            logger.info("collector %d/%d %s: failed, %.1f s", number, len(specs), name, took)
+            logger.warning("collector %s failed: %s", name, why)  # even when it only warns: the reason is lost otherwise
         else:
+            logger.info("collector %d/%d %s: ok, %.1f s", number, len(specs), name, took)
             digest = core.sha256_hex(core.canonical(facts))
             path = Path(artifacts_dir) / f"collector-{name}.json"
             path.write_bytes(core.pretty(facts))
@@ -108,6 +129,11 @@ def run_all(specs, *, declared, cwd, env, artifacts_dir, taken=()) -> Collected:
             problems += [f"collector {name!r}: expect {d}" for d in _differences(spec.get("expect", {}), facts)]
             if problems:
                 out.warnings.append("collector-mismatch")
+                logger.warning("collector %s: %d difference(s) from what was declared or expected", name, len(problems))
+                for problem in problems[:MAX_LOGGED_DIFFS]:
+                    logger.warning("%s", problem)
+                if len(problems) > MAX_LOGGED_DIFFS:
+                    logger.warning("collector %s: and %d more", name, len(problems) - MAX_LOGGED_DIFFS)
         if problems and checks and refuse:  # an unchecked collector that fails only warns
             out.refusals += [Refusal(problem) for problem in problems[:MAX_DIFFS]]
     return out

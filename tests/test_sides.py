@@ -108,9 +108,17 @@ def test_the_harness_decides_what_a_suite_is(tree, monkeypatch):
 
 
 def test_a_dirty_working_tree_is_reported_dirty(tree, monkeypatch):
+    with open(tree / SUITE, "a") as suite:  # a tracked file, edited
+        suite.write("# edited\n")
+    provided(monkeypatch, description(tree))
+    assert session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)["identity"]["dirty"] == "dirty"
+
+
+def test_an_untracked_file_leaves_a_working_tree_clean(tree, monkeypatch):
     (tree / "scratch.txt").write_text("x")
     provided(monkeypatch, description(tree))
-    assert session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)["identity"]["dirty"] != "clean"
+    identity = session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)["identity"]
+    assert identity["dirty"] == "clean" and identity["untracked"] == ["scratch.txt"]
 
 
 # --- a bare path is read by the harness ---------------------------------------------

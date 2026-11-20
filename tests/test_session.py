@@ -86,9 +86,8 @@ def test_clean_sides_say_nothing_and_are_not_local_only(repo, tmp, builds):
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
 def test_a_side_with_no_tree_id_is_refused_before_anything_runs(repo, tmp, builds):
-    """An unreadable untracked file leaves git without a working-tree id: the dirty state is `unknown`."""
-    unreadable = repo["wt-head"] / "unreadable.txt"
-    unreadable.write_text("x\n")
+    """An unreadable tracked file leaves git without a working-tree id: the dirty state is `unknown`."""
+    unreadable = repo["wt-head"] / "bench.cpp"
     unreadable.chmod(0)
     try:
         with pytest.raises(session.SessionError, match=r"contender tree .* has no working-tree id.*unknown"):

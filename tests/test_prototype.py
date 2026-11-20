@@ -250,9 +250,9 @@ def test_a_dirty_result_carries_the_dirty_warnings_and_a_clean_one_does_not(repo
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
 def test_a_single_run_records_an_unknown_tree_without_a_tree_id(repo, tmp):
-    """UC-01 is unchanged: a tree git cannot hash is recorded as `unknown`, with no tree id (schema §4.1)."""
-    unreadable = repo["wt-head"] / "unreadable.txt"
-    unreadable.write_text("x\n")
+    """UC-01 is unchanged: a tree git cannot hash (a tracked file it cannot read) is recorded as `unknown`, with
+    no tree id (schema §4.1). An unreadable untracked file is not part of the tree."""
+    unreadable = repo["wt-head"] / "bench.cpp"
     unreadable.chmod(0)
     try:
         build = make_build(tmp / "b1", repo["wt-head"], cases())
@@ -419,7 +419,8 @@ def test_missing_build_is_refused_for_every_reason(tmp):
     assert all(type(problem) is core.Refusal for problem in problems)
     assert [str(problem).split(":")[0] for problem in problems] == [
         "suite binary not found",
-        "cannot locate the checkout the target was built from; set target.source_dir",
+        f"cannot locate the checkout the target was built from (there is no CMakeCache.txt in {tmp / 'absent'}); "
+        "set target.source_dir",  # the refusal says why (logging plan R31)
     ]
 
 
@@ -590,7 +591,7 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
     store_path = tmp / "store.parquet"  # no benchx.conf.json: the working directory is the root
     assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
-    assert "ingested 4, duplicate 0" in capsys.readouterr().out  # this run's files only, with load averages
+    assert "ingested 4, duplicate 0" in capsys.readouterr().err  # this run's files only, with load averages
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store(store_path).head()
@@ -616,7 +617,8 @@ def _run_working_tree(tmp, document, name):
 def test_working_tree_records_git_identity_dirty_and_untouched(repo, tmp):
     """A working_tree target is measured as found: HEAD, dirty, and a tree no commit has."""
     checkout = repo["wt-head"]
-    make_build(checkout / "bin", checkout, cases())  # untracked files make the tree dirty
+    (checkout / "bench.cpp").write_text("// edited, not committed\n")  # a tracked file edited makes the tree dirty
+    make_build(checkout / "bin", checkout, cases())  # untracked files do not
     identity_before = runner.snapshot.git_identity(checkout)
     docs = _run_working_tree(tmp, _working_tree_order(checkout / "bin", "wt-git", source_dir=str(checkout)), "wt-git")
     assert docs

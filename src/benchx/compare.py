@@ -11,6 +11,7 @@ store.
 
 import collections
 import json
+import logging
 import math
 import re
 import statistics
@@ -20,6 +21,8 @@ from .core import canonical, catalog
 from .projection import Projection, axis_order, declared_workload, get, said, workload_label
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
+
+logger = logging.getLogger(__name__)
 
 METHOD = {"name": "benchx/paired-relative", "version": "v1", "effect_measure": "relative"}
 PROFILES = {
@@ -141,7 +144,76 @@ def infer_parameter(documents, run_key) -> str:
 
 def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, k=3.0, min_rounds=3) -> dict:
     """The run-mode comparison document. `label` names the sides of `environments`, and `parameter`
-    those of `variants`."""
+    those of `variants`. The comparator's contract is about its result (the same inputs give the same
+    document), which logging does not touch: this logs the inputs, then the outcome from the document
+    `_compare` returns, so that every return path gets its records."""
+    doc = _compare(documents, run_key=run_key, profile=profile, baseline=baseline, label=label,
+                   parameter=parameter, k=k, min_rounds=min_rounds)
+    _log_outcome(doc, documents, run_key=run_key, profile=profile, baseline=baseline, k=k, min_rounds=min_rounds)
+    return doc
+
+
+def _log_outcome(doc, documents, *, run_key, profile, baseline, k, min_rounds) -> None:
+    """What the comparison found, one record per fact that explains a verdict or the lack of one."""
+    ours = [d for d in documents if d["provenance"].get("run_key") == run_key]
+    logger.debug("compare: run %s, profile %s, varying %s, identity schema %s, baseline as typed %r, k %g, "
+                 "min_rounds %d; %d result document(s) used of %d offered (the others are conditions, such as the "
+                 "load average)", run_key, profile, doc["varying"], doc["identity_schema"], baseline, k, min_rounds,
+                 len(doc["inputs"]), len(ours))
+    if doc["local_only"]:
+        dirty = sorted({f"the {what} tree {(d['provenance'].get(tree) or d['revision']['key'])[:12]} is "
+                        f"{d['provenance'][flag]}" for d in ours
+                        for flag, tree, what in (("subject_dirty", "subject_tree", "subject"),
+                                                 ("benchmark_dirty", "benchmark_tree", "benchmark"))
+                        if d["provenance"][flag] != "clean"})
+        logger.info("local-only: %s", "; ".join(dirty))
+    for failed in doc["failed_invariants"]:
+        if "workload" in failed:
+            where = f"{workload_label(failed['workload'])} [{failed['quantity']}]"
+            logger.warning("invariant %s failed for %s: %s", failed["invariant"], where, failed["detail"])
+        else:
+            logger.error("invariant %s failed: %s; no unit was compared", failed["invariant"], failed["detail"])
+    groups = collections.defaultdict(list)
+    for exclusion in doc["exclusions"]:
+        groups[exclusion["reason"]].append(exclusion["result"])
+    for reason, results in groups.items():
+        logger.warning("excluded %d result(s): %s", len(results), reason)
+        for result in results:
+            logger.debug("excluded: %s %s", result["producer"], result["ingest_key"])
+    if doc["missing"]:
+        first = ", ".join(f"{workload_label(m['workload'])} [{m['quantity']}] on {m['side']}" for m in doc["missing"][:3])
+        logger.warning("%d unit(s) have no result on a side: %s%s", len(doc["missing"]), first,
+                       ", …" if len(doc["missing"]) > 3 else "")
+        for m in doc["missing"]:
+            logger.debug("missing: %s [%s] on %s", workload_label(m["workload"]), m["quantity"], m["side"])
+    for unit in doc["units"]:
+        facts = [unit["verdict"]] + ([f"reason {unit['reason']}"] if "reason" in unit else [])
+        facts.append(f"rounds {unit['rounds']}")
+        if "reference_estimate" in unit:
+            facts.append(f"reference {unit['reference_estimate']:.6g}")
+        if "effect" in unit:
+            facts += [f"effect {unit['effect']:+.2%}", f"noise {unit['noise']:.2%}", f"k x noise {k * unit['noise']:.2%}"]
+        if "reason" in unit and unit["reason"] == "insufficient-rounds":
+            facts.append(f"{max(min_rounds, MIN_PAIRS)} paired rounds required")
+        attempts = "; ".join(f"{role} " + ", ".join(f"{status} {n}" for status, n in counts.items())
+                             for role, counts in unit.get("attempts", {}).items())
+        logger.info("unit %s [%s]: %s; attempts %s", workload_label(unit["workload"]), unit["quantity"],
+                    ", ".join(facts), attempts)
+    by_verdict = collections.Counter(u["verdict"] for u in doc["units"])
+    indeterminate = collections.Counter(u.get("reason", "-") for u in doc["units"] if u["verdict"] == "indeterminate")
+    logger.log(logging.WARNING if indeterminate or doc["exclusions"] or doc["failed_invariants"] else logging.INFO,
+               "compared run %s, profile %s, baseline %s, contender %s: %d unit(s)%s%s; %d missing, %d invariant(s) "
+               "failed, %d excluded", run_key, profile, str(doc["baseline"])[:12], str(doc.get("contender"))[:12],
+               len(doc["units"]), "".join(f", {n} {verdict}" for verdict, n in sorted(by_verdict.items())),
+               f" (indeterminate: {', '.join(f'{r} {n}' for r, n in sorted(indeterminate.items()))})" if indeterminate else "",
+               len(doc["missing"]), len(doc["failed_invariants"]), len(doc["exclusions"]))
+
+
+def _compare(documents, *, run_key, profile, baseline, label=None, parameter=None, k=3.0, min_rounds=3) -> dict:
+    """The body of `compare`: the document, and the decisions that only it makes (logged where they happen)."""
+    if min_rounds < MIN_PAIRS:
+        logger.warning("min_rounds %d is below %d, the fewest rounds a verdict needs: %d is used",
+                       min_rounds, MIN_PAIRS, MIN_PAIRS)
     projection = profile_projection(profile, label, parameter)
     documents = _run_documents(documents, run_key)
     naming = projection.axis[0]
@@ -188,8 +260,15 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
         return doc
     contender = next(side for side in names if side != base)
     doc["contender"] = names[contender]
+    if profile == "revisions":
+        how = ("a prefix of the side's tree id" if any(str(names[s]).startswith(baseline) for s in matches)
+               else "a prefix of a result's revision.key")
+    else:
+        how = "equality with the recorded value"
+    logger.info("baseline %s (asked: %s, matched by %s), contender %s", names[base], baseline, how, names[contender])
     doc["sides"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == side))
                     for role, side in (("baseline", base), ("contender", contender))}
+    _log_declarations(documents, sides, base, contender)
 
     # Run-level invariants (schema §5.5, comparator.md §3), as the profile names them.
     check = set(projection.invariants)
@@ -271,7 +350,7 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                            "detail": f"{len(by_side[base])} against {len(by_side[contender])}: run the same "
                                      "number of rounds on both sides"})
             continue
-        rounds, side_failed = {}, False
+        rounds, side_failed, overwritten = {}, False, []
         for s in (base, contender):
             for d in by_side[s]:
                 if d["measurement"]["status"] != "success":
@@ -281,15 +360,33 @@ def compare(documents, *, run_key, profile, baseline, label=None, parameter=None
                     doc["exclusions"].append({"result": result, "reason": f"{why}: {said(d)}" if said(d) else why})
                     side_failed = side_failed or (profile in STRICT_STATUS and status in FAILED_STATUSES)
                     continue
-                rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
+                in_round = rounds.setdefault(d.get("procedure", {}).get("round"), {})
+                if s in in_round:  # a dict assignment: the second success replaces the first
+                    overwritten.append(in_round[s]["ingest_key"])
+                in_round[s] = d
+        label_of = f"{workload_label(where['workload'])} [{quantity}]"
+        if overwritten:
+            logger.warning("%s: %d second success(es) of a side in one round overwrote the first: %s", label_of,
+                           len(overwritten), ", ".join(overwritten[:3]) + (", …" if len(overwritten) > 3 else ""))
+        if None in rounds:
+            logger.warning("%s: results with no procedure.round all share one round: %d side(s) of it", label_of,
+                           len(rounds[None]))
         pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
                  if base in r and contender in r]
+        if len(pairs) < len(rounds):
+            logger.debug("%s: %d round(s) paired, %d dropped for a success on one side only (%s)", label_of, len(pairs),
+                         len(rounds) - len(pairs), "; ".join(f"round {r} has {'baseline' if base in v else 'contender'} only"
+                                                            for r, v in rounds.items() if not (base in v and contender in v)))
         unit_doc = _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed)
         succeeded = {s: [d for d in by_side[s] if d["measurement"]["status"] == "success"] for s in (base, contender)}
         unit_doc["unmatched_differences"] = _differences(projection, succeeded[base], succeeded[contender])
         if caveats := _caveats(by_side, base, contender):
             unit_doc["caveats"] = caveats
         doc["units"].append(unit_doc)
+    ignored = collections.Counter(p for u in doc["units"] for p in u.get("unmatched_differences", []))
+    if ignored:
+        logger.debug("facts that differ between the sides but that the identity policy ignores, so no invariant "
+                     "fails: %s", ", ".join(f"{pointer} ({n} unit(s))" for pointer, n in sorted(ignored.items())))
     return doc
 
 
@@ -371,6 +468,22 @@ def _differing(facts: list[dict]) -> list[str]:
     return sorted(p for key in set().union(*facts) for p in _diff(key, [f.get(key, _ABSENT) for f in facts]))
 
 
+def _log_declarations(documents, sides, base, contender) -> None:
+    """`sides` takes each side's declarations (how built, activation, shell, provider) from its first result in
+    sort order and never looks at the others: say which result that was, and warn when the others disagree
+    (the fields' names: never their values, which are the user's text and the inherited environment)."""
+    for role, side in (("baseline", base), ("contender", contender)):
+        ours = [d for d, x in zip(documents, sides) if x == side]
+        first = _declared(ours[0])
+        logger.debug("the %s side's declarations come from %s %s", role, ours[0]["producer"]["name"],
+                     ours[0]["ingest_key"])
+        differing = sorted({k for d in ours[1:] for k in set(first) | set(_declared(d))
+                            if first.get(k) != _declared(d).get(k)} - {"observed_env"})
+        if differing:
+            logger.warning("the %s side's results disagree about %s: the comparison shows the first result's",
+                           role, ", ".join(differing))
+
+
 def _declared(document) -> dict:
     """What a side says about how it was built and entered, beside what the
     runner saw: the declarations are recorded as given and never judged."""
@@ -424,6 +537,12 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=Fal
         unit["reason"] = "not-measured"
         return unit
     estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
+    if empty := [d["ingest_key"] for pair in pairs for d in pair if _estimate(d) is None]:
+        logger.warning("%s [%s]: %d success(es) with no observations are dropped from the pairs; rounds counts %d "
+                       "pair(s) before this and the threshold %d after it: %s", workload_label(where["workload"]),
+                       where["quantity"], len(empty), len(pairs), len([1 for b, c in estimates if b is not None
+                                                                        and c is not None]),
+                       ", ".join(empty[:3]) + (", …" if len(empty) > 3 else ""))
     estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
     if estimates:
         unit["reference_estimate"] = statistics.median(b for b, _ in estimates)
