@@ -409,8 +409,9 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds, side_failed=Fal
             "rounds": len(pairs), "attempts": attempts, "noise_source": "paired-rounds",
             "verdict": "indeterminate"}
     if benchmark_changed:
-        # As in `asv compare`: a benchmark whose version differs between the sides was edited, so its two
-        # sides measure different things. No pair is used, and the other benchmarks are compared.
+        # As in `asv compare`: a benchmark whose version differs between the results (the sides, or the
+        # rounds of one side) was edited, so its results measure different things. No pair is used,
+        # and the other benchmarks are compared.
         unit["reason"] = "benchmark-changed"
         return unit
     if side_failed:
@@ -493,7 +494,7 @@ def _reason(unit) -> str:
     """The unit's reason; for `not-measured`, which side measured nothing, and how its attempts ended:
     `not-measured: contender skipped`, or `baseline error 2, skipped 1` when the statuses differ."""
     if unit["reason"] == "benchmark-changed":
-        return "benchmark-changed: its version differs between the sides"
+        return "benchmark-changed: its version differs between the results"
     if unit["reason"] != "not-measured":
         return unit["reason"]
     sides = []
