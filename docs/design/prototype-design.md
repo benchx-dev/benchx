@@ -376,7 +376,8 @@ landing where its §3.4 puts it:
   (`runner-schema.md` §3.3). A result whose subject tree is `dirty` carries
   the quality warning `dirty-subject-tree`, and one whose benchmark is `dirty`
   `dirty-benchmark-tree` (schema §4.1); an `unknown` state has no tree id and
-  no warning of its own.
+  no warning of its own. A tree is `dirty` when a tracked file differs from its
+  HEAD; untracked files are not part of it, and the log names them.
 - **Build configuration**, from a built-in plugin that reads
   `CMakeCache.txt` in the build directory: build type, compiler and version,
   flags, and the project's own options (cache entries prefixed with the
