@@ -320,8 +320,8 @@ def _refuse_unknown_tree(side: dict, name: str | None = None) -> None:
         cause = side["identity"].get("why_unknown")
         raise SessionError(f"{who} {side['source']} has no working-tree id (its dirty state is "
                            f"{side['identity']['dirty']}{f'; {cause}' if cause else ''}): the sides cannot be told "
-                           "apart, or checked for a change during the run. Make every file in the tree readable, "
-                           "or git-ignore it (UC-03 §10)")
+                           "apart, or checked for a change during the run. Make every tracked file in the tree "
+                           "readable (UC-03 §10)")
 
 
 def _note_local_only(progress, sides) -> None:

@@ -231,3 +231,20 @@ def test_a_parametrized_case_logs_its_workload_and_parameter_values_before_it_ru
            "environment variables of the order A=1" in shown
     assert "n=100, kind='b'" in next(l for l in lines if "case 4/4 bench_matmul-3: workload" in l)
     assert lines.index(listed) < first  # listed once, before the first case
+
+
+def test_untracked_paths_are_said_once_as_info_and_capped(caplog):
+    """The identity covers tracked files only; the log names what it leaves out (schema §4.1), once per tree."""
+    log.configure(False)
+    untracked = [f"file{n}.txt" for n in range(12)]
+    source = {"path": "/p", "revision": "a" * 40, "dirty": "clean", "tree": "b" * 40, "untracked": untracked}
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        runner._log_identity({}, source, None, "/p")
+        runner._log_identity({}, source, None, "/p")
+        runner._log_identity({}, {**source, "path": "/q"}, None, "/q")  # another tree: said again
+        runner._log_identity({}, {"path": "/r", "revision": "a" * 40, "dirty": "clean", "tree": "c" * 40}, None, "/r")
+    said = [(r.levelname, r.getMessage()) for r in caplog.records if "untracked" in r.getMessage()]
+    assert [level for level, _ in said] == ["INFO", "INFO"]  # a tree with none says nothing
+    message = said[0][1]
+    assert message.startswith("the subject tree has 12 untracked path(s), which its dirty state and tree id leave out")
+    assert "file0.txt, file1.txt" in message and "file9.txt, and 2 more" in message and "file10.txt" not in message

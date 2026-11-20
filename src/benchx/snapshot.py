@@ -45,7 +45,8 @@ def env_allowlist(env: dict, adapter_names=()) -> tuple:
     return tuple(names)
 
 
-def _run(args, cwd=None):
+def _run(args, cwd=None, raw=False):
+    """The output of a command, stripped (`raw`: only its last newline, for output whose first column counts)."""
     try:
         out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True)
     except OSError as e:
@@ -55,7 +56,7 @@ def _run(args, cwd=None):
         logger.debug("%s failed in %s: exit %d: %s", log.command(args), cwd or Path.cwd(), e.returncode,
                      " | ".join((e.stderr or "").strip().splitlines()[:3]))
         return None
-    return out.stdout.strip()
+    return out.stdout.rstrip("\n") if raw else out.stdout.strip()
 
 
 def _read(path):
@@ -130,18 +131,10 @@ def merge(base: dict, facts: dict) -> dict:
 # Bytecode caches are written by running the suite, so they must not change the tree id.
 _PYCACHE_EXCLUDE = ":(exclude,glob)**/__pycache__/**"
 
-# So is `out/`, where a script gives each `bx bench` call its own results directory:
-# call 2 would otherwise see call 1's directory as an untracked file and record another
-# tree id. Left out only when the repository tracks nothing under an `out/`; with a
-# tracked `out/x.txt` a blanket exclusion would give a clean checkout a tree id that
-# differs from HEAD's, and an edit to that file would leave the tree `clean`.
-_OUT_GLOB = ":(glob)**/out/**"
+# `out/`, where a script gives each `bx bench` call its own results directory, is untracked
+# and so not part of a tree's identity; it is left out of the list of untracked paths the log
+# names as well, since it would head that list in every run.
 _OUT_EXCLUDE = ":(exclude,glob)**/out/**"
-
-
-def _out_is_untracked(top) -> bool:
-    """Whether nothing under an `out/` directory is tracked (False when git cannot say)."""
-    return _run(["git", "ls-files", "--", _OUT_GLOB], cwd=top) == ""
 
 
 _IGNORED: tuple[Path, ...] = ()
@@ -171,27 +164,32 @@ def _git_ignores(top, rel) -> bool:
 
 
 def git_identity(path) -> dict | None:
-    """Revision, dirty state, and working-tree id of a checkout (schema §4.1)."""
+    """Revision, dirty state, and working-tree id of a checkout (schema §4.1), for its tracked files: it is
+    `dirty` when one of them differs from HEAD (an edit, a deletion, a mode change, a submodule at another
+    commit), and its tree id is HEAD's tree with those differences in it, so a clean checkout has HEAD's own
+    tree id. Untracked files are not part of the identity: they are listed in `untracked`, for the log."""
     top = _run(["git", "rev-parse", "--show-toplevel"], cwd=path)
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    out_left_out = _out_is_untracked(top)
     own = [(rel, _git_ignores(top, rel)) for rel in _ignored_in(top)]
-    excludes = [_PYCACHE_EXCLUDE, *([_OUT_EXCLUDE] if out_left_out else []),
-                *(f":(top,exclude){rel}" for rel, git_does in own if not git_does)]
-    logger.debug("tree id of %s leaves out __pycache__, %s, and benchx's own paths %s (git's own ignore rules already "
-                 "cover %s)", top, "`**/out/**`" if out_left_out else "nothing under out/ (a tracked file is under an "
-                 "out/, or `git ls-files` failed)", [r for r, g in own if not g] or "(none inside it)",
+    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel, git_does in own if not git_does)]
+    logger.debug("identity of %s: its tracked files only; leaves out __pycache__ and benchx's own paths %s (git's own "
+                 "ignore rules already cover %s)", top, [r for r, g in own if not g] or "(none inside it)",
                  [r for r, g in own if g] or "none")
-    status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
-    # A scratch index that does not exist yet, so the repository's own index
-    # is untouched (schema §4.1).
+    status = _run(["git", "status", "--porcelain", "--untracked-files=no", "--", ".", *excludes], cwd=top, raw=True)
+    # What is not tracked, for the log: `git status` lists an untracked directory once, not file by file.
+    listed = _run(["git", "status", "--porcelain", "--untracked-files=normal", "--", ".", *excludes, _OUT_EXCLUDE],
+                  cwd=top, raw=True)
+    untracked = [line[3:] for line in (listed or "").splitlines() if line.startswith("?? ")]
+    # A scratch index that does not exist yet, so the repository's own index is untouched (schema §4.1):
+    # HEAD's tree, then the tracked files as they are now.
     with tempfile.TemporaryDirectory() as tmp:
         index = os.path.join(tmp, "index")
         env = {**os.environ, "GIT_INDEX_FILE": index}
         try:
-            subprocess.run(["git", "add", "-A", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True)
+            subprocess.run(["git", "read-tree", "HEAD"], cwd=top, env=env, check=True, capture_output=True)
+            subprocess.run(["git", "add", "-u", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True)
             tree = subprocess.run(["git", "write-tree"], cwd=top, env=env, check=True,
                                   capture_output=True, text=True).stdout.strip()
         except (OSError, subprocess.CalledProcessError) as e:
@@ -203,6 +201,8 @@ def git_identity(path) -> dict | None:
         identity.update(dirty="dirty" if status else "clean", tree=tree)
         if status:
             identity["changes"] = status.splitlines()  # why the tree is dirty, for the log
+        if untracked:
+            identity["untracked"] = untracked
     else:
         identity["dirty"] = "unknown"
         identity["why_unknown"] = "git status failed" if status is None else "git add or write-tree failed"

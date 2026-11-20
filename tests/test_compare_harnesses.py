@@ -348,8 +348,7 @@ def test_variants_google_benchmark_has_no_parameters_to_vary(tmp):
 def test_variants_a_tree_with_no_tree_id_is_refused_before_anything_runs(tmp):
     pytest.importorskip("pyperf")
     tree = variants_tree(tmp, VARIANTS)
-    unreadable = tree / "unreadable.txt"
-    unreadable.write_text("x\n")
+    unreadable = tree / "mod.py"  # a tracked file: an unreadable untracked one is not part of the tree
     unreadable.chmod(0)
     try:
         with pytest.raises(session.SessionError, match=r"^tree .* has no working-tree id.*unknown"):
