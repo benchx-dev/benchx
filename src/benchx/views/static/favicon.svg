@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The benchx mark, optically adjusted for 16-32 px: plank and legs further apart, heavier legs. -->
+  <style>.legs{stroke:#0b0b0b}@media (prefers-color-scheme:dark){.legs{stroke:#f0efec}}</style>
+  <rect x="8" y="8" width="48" height="8" rx="2" fill="#2a78d6"/>
+  <path class="legs" d="M18 26 L46 52 M46 26 L18 52" stroke-width="8" stroke-linecap="round" fill="none"/>
+</svg>

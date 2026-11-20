@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="benchx">
+  <title>benchx</title>
+  <!-- The benchx mark: a trestle bench whose crossed legs are the x. For 16 px use favicon.svg. -->
+  <style>.legs{stroke:#0b0b0b}@media (prefers-color-scheme:dark){.legs{stroke:#f0efec}}</style>
+  <rect x="8" y="10" width="48" height="8" rx="2" fill="#2a78d6"/>
+  <path class="legs" d="M18 24 L46 52 M46 24 L18 52" stroke-width="7" stroke-linecap="round" fill="none"/>
+</svg>
