@@ -1,5 +1,18 @@
 name: docs
 
+# Builds the documentation site and deploys it to GitHub Pages.
+#
+# What triggers a deployment (job `deploy`):
+#   - a push to main that changes one of the paths below, usually the merge of a pull request;
+#   - a manual run on main: Actions > docs > Run workflow, branch main.
+# A pull request, and a manual run on another branch, only build the site.
+#
+# The Examples page shows pages that the e2e workflow (e2e.yml) generated from the examples.
+# Each build takes, for every example, the newest docs-<example> artifact of a run of e2e.yml
+# on main. A change to an example, or to what e2e produces, therefore reaches the site with the
+# next deployment, not by itself. To deploy after such a change, see the steps at
+# `workflow_dispatch` below.
+
 on:
   push:
     branches: [main]
@@ -19,6 +32,14 @@ on:
       - "zensical.toml"
       - "README.md"
       - ".github/workflows/docs.yml"
+  # To deploy the site again without a change under the paths above, for example after an
+  # example changed in benchx_examples:
+  #   1. Run "e2e examples" by hand on main (Actions > e2e examples > Run workflow), and wait
+  #      until its job for the example has finished: a build takes the example pages from the
+  #      newest e2e runs on main, and a run that is still going has no page to give yet.
+  #   2. Run this workflow by hand on main (Actions > docs > Run workflow).
+  # A run on main deploys, like a push to main does. A run on another branch only builds.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,23 +51,82 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # actions: read, to find and download the example pages (the first two steps).
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
-      - name: Generate derived pages (landing page, benchx page, schema reference)
+      # The pages of the examples are made by the e2e workflow, which runs on every push to
+      # main: the job of each example uploads a docs-<example> artifact. For each example, take
+      # the newest artifact from a run of e2e.yml on main that was not started by a pull request
+      # (a pull request from a fork whose branch is called main must not get in). Whether the
+      # other jobs of that run passed does not matter: an example uploads its page only when
+      # it succeeded. The run for the push being built is usually still going, so the page
+      # is typically the one from the push before. Artifacts expire after 14 days; an example
+      # without an artifact is left out of the site, with a warning.
+      - name: Download the example pages from the latest e2e runs on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          declare -A found
+          count=0
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow e2e.yml --branch main \
+                   --limit 20 --json databaseId,event \
+                   --jq '.[] | select(.event != "pull_request") | .databaseId' || true)
+          while IFS= read -r run_id; do
+            [ -n "$run_id" ] || continue
+            names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+                      --jq '.artifacts[] | select(.expired | not) | .name' || true)
+            while IFS= read -r name; do
+              [[ "$name" =~ ^docs-[A-Za-z0-9_-]+$ ]] || continue
+              [ -z "${found[$name]:-}" ] || continue
+              if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                   --name "$name" --dir "generated/$name"; then
+                found[$name]="$run_id"
+                count=$((count + 1))
+                echo "$name: from e2e run $run_id"
+              fi
+            done <<< "$names"
+          done <<< "$runs"
+          if [ "$count" -eq 0 ]; then
+            echo "::warning::No example pages: no unexpired docs-* artifact in the last 20 e2e runs on main. The site is built without examples."
+          fi
+
+      # One directory per example, docs/examples/<example>/, with the page <example>.md and
+      # its assets/. The Examples page lists whatever is there (tools/gen_docs.py).
+      - name: Assemble the example pages into docs/examples/
+        run: |
+          set -euo pipefail
+          for artifact in generated/docs-*; do
+            [ -d "$artifact" ] || continue
+            example="${artifact##*/docs-}"
+            case "$example" in
+              ""|*[!a-zA-Z0-9_-]*) echo "Invalid example name in $artifact" >&2; exit 1 ;;
+            esac
+            mkdir -p "docs/examples/$example"
+            cp -R "$artifact/." "docs/examples/$example/"
+          done
+          if [ -d docs/examples ]; then find docs/examples -type f | sort; fi
+
+      - name: Generate derived pages (landing page, benchx page, schema reference, Examples page)
         run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py
 
       - name: Build site
         run: uv run --python 3.12 --with-requirements docs/requirements.txt zensical build --strict --clean
 
-      - uses: actions/upload-pages-artifact@v3
+      # Since v4 this leaves hidden files (dotfiles) out of the artifact; the site has none.
+      # If it ever needs one, pass `include-hidden-files: true` (an input from v5 on).
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -56,7 +136,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

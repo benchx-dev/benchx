@@ -8,7 +8,8 @@ name: e2e examples
 #   arrow       builds a small Google Benchmark suite with CMake and compares the builds:
 #                 examples/arrow/demo/run.sh
 #                 examples/arrow/archery-local/run.sh
-#   pyperf-suite  runs a suite of Python functions with `bx bench`:
+#   pyperf-suite  runs a suite of Python functions with `bx bench`, by executing the
+#                 example's README through benchx_examples' reusable workflow (see the job):
 #                 examples/pyperf-suite/run.sh
 #   matmul-params  runs one parametrized benchmark, numpy and torch at three sizes, with
 #                 `bx bench`; the quick version from the example's README:
@@ -20,9 +21,17 @@ name: e2e examples
 # Nothing is checked. The job fails only if a step fails (a clone, a build, a script that
 # crashes); the scripts exit 0 even when a revision fails, so read the printed output.
 #
-# Runs on every pull request, and on demand. A run on demand can take another
-# benchx_examples branch, tag or commit (examples_ref), which a pull request here cannot:
-# the examples live in another repository.
+# Runs on every pull request, on every push to main, and on demand. A run on demand can take
+# another benchx_examples branch, tag or commit (examples_ref), which a pull request here
+# cannot: the examples live in another repository.
+#
+# The runs on main are what the documentation site shows of the examples: docs.yml takes, for
+# each example, the docs-<example> artifact of the newest run on main (see the comment there).
+# This workflow deploys nothing itself. To put a change to an example on the site: run this
+# workflow by hand on main (Actions > e2e examples > Run workflow), wait until the job of
+# the example has finished, then run docs.yml by hand on main (Actions > docs > Run workflow).
+# A merge that changes the docs paths deploys the site by itself, with the pages of the runs
+# that had finished by then.
 #
 # In the numpy-spin job the benchmarks are pinned to two cores (BENCH_CPUS). num_threads.sh
 # should use 1, 2 and 4 threads, so that the last of them oversubscribes the two cores. The
@@ -35,6 +44,8 @@ on:
         description: "benchx_examples branch, tag or commit to run"
         default: main
   pull_request:
+  push:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -56,12 +67,12 @@ jobs:
       CCACHE_MAXSIZE: 500M
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
@@ -81,7 +92,7 @@ jobs:
       # The key is new for every run, because a cache cannot be overwritten; a run starts
       # from the most recent one. It is saved at the end, also when a later step fails.
       - name: Restore the ccache cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -90,7 +101,7 @@ jobs:
       - name: Zero the ccache statistics
         run: ccache --zero-stats
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -164,14 +175,14 @@ jobs:
 
       - name: Save the ccache cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: numpy-spin-output
           path: |
@@ -186,18 +197,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -232,7 +243,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: arrow-output
           path: |
@@ -241,58 +252,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The example's README is executed by the reusable workflow of benchx_examples, which
+  # installs this checkout (benchx-source: checkout), runs examples/pyperf-suite/run.sh
+  # through the README, and uploads three artifacts: logs-pyperf-suite, results-pyperf-suite
+  # (the example's out/) and docs-pyperf-suite (the generated page, which docs.yml publishes).
+  # It prints the same "what is under test" lines as the other jobs.
+  #
+  # TEMPORARY: benchx_examples PR #16 (branch ci_exec_md of ev-br/benchx_examples) is not
+  # merged yet, so the workflow and the examples both come from that branch, and the
+  # `examples_ref` input is not used here. After the merge, use instead:
+  #   uses: benchx-dev/benchx_examples/.github/workflows/reusable-example.yml@main
+  #   with: examples-repository omitted, examples-ref: ${{ inputs.examples_ref || 'main' }}
   pyperf-suite:
-    name: pyperf-suite (run.sh)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out benchx
-        uses: actions/checkout@v4
-        with:
-          path: benchx
-
-      - name: Clone benchx_examples
-        uses: actions/checkout@v4
-        with:
-          repository: benchx-dev/benchx_examples
-          ref: ${{ inputs.examples_ref || 'main' }}
-          path: benchx_examples
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: benchx/uv.lock
-
-      # The script runs plain `python` and `bx`, and the workers need pyperf, which the
-      # `test` extra brings. benchx is installed in editable mode, which is where it reads
-      # its schemas from.
-      - name: Install benchx
-        working-directory: benchx
-        run: |
-          uv python install 3.13
-          uv sync --extra test --python 3.13
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-
-      - name: Show what is under test
-        run: |
-          echo "python: $(python --version) ($(command -v python))"
-          echo "bx: $(command -v bx)"
-          echo "pyperf: $(python -c 'import pyperf; print(pyperf.__version__)')"
-          echo "benchx: $(git -C benchx rev-parse --short HEAD)"
-          echo "benchx_examples: $(git -C benchx_examples rev-parse --short HEAD)"
-
-      - name: Run the pyperf suite
-        working-directory: benchx_examples/examples/pyperf-suite
-        run: bash ./run.sh
-
-      - name: Upload the output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pyperf-suite-output
-          path: benchx_examples/examples/pyperf-suite/out
-          if-no-files-found: warn
-          retention-days: 14
+    uses: ev-br/benchx_examples/.github/workflows/reusable-example.yml@ci_exec_md
+    with:
+      example: pyperf-suite
+      benchx-source: checkout
+      examples-repository: ev-br/benchx_examples
+      examples-ref: ci_exec_md
 
   matmul-params:
     name: matmul-params (quick version)
@@ -303,18 +280,18 @@ jobs:
       BENCHX_HOME: ${{ github.workspace }}/benchx_examples/examples/matmul-params/out/home
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -354,7 +331,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: matmul-params-output
           path: benchx_examples/examples/matmul-params/out
@@ -367,18 +344,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -410,7 +387,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: numpy-venvs-output
           path: benchx_examples/examples/numpy-venvs/out
