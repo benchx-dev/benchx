@@ -5,11 +5,8 @@ import os
 
 import pytest
 
-pytest.importorskip("pyarrow")
-
 from benchx import cli, runner, session
-from benchx.store import Store
-from conftest import NOISY, QUIET, cases, make_build
+from conftest import NOISY, QUIET, cases, make_build, requires_pyarrow
 
 
 @pytest.fixture
@@ -23,7 +20,9 @@ def verdicts(doc):
     return {u["workload"]["name"]: u["verdict"] for u in doc["units"]}
 
 
+@requires_pyarrow
 def test_session_alternates_delivers_and_compares(repo, tmp, builds):
+    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
                                   adapter="google-benchmark", suite="demo-bench", rounds=6, store=store, run_key="s1", out=tmp / "out")
@@ -40,7 +39,9 @@ def test_session_alternates_delivers_and_compares(repo, tmp, builds):
     assert all(d["procedure"]["round"] == slot // 2 for slot, docs in by_slot.items() for d in docs)
 
 
+@requires_pyarrow
 def test_session_environments(repo, tmp):
+    from benchx.store import Store
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3), hardened=True)
     doc = session.compare_targets(f"{plain}:{repo['wt-head']}", f"{hardened}:{repo['wt-head']}",
@@ -52,6 +53,7 @@ def test_session_environments(repo, tmp):
 
 
 def compare_dirty(builds, tmp, **extra):
+    from benchx.store import Store
     said = []
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
@@ -60,6 +62,7 @@ def compare_dirty(builds, tmp, **extra):
     return doc, said
 
 
+@requires_pyarrow
 def test_a_dirty_side_is_compared_and_labeled_local_only(repo, tmp, builds):
     """UC-03 §10: the comparison runs, says before measuring which side is not clean, and is local-only."""
     (repo["wt-head"] / "bench.cpp").write_text("// uncommitted\n")
@@ -73,6 +76,7 @@ def test_a_dirty_side_is_compared_and_labeled_local_only(repo, tmp, builds):
     assert {"contender: dirty-subject-tree", "contender: dirty-benchmark-tree"} <= caveats
 
 
+@requires_pyarrow
 def test_both_dirty_sides_are_named(repo, tmp, builds):
     (repo["wt-base"] / "bench.cpp").write_text("// uncommitted, base\n")
     (repo["wt-head"] / "bench.cpp").write_text("// uncommitted, head\n")
@@ -81,11 +85,13 @@ def test_both_dirty_sides_are_named(repo, tmp, builds):
     assert [m.split()[0] for m in said if "local-only" in m] == ["baseline", "contender"]
 
 
+@requires_pyarrow
 def test_clean_sides_say_nothing_and_are_not_local_only(repo, tmp, builds):
     doc, said = compare_dirty(builds, tmp)
     assert doc["local_only"] is False and not [m for m in said if "local-only" in m]
 
 
+@requires_pyarrow
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
 def test_a_side_with_no_tree_id_is_refused_before_anything_runs(repo, tmp, builds):
     """An unreadable untracked file leaves git without a working-tree id: the dirty state is `unknown`."""
@@ -108,20 +114,23 @@ def test_a_side_with_no_tree_id_is_refused_before_anything_runs(repo, tmp, build
     ({"profile": "history"}, "not in the implementation"),
 ])
 def test_session_refusals(tmp, builds, kwargs, message):
-    args = {"adapter": "google-benchmark", "suite": "demo-bench", "rounds": 3, "store": Store(tmp / "store.parquet"), "out": tmp / "out", **kwargs}
+    from benchx.results import MemoryStore
+    args = {"adapter": "google-benchmark", "suite": "demo-bench", "rounds": 3, "store": MemoryStore(), "out": tmp / "out", **kwargs}
     with pytest.raises(session.SessionError, match=message):
         session.compare_targets(builds["baseline"], builds["contender"], **args)
 
 
 def test_a_refused_order_stops_the_session(tmp, builds, monkeypatch):
+    from benchx.results import MemoryStore
     def refuse(*_, **__):
         raise runner.Refused("deferred")
     monkeypatch.setattr(runner, "run", refuse)
     with pytest.raises(runner.Refused):
         session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
-                                adapter="google-benchmark", suite="demo-bench", rounds=3, store=Store(tmp / "store.parquet"), out=tmp / "out")
+                                adapter="google-benchmark", suite="demo-bench", rounds=3, store=MemoryStore(), out=tmp / "out")
 
 
+@requires_pyarrow
 def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     common = ["--profile", "revisions"]
     assert cli.main(["compare", builds["baseline"], builds["contender"], *common, "--adapter", "google-benchmark", "--suite", "demo-bench",
@@ -166,8 +175,8 @@ def test_mode_selection(argv, message, capsys):
     assert message in capsys.readouterr().err
 
 
+@requires_pyarrow
 @pytest.mark.parametrize("argv, message", [
-    # one target, and --baseline in measure mode: both are for variants only; no --vary is fine in either mode
     (["nowhere", "--profile", "variants", "--suite", "s", "--rounds", "3", "--adapter", "pyperf"],
      "working tree not found"),
     (["nowhere", "--profile", "variants", "--suite", "s", "--rounds", "3", "--adapter", "pyperf",

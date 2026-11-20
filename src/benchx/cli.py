@@ -163,10 +163,12 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         raise UsageError("give --project or --no-project, not both")
     timeouts = cfg.section("timeouts")
     adapter = cfg.pick(given, block.get("name"), flag="--adapter", key="adapter.name")
+    flags = {name: getattr(args, name) for name in harnesses.FLAG_NAMES}
+    harnesses.get(adapter).flags_to_precision(**flags)
     return {
         "adapter": adapter,
         "suite": cfg.pick(forced_suite or args.suite, block.get("suite"), flag="--suite", key="adapter.suite"),
-        "flags": {name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+        "flags": flags,
         "file_precision": block.get("precision"),
         "quantities": quantities,
         "filter": args.filter,
@@ -387,7 +389,7 @@ class UsageError(Exception):
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
 _MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project", "no_project",
-                 "run_key", "out", "source_uri", "no_build")
+                 "run_key", "out", "source_uri", "no_build", "no_ingest")
 _READ_ONLY = ("baseline", "results")
 
 
@@ -476,26 +478,36 @@ def _read(cfg, args, policy):
 
 def _measure(cfg, args, policy):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = _open_store(
-        cfg.store_path,
-        "compare",
-        hint="run sides with `bx bench --no-ingest` and compare with `bx compare --run ... --results DIR`",
-    )
-    if store is None:
-        return EXIT_REFUSED
-    print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
     try:
         settings = _common(cfg, args)
         _needs_provider(cfg, *args.targets)
-        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
         rounds = cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds", key="compare.rounds")
+        label = session.parse_label(args.label) if policy["profile"] != "variants" and args.label else None
+    except (UsageError, config_mod.ConfigError) as e:
+        print(f"bx compare: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    except session.SessionError as e:
+        print(f"cannot compare: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    if args.no_ingest:
+        store = MemoryStore()
+    else:
+        store = _open_store(
+            cfg.store_path,
+            "compare",
+            hint="pass --no-ingest to compare in memory without persisting to the local store",
+        )
+        if store is None:
+            return EXIT_REFUSED
+        print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
+    try:
+        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
         progress = lambda message: print(message, file=sys.stderr)  # noqa: E731
         if policy["profile"] == "variants":
             doc = session.compare_variants(
                 *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
                 progress=progress, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
         else:
-            label = session.parse_label(args.label) if args.label else None
             doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=progress,
                                           **policy, **settings)
     except runner.Refused as e:
@@ -709,6 +721,8 @@ def main(argv=None):
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
                          help="alternation rounds; each runs both sides once (default: compare.rounds)")
+    measure.add_argument("--no-ingest", action="store_true",
+                         help="write result files and compare in memory; skip the local store")
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
@@ -726,7 +740,11 @@ def main(argv=None):
         args.functions += extra
     elif extra:
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except core.catalog.FormatCheckerError as e:
+        print(f"bx {args.cmd}: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
 
 
 if __name__ == "__main__":

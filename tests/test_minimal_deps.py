@@ -13,7 +13,7 @@ from benchx import cli, core, identity
 from benchx.core import catalog
 from benchx.core.errors import StructureError
 from benchx.results import MemoryStore, store_project
-from conftest import NOISY, QUIET, cases, make_build, order, requires_pyarrow, run_rounds
+from conftest import NOISY, QUIET, cases, git, make_build, order, requires_pyarrow, run_rounds
 
 
 def _block_pyarrow(monkeypatch):
@@ -229,6 +229,83 @@ def test_bench_run_and_compare_results_without_pyarrow(repo, tmp, monkeypatch, c
     ]) == cli.EXIT_OK
     table_out = capsys.readouterr().out
     assert "REGRESSED" in table_out and "| Change" in table_out
+    assert not list(tmp.glob("*.parquet"))
+
+
+def test_compare_measure_mode_no_ingest_without_pyarrow(repo, tmp, monkeypatch, capsys):
+    """`bx compare BASE CONTENDER --no-ingest` runs and compares in memory without pyarrow."""
+    _block_pyarrow(monkeypatch)
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    head = make_build(tmp / "b-head", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3))
+    out = tmp / "measure-out"
+
+    assert cli.main([
+        "compare", f"{base}:{repo['wt-base']}", f"{head}:{repo['wt-head']}",
+        "--profile", "revisions",
+        "--adapter", "google-benchmark",
+        "--suite", "demo-bench",
+        "--rounds", "4",
+        "--run-key", "m-no-arrow",
+        "--out", str(out),
+        "--no-ingest",
+        "--json",
+    ]) == cli.EXIT_OK
+    measured = json.loads(capsys.readouterr().out)
+    assert core.check(measured, "comparison-document") == []
+    assert measured["failed_invariants"] == [] and not list(tmp.glob("*.parquet"))
+    assert {u["workload"]["name"]: u["verdict"] for u in measured["units"]} == {
+        QUIET: "regressed", NOISY: "no-change-detected",
+    }
+
+    # Reading those same JSON files back with --results gives the exact same document.
+    assert cli.main([
+        "compare", "--run", "m-no-arrow", "--profile", "revisions",
+        "--baseline", repo["base"][:10], "--results", str(out), "--json",
+    ]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == measured
+
+    # --no-ingest is rejected in read mode.
+    assert cli.main([
+        "compare", "--run", "m-no-arrow", "--profile", "revisions",
+        "--baseline", repo["base"][:10], "--no-ingest",
+    ]) == cli.EXIT_REFUSED
+    assert "measure mode" in capsys.readouterr().err
+
+
+def test_compare_variants_measure_mode_no_ingest_without_pyarrow(tmp, monkeypatch, capsys):
+    """`bx compare TARGET --profile variants --no-ingest` works without pyarrow."""
+    pytest.importorskip("pyperf")
+    _block_pyarrow(monkeypatch)
+    tree = tmp / "variants-tree"
+    tree.mkdir()
+    git(tree, "init", "-q")
+    (tree / "mod.py").write_text(
+        "def bench_work(role):\n"
+        "    sum(range(10 if role == 'baseline' else 2000))\n"
+        "bench_work.params = ['baseline', 'variant']\n"
+        "bench_work.param_names = ['role']\n"
+    )
+    git(tree, "add", "-A")
+    git(tree, "commit", "-qm", "init")
+
+    assert cli.main([
+        "compare", str(tree),
+        "--profile", "variants",
+        "--adapter", "pyperf",
+        "--suite", "mod.py",
+        "--rounds", "2",
+        "--min-rounds", "2",
+        "--processes", "2",
+        "--values", "2",
+        "--loops", "50",
+        "--warmups", "0",
+        "--run-key", "v-no-arrow",
+        "--out", str(tmp / "v-out"),
+        "--no-ingest",
+        "--tables",
+    ]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "bench_work" in out and "| Change" in out
     assert not list(tmp.glob("*.parquet"))
 
 

@@ -7,11 +7,9 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pyperf")
-pytest.importorskip("pyarrow")
 
 from benchx import adapters, cli, core, runner, snapshot
-from benchx.store import Store
-from conftest import git
+from conftest import git, requires_pyarrow
 
 SUITE = textwrap.dedent('''
     def bench_a():
@@ -102,6 +100,7 @@ def test_a_new_file_in_a_repository_is_dirty(subject, versioned_suite):
     assert snapshot.benchmark_identity(new, subject)["dirty"] == "dirty"
 
 
+@requires_pyarrow
 def test_an_unversioned_suite_is_recorded_without_a_revision(subject, loose_suite):
     order = bench(subject, loose_suite, "u1")
     assert order["benchmark"] == {"source": {"uri": loose_suite.parent.as_uri(), "type": "directory"}}
@@ -115,6 +114,7 @@ def test_an_unversioned_suite_is_recorded_without_a_revision(subject, loose_suit
     assert provenance["subject_dirty"] == "clean" and provenance["subject_tree"] != provenance["benchmark_tree"]
 
 
+@requires_pyarrow
 def test_a_versioned_suite_is_recorded_with_its_own_revision(subject, versioned_suite):
     bench(subject, versioned_suite, "v1")
     document = result("v1")
@@ -124,7 +124,9 @@ def test_a_versioned_suite_is_recorded_with_its_own_revision(subject, versioned_
     assert document["revision"]["key"] == git(subject, "rev-parse", "HEAD")
 
 
+@requires_pyarrow
 def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_suite, tmp):
+    from benchx.store import Store
     bench(subject, loose_suite, "e1")
     before = result("e1")
     loose_suite.write_text(SUITE + "\n# edited\n")
@@ -138,6 +140,7 @@ def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_su
     assert len(store.history(series[0]["fingerprint"])) == 2  # both runs are points of it
 
 
+@requires_pyarrow
 def test_a_suite_inside_the_subject_is_recorded_as_before(subject):
     (subject / "bench_in.py").write_text(SUITE)
     git(subject, "add", "-A")
@@ -149,6 +152,7 @@ def test_a_suite_inside_the_subject_is_recorded_as_before(subject):
     assert document["provenance"]["benchmark_tree"] == document["provenance"]["subject_tree"]
 
 
+@requires_pyarrow
 def test_an_order_naming_the_wrong_benchmark_is_refused(subject, loose_suite, tmp):
     order = bench(subject, loose_suite, "m1")
     order["benchmark"] = {"source": {"uri": "https://example.org/elsewhere.git", "type": "git"}, "revision": "abc"}
