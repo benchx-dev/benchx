@@ -301,6 +301,14 @@ deferred. `timeouts.order_s` limits each step that runs the user's code before a
 yet bound the order as a whole. A plan with no case in it is a refusal too, naming the filter
 (asv also names the benchmarks it could have selected), so that a typo does not end in `0
 result(s)` and a success status.
+
+A pyperf or asv case runs in a session of its own, so that a timeout can kill the workers with the manager. The
+terminal's Ctrl-C therefore reaches `bx` and not that group, and `bx` gives the group what the terminal would have
+(`adapters.base.stop_group`): `SIGINT`, so that pyperf's manager stops its worker and says so, as it does when run
+alone; then, after one second (`STOP_GRACE_S`), `SIGKILL` to the group, which also reaches what a benchmark started
+itself. A second Ctrl-C skips the wait, and the wait on the pipes is bounded, so a process that left the group
+cannot hold `bx`. Google Benchmark, the collectors and the provider stay in `bx`'s own group, where Ctrl-C reaches
+them directly; nothing about them changes.
 Precision keys the order leaves out are recorded with Google Benchmark's
 defaults.
 
