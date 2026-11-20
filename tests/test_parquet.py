@@ -7,10 +7,11 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import rfc8785
+
+pa = pytest.importorskip("pyarrow")
+import pyarrow.parquet as pq
 
 from benchx import parquet
 from benchx.core import loader

@@ -160,6 +160,7 @@ FLAGS = {"processes": 2, "values": 2, "loops": 50, "warmups": 0}
 
 def compare(tmp_path, module, run_key, names=("f",)):
     pytest.importorskip("pyperf")
+    pytest.importorskip("pyarrow")
     from benchx import harnesses, session
     from benchx.store import Store
     from test_compare_harnesses import make_worktrees

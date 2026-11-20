@@ -20,8 +20,9 @@ from . import config as config_mod
 from . import core, harnesses, orders, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
+from . import views as views_mod
 from .core.validation import Kind
-from .store import Store, warning_codes
+from .results import MemoryStore, warning_codes
 
 EXIT_OK = 0
 EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
@@ -47,12 +48,34 @@ def _load(command):
     return cfg
 
 
+def _open_store(path, command: str, *, hint: str | None = None):
+    """Open the local Parquet store, or explain how to install pyarrow and return None."""
+    try:
+        from .store import Store
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".")[0] == "pyarrow":
+            suffix = f", or {hint}" if hint else ""
+            print(
+                f"bx {command}: error: Parquet store requires pyarrow; "
+                f"install it with `pip install 'benchx[parquet]'`{suffix}",
+                file=sys.stderr,
+            )
+            return None
+        raise
+    return Store(path)
+
+
 def cmd_run(args):
     """Run one order, write its result files, and deliver them to the local
     store. The runner itself stays store-unaware (runner.md §2 principle 6);
     this command composes it with ingest, as the workbench does."""
     if (cfg := _load("run")) is None:
         return EXIT_REFUSED
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "run", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     out = Path(args.out) if args.out else cfg.results_dir
     snapshot.ignore(cfg.store_path, cfg.results_dir, out)
     try:
@@ -61,9 +84,8 @@ def cmd_run(args):
         return _refused(e)
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
-    if args.no_ingest:
+    if store is None:
         return EXIT_OK
-    store = Store(cfg.store_path)
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
 
@@ -143,10 +165,12 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         raise UsageError("give --project or --no-project, not both")
     timeouts = cfg.section("timeouts")
     adapter = cfg.pick(given, block.get("name"), flag="--adapter", key="adapter.name")
+    flags = {name: getattr(args, name) for name in harnesses.FLAG_NAMES}
+    harnesses.get(adapter).flags_to_precision(**flags)
     return {
         "adapter": adapter,
         "suite": cfg.pick(forced_suite or args.suite, block.get("suite"), flag="--suite", key="adapter.suite"),
-        "flags": {name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+        "flags": flags,
         "file_precision": block.get("precision"),
         "quantities": quantities,
         "filter": args.filter,
@@ -195,7 +219,11 @@ def cmd_bench(args):
         return EXIT_REFUSED
     settings["filter"] = names or settings["filter"]
     snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
-    store = None if args.no_ingest else Store(cfg.store_path)
+    store = None
+    if not args.no_ingest:
+        store = _open_store(cfg.store_path, "bench", hint="pass --no-ingest to write JSON results only")
+        if store is None:
+            return EXIT_REFUSED
     try:
         summary = session.bench_target(target, store=store, progress=lambda message: print(message, file=sys.stderr),
                                        **settings)
@@ -276,13 +304,17 @@ def _report(outcome):
 def cmd_ingest(args):
     if (cfg := _load("ingest")) is None:
         return EXIT_REFUSED
-    return _report(Store(cfg.store_path).ingest_paths(args.paths))
+    if (store := _open_store(cfg.store_path, "ingest")) is None:
+        return EXIT_REFUSED
+    return _report(store.ingest_paths(args.paths))
 
 
 def cmd_series(args):
     if (cfg := _load("series")) is None:
         return EXIT_REFUSED
-    for s in Store(cfg.store_path).series(args.workload, args.quantity):
+    if (store := _open_store(cfg.store_path, "series")) is None:
+        return EXIT_REFUSED
+    for s in store.series(args.workload, args.quantity):
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
@@ -292,7 +324,9 @@ def cmd_series(args):
 def cmd_history(args):
     if (cfg := _load("history")) is None:
         return EXIT_REFUSED
-    points = Store(cfg.store_path).history(args.series)
+    if (store := _open_store(cfg.store_path, "history")) is None:
+        return EXIT_REFUSED
+    points = store.history(args.series)
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
@@ -305,7 +339,8 @@ def cmd_history(args):
 def cmd_head(args):
     if (cfg := _load("head")) is None:
         return EXIT_REFUSED
-    store = Store(cfg.store_path)
+    if (store := _open_store(cfg.store_path, "head")) is None:
+        return EXIT_REFUSED
     total, rows = store.head(args.n, args.project, args.workload, measurands=args.table)
     if args.json:
         for row in rows:
@@ -356,7 +391,7 @@ class UsageError(Exception):
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
 _MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project", "no_project",
-                 "run_key", "out", "source_uri", "no_build")
+                 "run_key", "out", "source_uri", "no_build", "no_ingest")
 _READ_ONLY = ("baseline", "results")
 
 
@@ -432,31 +467,49 @@ def _view_flags(args):
 
 def _read(cfg, args, policy):
     if args.results:
-        with tempfile.TemporaryDirectory() as tmp:  # the ad hoc path: a throwaway store
-            store = Store(Path(tmp) / "store.parquet")
-            outcome = store.ingest_paths(args.results)
-            if outcome["rejected"]:
-                return _report(outcome)
-            return _compare(store, args, policy)
-    return _compare(Store(cfg.store_path), args, policy)
+        store = MemoryStore()  # the ad hoc path: validated in memory without PyArrow
+        outcome = store.ingest_paths(args.results)
+        if outcome["rejected"]:
+            return _report(outcome)
+        return _compare(store, args, policy)
+    store = _open_store(cfg.store_path, "compare", hint="pass --results DIR to compare JSON results directly")
+    if store is None:
+        return EXIT_REFUSED
+    return _compare(store, args, policy)
 
 
 def _measure(cfg, args, policy):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = Store(cfg.store_path)
-    print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
     try:
         settings = _common(cfg, args)
         _needs_provider(cfg, *args.targets)
-        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
         rounds = cfg.pick(args.rounds, cfg.section("compare").get("rounds"), flag="--rounds", key="compare.rounds")
+        label = session.parse_label(args.label) if policy["profile"] != "variants" and args.label else None
+    except (UsageError, config_mod.ConfigError) as e:
+        print(f"bx compare: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    except session.SessionError as e:
+        print(f"cannot compare: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    if args.no_ingest:
+        store = MemoryStore()
+    else:
+        store = _open_store(
+            cfg.store_path,
+            "compare",
+            hint="pass --no-ingest to compare in memory without persisting to the local store",
+        )
+        if store is None:
+            return EXIT_REFUSED
+        print(f"{store.path}", file=sys.stderr)  # stderr, so --json output stays clean
+    try:
+        snapshot.ignore(cfg.store_path, cfg.results_dir, *([args.out] if args.out else []))
         progress = lambda message: print(message, file=sys.stderr)  # noqa: E731
         if policy["profile"] == "variants":
             doc = session.compare_variants(
                 *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
                 progress=progress, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
         else:
-            label = session.parse_label(args.label) if args.label else None
             doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=progress,
                                           **policy, **settings)
     except runner.Refused as e:
@@ -508,6 +561,105 @@ def cmd_validate(args):
         valid += inspection.valid
     print(f"{valid}/{len(args.files)} valid", file=sys.stderr)
     return EXIT_OK if valid == len(args.files) else EXIT_INVALID
+
+
+def cmd_view(args):
+    """Build static dashboard views and optionally serve them over local HTTP."""
+    if (cfg := _load("view")) is None:
+        return EXIT_REFUSED
+    serve = args.serve or args.out is None
+    if args.open and not serve:
+        print("bx view: error: --open goes with serving (omit --out, or pass --serve)", file=sys.stderr)
+        return EXIT_REFUSED
+
+    source_kwargs: dict = {}
+    if args.runs is not None:
+        source_kwargs["runs_dir"] = args.runs
+    elif args.results is not None:
+        source_kwargs["results_paths"] = list(args.results)
+    else:
+        source_kwargs["store_path"] = args.store if args.store is not None else cfg.store_path
+
+    if args.marts:
+        write_marts: bool | None = True
+    elif args.no_marts:
+        write_marts = False
+    elif args.out is None:
+        write_marts = False
+    else:
+        write_marts = None
+
+    repo = Path(args.repo) if args.repo is not None else cfg.root
+    build_kwargs = {
+        **source_kwargs,
+        "project_file": Path(args.project_file) if args.project_file else None,
+        "title": args.title,
+        "repo": repo,
+        "write_marts": write_marts,
+        "stamp": args.stamp,
+        "config": cfg,
+    }
+
+    def _run_build(out_dir: Path) -> dict | None:
+        try:
+            return views_mod.build_site(out_dir, **build_kwargs)
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.split(".")[0] == "pyarrow":
+                hint = ""
+                if "store_path" in source_kwargs:
+                    hint = ", or pass --results DIR to build views from JSON results directly"
+                print(f"bx view: error: {exc}{hint}", file=sys.stderr)
+                return None
+            raise
+        except views_mod.ViewError as exc:
+            print(f"bx view: error: {exc}", file=sys.stderr)
+            return None
+
+    port = 8000 if args.port is None else args.port
+    fallback_port = args.port is None
+
+    def _finish(summary: dict, out_dir: Path) -> int:
+        exit_code = EXIT_OK
+        if summary["outcome"] and summary["outcome"]["rejected"]:
+            exit_code = _report(summary["outcome"])
+        counts = summary["counts"]
+        if args.out is not None:
+            print(
+                f"{counts['points']} result(s), {counts['series']} series, "
+                f"{counts['distinct_commits']} commit(s) -> {summary['out']}"
+            )
+        else:
+            print(
+                f"{counts['points']} result(s), {counts['series']} series, "
+                f"{counts['distinct_commits']} commit(s)"
+            )
+        if serve:
+            try:
+                views_mod.serve_site(
+                    out_dir,
+                    host=args.host,
+                    port=port,
+                    fallback_port=fallback_port,
+                    open_browser=args.open,
+                )
+            except OSError as exc:
+                print(f"bx view: error: cannot serve on {args.host}:{port}: {exc}", file=sys.stderr)
+                return EXIT_REFUSED
+        return exit_code
+
+    if args.out is not None:
+        out_dir = Path(args.out)
+        summary = _run_build(out_dir)
+        if summary is None:
+            return EXIT_REFUSED
+        return _finish(summary, out_dir)
+
+    with tempfile.TemporaryDirectory(prefix="benchx-view-") as tmp:
+        out_dir = Path(tmp)
+        summary = _run_build(out_dir)
+        if summary is None:
+            return EXIT_REFUSED
+        return _finish(summary, out_dir)
 
 
 def _add_target_options(parser, command):
@@ -666,10 +818,12 @@ def main(argv=None):
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
     read.add_argument("--results", nargs="+",
-                      help="compare these result directories through a throwaway store, not the local one")
+                      help="compare these result files or directories directly, without using the local store")
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
                          help="alternation rounds; each runs both sides once (default: compare.rounds)")
+    measure.add_argument("--no-ingest", action="store_true",
+                         help="write result files and compare in memory; skip the local store")
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
@@ -680,6 +834,36 @@ def main(argv=None):
                    help="kind of document being checked (default: %(default)s)")
     p.set_defaults(fn=cmd_validate)
 
+    p = sub.add_parser(
+        "view",
+        help="build and serve the static benchmark dashboard",
+        description="Build static dashboard views from the local Parquet store, JSON result files "
+                    "(--results, no PyArrow required), or a runs/<sha>/<node>/ directory (--runs). "
+                    "With no --out, builds into a temporary directory and serves locally until Ctrl-C; "
+                    "with --out DIR, writes the static site (add --serve to also serve it).",
+    )
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--store", help="local Parquet store (default: paths.store / $BENCHX_HOME/store.parquet)")
+    src.add_argument("--results", nargs="+",
+                     help="JSON result files or directories, read directly without PyArrow")
+    src.add_argument("--runs", help="runs/<sha>/<node>/ directory holding run.parquet and results.parquet")
+    p.add_argument("--out", help="write the static site into DIR instead of a temporary directory")
+    p.add_argument("--serve", action="store_true", help="serve the built site over local HTTP")
+    p.add_argument("--host", default="127.0.0.1", help="bind address for local serving (default %(default)s)")
+    p.add_argument("--port", type=int, default=None,
+                   help="TCP port for local serving (default 8000, falling back to a free port if busy)")
+    p.add_argument("--open", action="store_true", help="open the served dashboard in the default web browser")
+    p.add_argument("--project-file", help="project.json describing title, links, and upstream commit URL")
+    p.add_argument("--title", help="override the dashboard page title")
+    p.add_argument("--repo", help="git checkout used to enrich commit metadata for --store / --results")
+    marts_group = p.add_mutually_exclusive_group()
+    marts_group.add_argument("--marts", action="store_true",
+                             help="write derived Parquet tables under data/ (requires benchx[parquet])")
+    marts_group.add_argument("--no-marts", action="store_true",
+                             help="skip writing derived Parquet tables under data/")
+    p.add_argument("--stamp", help="cache-busting version stamped onto static asset URLs in index.html")
+    p.set_defaults(fn=cmd_view)
+
     args, extra = ap.parse_known_args(argv)
     # argparse takes a nargs="*" positional only from the first run of positionals, so cases
     # given after an option (`bx bench T --suite S CASE`) arrive here, on some Python versions.
@@ -687,7 +871,11 @@ def main(argv=None):
         args.functions += extra
     elif extra:
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except core.catalog.FormatCheckerError as e:
+        print(f"bx {args.cmd}: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import textwrap
 import pytest
 
 pytest.importorskip("pyperf")
+pytest.importorskip("pyarrow")
 
 from benchx import cli, core
 from conftest import git

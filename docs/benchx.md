@@ -24,7 +24,8 @@ implement a missing feature.
 Install from [PyPI](https://pypi.org/project/benchx/):
 
 ```console
-$ pip install benchx
+$ pip install benchx                # minimal: run with --no-ingest, validate, and compare --results
+$ pip install 'benchx[parquet]'     # adds PyArrow for the local Parquet store and history queries
 ```
 
 
@@ -55,7 +56,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json | --tables [--all]]
+           [--run-key KEY] [--out DIR] [--no-build] [--no-ingest] [--k 3] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
@@ -73,6 +74,10 @@ bx ingest <dir|file>                     # result files and work orders → the 
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query); dirty ones are marked
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
+bx view [--out DIR] [--serve] [--host 127.0.0.1] [--port 8000] [--open]
+        [--store PATH | --results PATH… | --runs DIR]
+        [--project-file PATH] [--title TITLE] [--repo DIR] [--marts | --no-marts] [--stamp STR]
+                                         # build and serve the static benchmark dashboard (no --out: temp dir + serve)
 
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
@@ -247,7 +252,8 @@ outside the checkout is identified by one file): put it inside the checkout.
   and it refuses an order that names a deferred field (`environment_policy`,
   a declared `build`, `components`, `schedule`) instead of ignoring it.
 - **The store** is one Parquet file, by default `store.parquet` in the project root
-  (`paths.store` in `benchx.conf.json` moves it). It reads documents strictly, validates them, and applies the
+  (`paths.store` in `benchx.conf.json` moves it), and requires the optional `parquet` extra
+  (`pip install 'benchx[parquet]'`). It reads documents strictly, validates them, and applies the
   schema §5.4 contract: idempotency and the rejection codes `malformed`,
   `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
   `attempt-conflict`. Each result is one row: the columns
@@ -257,6 +263,12 @@ outside the checkout is identified by one file): put it inside the checkout.
   query, under the identity policy in `benchx/identity.py`: the default of
   `schemas/identity-policy/0.1.0` with the benchmark's revision ignored.
   Every accepting ingest rewrites the file atomically.
+- **Schema validation** checks documents against the schemas shipped inside the package, or custom
+  schemas pointed to by `$BENCHX_SCHEMAS`. The shipped schemas use only the `date-time` and `uri`
+  JSON Schema formats, checked via `rfc3339-validator` and `rfc3986-validator`. Custom schemas
+  supplied through `$BENCHX_SCHEMAS` that declare additional formats require the corresponding
+  `jsonschema` format validator package (or `jsonschema[format-nongpl]`); if a declared format has
+  no installed checker, validation fails explicitly rather than silently accepting unchecked values.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
   trees have a working-tree id, before running anything; it says which sides
@@ -278,8 +290,8 @@ outside the checkout is identified by one file): put it inside the checkout.
   |effect| > *k* × noise). `environments` names its sides by the label
   `--label` gives, and `variants` by the two values of one workload parameter
   (`--vary`); under `variants` a failed attempt on either side fails its unit
-  (`side-failed`). `--results` compares result files through a throwaway
-  store: the ad hoc path. Condition measurements (`measurement.kind:
+  (`side-failed`). `--results` validates and compares JSON result files in memory
+  without PyArrow or a Parquet store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
 - **The tables** (`--tables`, `benchx/tables.py`) print, after the usual summary, what
   `asv continuous` prints, laid out and rounded as asv does: a table of each side (a value
@@ -290,6 +302,14 @@ outside the checkout is identified by one file): put it inside the checkout.
   deviation (not asv's `±`); `Change` and `Verdict` are the comparator's verdict (`+`
   regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
   times it), and `Ratio` is After over Before. A text view: not with `--json`.
+- **Views** (`bx view`, `benchx/views/`) derive flat tables (`commits`, `points`, `changes`,
+  `latest`, `movers`) and static JSON view payloads (`landing`, `series`, `sparks`,
+  `history/<suite>`, `commits/<sha>`) in pure Python from the local Parquet store, JSON result
+  files (`--results`, no PyArrow required), or a CI `runs/<sha>/<node>/` directory (`--runs`,
+  with `run.parquet` and `results.parquet`). With no `--out`, `bx view` builds into a temporary
+  directory and serves the bundled static dashboard over local HTTP until Ctrl-C; with `--out DIR`,
+  it writes a deployable static site (and optional Parquet marts under `data/` when `pyarrow` is
+  installed, unless `--no-marts`).
 
 **Stopping a run.** Ctrl-C stops the benchmarks `bx` started, within about a second; pyperf gets the Ctrl-C and stops its worker.
 A second Ctrl-C does not wait. Results already stored
@@ -300,8 +320,8 @@ current process ends.
 ## Run it
 
 ```console
-$ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
-$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
+$ uv venv && uv pip install -e '.[parquet,test]'   # editable; omit `parquet` for a minimal Arrow-free install
+$ .venv/bin/python -m pytest tests                 # fake Google Benchmark binary, no compiler
 ```
 
 `tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
@@ -314,7 +334,8 @@ keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
 scenario, and the test's docstring has the rest.
 
 A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
-`pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.
+`pip install 'benchx[parquet,test]'` (or `pip install 'benchx[test]'` for the Arrow-free subset)
+followed by `python -m pytest --pyargs benchx`.
 
 The end-to-end examples that build real software are in
 [benchx_examples](https://github.com/benchx-dev/benchx_examples), and the `e2e`

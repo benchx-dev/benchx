@@ -96,7 +96,7 @@ def test_a_binary_that_never_lists_its_benchmarks_is_a_refusal(repo, tmp, capsys
     assert message in str(raised.value)
     assert [p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-")] == []
     with finishes_within(20):
-        assert cli.main(["run", str(path), "--out", str(tmp / "out")]) == cli.EXIT_REFUSED
+        assert cli.main(["run", str(path), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_REFUSED
     assert f"refused: {message}" in capsys.readouterr().err
 
 
