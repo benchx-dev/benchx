@@ -263,9 +263,10 @@ async function renderLanding() {
   const all = groupSeries([...S.series, ...never], (g) => {
     const newest = g.list.filter((s) => s.latest != null).sort((a, b) => b.orders[b.orders.length - 1] - a.orders[a.orders.length - 1])[0];
     // Status, value and link all describe one node: the newest one's, or the failing one when none succeeded.
-    const failing = g.list.find((s) => s.status && s.status !== "success" && (!newest || s.node === newest.node));
+    const failing = g.list.find((s) => isFailed(s.status) && (!newest || s.node === newest.node));
+    const skipped = !failing && g.list.find((s) => s.status === "skipped" && (!newest || s.node === newest.node));
     return { newest, change: newest?.vs_prev ?? null, noise: newest?.noise ?? null, v: newest ? verdict(newest.vs_prev, g.direction) : "none",
-      status: failing ? failing.status : "success", reason: failing?.reason };
+      status: failing ? failing.status : skipped ? "skipped" : "success", reason: (failing || skipped)?.reason };
   });
   const suites = [...new Set(all.map((g) => g.suite))].sort();
   const nodes = [...new Set(S.series.map((s) => s.node))].sort();
@@ -278,7 +279,7 @@ async function renderLanding() {
     change: (a, b) => size(b) - size(a),
     regressed: (a, b) => (b.v === "regressed") - (a.v === "regressed") || size(b) - size(a),
     improved: (a, b) => (b.v === "improved") - (a.v === "improved") || size(b) - size(a),
-    failing: (a, b) => (b.status !== "success") - (a.status !== "success") || size(b) - size(a),
+    failing: (a, b) => isFailed(b.status) - isFailed(a.status) || size(b) - size(a),
     noise: (a, b) => (b.noise ?? -1) - (a.noise ?? -1),
     name: (a, b) => a.suite.localeCompare(b.suite) || a.case.localeCompare(b.case) || a.params.localeCompare(b.params),
   };
@@ -423,7 +424,7 @@ function renderSuites() {
   for (const s of state.series) {
     const e = by.get(s.suite) || { suite: s.suite, series: 0, cases: new Set(), nodes: new Set(), regressed: 0, improved: 0, failing: 0 };
     e.series++; e.cases.add(`${s.case}|${s.params}`); e.nodes.add(s.node);
-    if (s.status && s.status !== "success") e.failing++;
+    if (isFailed(s.status)) e.failing++;
     else if (s.vs_prev != null && Math.abs(s.vs_prev) > state.landing.notable) {
       const v = verdict(s.vs_prev, s.direction);
       if (v === "regressed") e.regressed++; else if (v === "improved") e.improved++;
@@ -457,8 +458,9 @@ async function renderSuite(suite) {
   const groups = groupSeries(Object.values(hist.series).map((s) => ({ ...s, suite })), (g) => {
     const mine = g.list.map((s) => latestBy.get(`${s.case}|${s.params}|${s.quantity}|${s.node}`)).filter(Boolean);
     const newest = mine.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
-    const failing = mine.find((r) => r.status && r.status !== "success" && (!newest || r.node === newest.node));
-    return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : "success", reason: failing?.reason };
+    const failing = mine.find((r) => isFailed(r.status) && (!newest || r.node === newest.node));
+    const skipped = !failing && mine.find((r) => r.status === "skipped" && (!newest || r.node === newest.node));
+    return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : skipped ? "skipped" : "success", reason: (failing || skipped)?.reason };
   }).sort((a, b) => a.case.localeCompare(b.case) || a.params.localeCompare(b.params));
   const grid = h("div", { class: "grid" });
   const status = h("span", { class: "note" });
@@ -471,7 +473,7 @@ async function renderSuite(suite) {
     drawCards(grid, cards, () => hist.commits);
   };
   const filter = h("input", { type: "search", placeholder: "filter by name", "aria-label": "filter benchmarks", oninput: (e) => drawSuite(e.target.value.trim().toLowerCase()) });
-  const failing = groups.filter((g) => g.status !== "success").length;
+  const failing = groups.filter((g) => isFailed(g.status)).length;
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", suite),
     h("h2", {}, suite),
@@ -481,7 +483,7 @@ async function renderSuite(suite) {
     h("details", { class: "table-view" }, h("summary", {}, "Table view"),
       table(["benchmark", "quantity", "node", "status", ">latest", ">vs previous", ">vs 10 back", ">noise", ">points"],
         rows.map((s) => [h("a", { href: benchHref(s, { node: s.node }) }, caseLabel(s)), s.quantity, s.node,
-          s.status && s.status !== "success" ? failTag(s.reason, s.status) : "ok",
+          isFailed(s.status) ? failTag(s.reason, s.status) : s.status === "skipped" || s.status === "partial" ? h("span", { class: "tag", title: s.reason || "" }, s.status) : "ok",
           fmtValue(s.estimate, s.unit), delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit }), delta(s.vs_10, s.direction, { unit: s.unit }), fmtAbsPct(s.noise), s.points]))),
     footer());
   drawSuite();
@@ -502,7 +504,7 @@ async function renderBench(suite, kase, query) {
   const shown = all.filter((s) => s.params === params && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter));
   const latestRows = state.series.filter((s) => s.suite === suite && s.case === kase && s.params === params && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter));
   const kpi = latestRows.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
-  const failing = latestRows.filter((r) => r.status && r.status !== "success");
+  const failing = latestRows.filter((r) => isFailed(r.status));
   const unit = shown[0]?.unit || kpi?.unit || "";
   const direction = shown[0]?.direction || kpi?.direction || "";
   const opts = { unit };
@@ -577,7 +579,7 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
   const allValues = seriesList.flatMap((s) => s.estimates);
   const scale = pickScale(allValues, unit);
   const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null) col[index.get(o)] = s.estimates[k] / scale[1]; }); return col; });
-  const fails = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.statuses[k] && s.statuses[k] !== "success") col[index.get(o)] = s.reasons?.[k] || s.statuses[k]; }); return col; });
+  const fails = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (isFailed(s.statuses[k])) col[index.get(o)] = s.reasons?.[k] || s.statuses[k]; }); return col; });
   const spread = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null) col[index.get(o)] = { n: s.ns?.[k], min: s.mins?.[k], max: s.maxs?.[k] }; }); return col; });
   const nFailed = fails.flat().filter(Boolean).length;
   const totalPoints = allValues.filter((v) => v != null).length;
@@ -613,7 +615,7 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
     axes: [
       { stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "12px system-ui, sans-serif", space: 70, gap: 8,
         splits: (u, axisIdx, min, max, incr) => { const step = Math.max(1, Math.ceil(incr)); const out = []; for (let i = Math.max(0, Math.ceil(min)); i <= Math.min(xs.length - 1, Math.floor(max)); i += step) out.push(i); return out; },
-        values: (u, vals) => vals.map((v) => axis[v] ? axis[v].short.slice(0, 7) : "") },
+        values: (u, vals) => vals.map((v) => axis[v] ? (axis[v].short.includes("+dirty") ? axis[v].short.slice(0, 13) : axis[v].short.slice(0, 7)) : "") },
       { stroke: cssVar("--muted"), grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "12px system-ui, sans-serif", size: 60,
         values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
     ],

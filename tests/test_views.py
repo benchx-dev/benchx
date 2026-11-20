@@ -273,16 +273,18 @@ def test_view_from_json_results_without_pyarrow(repo, tmp, monkeypatch, capsys):
 
     landing = _load(site_dir / "data" / "views" / "landing.json")
     subjects = {c["sha"]: c["subject"] for c in landing["recent_commits"]}
+    shorts = {c["sha"]: c["short"] for c in landing["recent_commits"]}
     assert subjects[repo["base"]] == "base"
     assert subjects[repo["head"]] == "head"
     dirty_shas = [sha for sha in subjects if "-dirty-" in sha]
     assert len(dirty_shas) == 1
     assert "dirty working tree" in subjects[dirty_shas[0]]
+    assert "+dirty" in shorts[dirty_shas[0]] and shorts[dirty_shas[0]] != shorts[repo["head"]]
 
-    # Head's parent is base, verified from git metadata.
+    # Head's parent is base, verified from git metadata (non-vacuous even on equal 1s timestamps).
     head_page = _load(site_dir / "data" / "views" / "commits" / f"{repo['head']}.json")
     assert head_page["parent"] == repo["base"]
-    assert all(ch["prev_is_parent"] is True for ch in head_page["changes"])
+    assert head_page["changes"] and all(ch["prev_is_parent"] is True for ch in head_page["changes"])
 
 
 def test_view_pyarrow_errors_are_actionable(tmp, monkeypatch, capsys):
@@ -447,8 +449,137 @@ def test_parametrized_workload_and_rejected_results(adhoc, tmp, monkeypatch, cap
     assert len(series) == 1
     assert series[0]["params"] == '{"a":1,"b":2}'
 
-    # Malformed JSON file is reported and exits EXIT_INVALID.
+    # Malformed JSON file is reported, still prints summary, and exits EXIT_INVALID.
     (res_dir / "broken.json").write_text("{not valid", encoding="utf-8")
     capsys.readouterr()
-    assert cli.main(["view", "--results", str(res_dir), "--out", str(tmp / "bad-site")]) == cli.EXIT_INVALID
-    assert "rejected broken.json: malformed" in capsys.readouterr().err
+    bad_site = tmp / "bad-site"
+    assert cli.main(["view", "--results", str(res_dir), "--out", str(bad_site)]) == cli.EXIT_INVALID
+    captured = capsys.readouterr()
+    assert "rejected broken.json: malformed" in captured.err
+    assert str(bad_site) in captured.out
+
+    # Without --out, still serves the valid results (with ingest_problems banner) and returns EXIT_INVALID.
+    served = []
+    monkeypatch.setattr(views, "serve_site", lambda directory, **kwargs: served.append(Path(directory)))
+    assert cli.main(["view", "--results", str(res_dir)]) == cli.EXIT_INVALID
+    assert len(served) == 1
+
+
+def test_build_commits_breaks_equal_timestamp_ties_by_ancestry():
+    same_ts = dt.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
+    parent_sha, child_sha = "f" * 40, "0" * 40  # child sorts before parent lexicographically
+    runs = [
+        {"sha": child_sha, "parents": [parent_sha], "committer_date": same_ts, "author_date": same_ts,
+         "subject": "child", "node": "n1", "state": "finished", "results": 1},
+        {"sha": parent_sha, "parents": ["a" * 40], "committer_date": same_ts, "author_date": same_ts,
+         "subject": "parent", "node": "n1", "state": "finished", "results": 1},
+    ]
+    commits = marts_mod.build_commits(runs)
+    order = {r["sha"]: r["commit_order"] for r in commits}
+    assert order[parent_sha] == 1 and order[child_sha] == 2
+
+
+def test_summary_only_estimate_and_partial_and_skipped_statuses(adhoc, tmp, monkeypatch):
+    _block_pyarrow(monkeypatch)
+    res_dir = tmp / "status-res"
+    res_dir.mkdir()
+
+    # 1. Summary-only success result (no observations, schema estimate summary).
+    summary_only = json.loads(json.dumps(adhoc))
+    summary_only["ingest_key"] = "sum-1"
+    summary_only["attempt_key"] = "att-sum-1"
+    summary_only["coordinates"]["workload"]["name"] = "case_summary"
+    summary_only["measurement"].pop("observations", None)
+    summary_only["measurement"]["summaries"] = [
+        {
+            "type": "estimate",
+            "estimator": {"name": "median", "method_version": "benchx/median/v1", "input_level": "observations"},
+            "value": 0.123,
+            "source": "producer",
+        }
+    ]
+    (res_dir / "summary.json").write_text(json.dumps(summary_only), encoding="utf-8")
+
+    # 2. Partial result with observations: contributes an estimate and is not a failure.
+    partial_doc = json.loads(json.dumps(adhoc))
+    partial_doc["ingest_key"] = "part-1"
+    partial_doc["attempt_key"] = "att-part-1"
+    partial_doc["coordinates"]["workload"]["name"] = "case_partial"
+    partial_doc["measurement"]["status"] = "partial"
+    partial_doc["measurement"]["reason"] = "budget-exceeded"
+    (res_dir / "partial.json").write_text(json.dumps(partial_doc), encoding="utf-8")
+
+    # 3. Skipped result: listed in series.json, not counted as a failure.
+    skipped_doc = json.loads(json.dumps(adhoc))
+    skipped_doc["ingest_key"] = "skip-1"
+    skipped_doc["attempt_key"] = "att-skip-1"
+    skipped_doc["coordinates"]["workload"]["name"] = "case_skipped"
+    skipped_doc["measurement"]["status"] = "skipped"
+    skipped_doc["measurement"]["reason"] = "unsupported"
+    skipped_doc["measurement"].pop("observations", None)
+    (res_dir / "skipped.json").write_text(json.dumps(skipped_doc), encoding="utf-8")
+
+    site_dir = tmp / "status-site"
+    assert cli.main(["view", "--results", str(res_dir), "--out", str(site_dir)]) == cli.EXIT_OK
+
+    series = {s["case"]: s for s in _load(site_dir / "data" / "views" / "series.json")}
+    assert series["case_summary"]["estimate"] == pytest.approx(0.123) and series["case_summary"]["points"] == 1
+    assert series["case_partial"]["estimate"] is not None and series["case_partial"]["points"] == 1
+    assert series["case_skipped"]["status"] == "skipped" and series["case_skipped"]["estimate"] is None
+
+    landing = _load(site_dir / "data" / "views" / "landing.json")
+    assert landing["failures"] == []
+    assert landing["latest_runs"][0]["failed_results"] == 0
+
+
+@pytest.mark.parametrize("flag, uri", [
+    ("--results", "s3://bucket/results"),
+    ("--store", "s3://bucket/store.parquet"),
+    ("--runs", "s3://bucket/runs"),
+])
+def test_remote_uri_rejected_clearly(tmp, monkeypatch, capsys, flag, uri):
+    _block_pyarrow(monkeypatch)
+    out = tmp / "remote-site"
+    assert cli.main(["view", flag, uri, "--out", str(out)]) == cli.EXIT_REFUSED
+    err = capsys.readouterr().err
+    assert "remote URI" in err and "s3://" in err
+    assert not out.exists()
+
+
+@requires_pyarrow
+def test_path_traversal_and_orphan_results_in_runs_dir(repo, tmp, capsys):
+    from benchx.store import Store
+
+    runs_dir = tmp / "runs"
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    res_out = tmp / "raw-base"
+    assert cli.main([
+        "bench", f"{base}:{repo['wt-base']}", "--adapter", "google-benchmark", "--suite", "demo-bench",
+        "--run-key", f"main/{repo['base']}/m5", "--out", str(res_out), "--no-ingest",
+    ]) == cli.EXIT_OK
+    # Orphan results.parquet without a matching run.parquet.
+    Store(runs_dir / repo["base"] / "m5" / "results.parquet").ingest_paths([res_out])
+
+    # Malicious path-traversal node name in a second run's run.parquet.
+    evil_sha = "e" * 40
+    views.write_run(
+        runs_dir / evil_sha / "safe-dir",
+        {"sha": evil_sha, "parents": [], "committer_date": "2026-01-01T00:00:00+00:00", "subject": "evil"},
+        {"state": "failed", "node": "../../../../escaped"},
+        log="must stay inside out\n",
+    )
+    capsys.readouterr()
+
+    site_dir = tmp / "site"
+    assert cli.main(["view", "--runs", str(runs_dir), "--out", str(site_dir)]) == cli.EXIT_OK
+
+    # Traversal log stayed inside site_dir/data/logs and did not escape.
+    assert not (tmp / "escaped.txt").exists()
+    logs = list((site_dir / "data" / "logs").rglob("*.txt"))
+    assert len(logs) == 1 and logs[0].resolve().is_relative_to((site_dir / "data" / "logs").resolve())
+
+    # Orphan results got a synthesized commit row (commit_order > 0) and a commit page.
+    landing = _load(site_dir / "data" / "views" / "landing.json")
+    by_sha = {c["sha"]: c for c in landing["recent_commits"]}
+    assert by_sha[repo["base"]]["commit_order"] > 0
+    assert (site_dir / "data" / "views" / "commits" / f"{repo['base']}.json").is_file()

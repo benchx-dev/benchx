@@ -10,44 +10,101 @@ optional `.parquet` marts:
     movers.parquet    the largest changes per commit x node
     manifest.json     counts, the latest commit, the tables
 
-A series is (suite, case, params, quantity, node). Verdicts are not computed here:
-the relative changes are a heuristic until benchx's comparator history mode exists.
+A series is (suite, case, params, quantity, node). Both `success` and `partial`
+results contribute estimates (matching `benchx.identity.points`), while `skipped`
+is preserved as non-failing status. Verdicts are not computed here: the relative
+changes are a heuristic until benchx's comparator history mode exists.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import heapq
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .inputs import UTC, _require_pyarrow
+from .inputs import UTC, _require_pyarrow, short_sha, synthesize_runs
 
 RECENT = 21  # points per series the noise estimate looks at (20 consecutive changes)
 MOVERS_PER_COMMIT = 100
+MEASURED_STATUSES = ("success", "partial")
+NON_FAILED_STATUSES = ("success", "partial", "skipped")
+
+
+def is_measured(point: dict) -> bool:
+    """Whether a point carries a usable measurement estimate (matching identity.points)."""
+    return point["status"] in MEASURED_STATUSES and point["estimate"] is not None
+
+
+def is_failed_status(status: str | None) -> bool:
+    """Whether a result status represents a failure (error/censored, not skipped/partial/success)."""
+    return bool(status) and status not in NON_FAILED_STATUSES
 
 
 def _series_key(row: dict) -> tuple:
     return (row["suite"], row["case"], row["params"], row["quantity"], row["node"])
 
 
-def build_commits(runs: list[dict]) -> list[dict]:
-    """Order commits across all nodes by committer_date (ties by sha)."""
-    unique = {(r["sha"], r.get("committer_date")) for r in runs}
-    order: dict[str, int] = {}
-    for sha, _ in sorted(
-        unique,
-        key=lambda t: (t[1] or dt.datetime.min.replace(tzinfo=UTC), t[0]),
-    ):
-        if sha not in order:
-            order[sha] = len(order) + 1
+def _order_shas(runs: list[dict]) -> dict[str, int]:
+    """Order unique SHAs by committer_date while keeping every known parent before its child."""
+    min_dt = dt.datetime.min.replace(tzinfo=UTC)
+    date_by_sha: dict[str, dt.datetime] = {}
+    parents_by_sha: dict[str, set[str]] = defaultdict(set)
+    for run in runs:
+        sha = run["sha"]
+        cdate = run.get("committer_date") or min_dt
+        if sha not in date_by_sha or cdate < date_by_sha[sha]:
+            date_by_sha[sha] = cdate
+        for p in run.get("parents") or ():
+            if p and p != sha:
+                parents_by_sha[sha].add(p)
 
+    all_shas = set(date_by_sha)
+    in_degree: dict[str, int] = {}
+    children: dict[str, list[str]] = defaultdict(list)
+    for sha in all_shas:
+        known_parents = [p for p in parents_by_sha.get(sha, ()) if p in all_shas]
+        in_degree[sha] = len(known_parents)
+        for p in known_parents:
+            children[p].append(sha)
+
+    # Kahn's topological sort with a min-heap keyed on (committer_date, sha):
+    # parents always precede their children even when timestamps tie within one second.
+    ready: list[tuple[dt.datetime, str]] = [
+        (date_by_sha[sha], sha) for sha, deg in in_degree.items() if deg == 0
+    ]
+    heapq.heapify(ready)
+    order: dict[str, int] = {}
+    while ready:
+        _, sha = heapq.heappop(ready)
+        if sha in order:
+            continue
+        order[sha] = len(order) + 1
+        for child in children.get(sha, ()):
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                heapq.heappush(ready, (date_by_sha[child], child))
+
+    # Fallback if synthetic metadata ever contains a cycle.
+    if len(order) < len(all_shas):
+        remaining = sorted(
+            ((date_by_sha[sha], sha) for sha in all_shas if sha not in order)
+        )
+        for _, sha in remaining:
+            order[sha] = len(order) + 1
+    return order
+
+
+def build_commits(runs: list[dict]) -> list[dict]:
+    """Order commits across all nodes by committer_date, breaking ties by ancestry then sha."""
+    order = _order_shas(runs)
     rows: list[dict] = []
     for run in runs:
         parents = list(run.get("parents") or [])
         rows.append({
             "sha": run["sha"],
-            "short": run["sha"][:12],
+            "short": short_sha(run["sha"]),
             "parents": parents,
             "parent": parents[0] if parents else None,
             "author_date": run.get("author_date"),
@@ -103,10 +160,10 @@ def build_points(raw_points: list[dict], commits: list[dict]) -> list[dict]:
 
 
 def build_changes(points: list[dict]) -> list[dict]:
-    """Every successful point compared against the immediately preceding point in its series."""
+    """Every measured point compared against the immediately preceding point in its series."""
     grouped: dict[tuple, list[dict]] = defaultdict(list)
     for pt in points:
-        if pt["status"] == "success" and pt["estimate"] is not None:
+        if is_measured(pt):
             grouped[_series_key(pt)].append(pt)
 
     rows: list[dict] = []
@@ -140,10 +197,10 @@ def build_changes(points: list[dict]) -> list[dict]:
 
 
 def build_latest(points: list[dict]) -> list[dict]:
-    """One summary row per series that has at least one successful point."""
+    """One summary row per series that has at least one measured point."""
     grouped: dict[tuple, list[dict]] = defaultdict(list)
     for pt in points:
-        if pt["status"] == "success" and pt["estimate"] is not None:
+        if is_measured(pt):
             grouped[_series_key(pt)].append(pt)
 
     rows: list[dict] = []
@@ -229,7 +286,15 @@ def build_marts(
     has_parquet_marts: bool = False,
 ) -> dict:
     """Compute all derived tables and manifest metadata in memory."""
-    commits = build_commits(runs)
+    # Ensure every (sha, node) present in raw_points has a run row so orphan results
+    # (for example results.parquet without run.parquet) get a real commit_order and page.
+    known_pairs = {(r["sha"], r["node"]) for r in runs}
+    orphan_points = [pt for pt in raw_points if (pt["sha"], pt["node"]) not in known_pairs]
+    all_runs = list(runs)
+    if orphan_points:
+        all_runs.extend(synthesize_runs(orphan_points, default_state="unknown"))
+
+    commits = build_commits(all_runs)
     points = build_points(raw_points, commits) if raw_points else []
     changes = build_changes(points) if points else []
     latest = build_latest(points) if points else []
@@ -275,7 +340,7 @@ def build_marts(
         "suites": suite_counts,
         "tables": tables,
         "notes": {
-            "commit_order": "rank of committer_date (or measurement start) among measured commits",
+            "commit_order": "rank of committer_date (breaking ties by ancestry then sha) among measured commits",
             "rel_change": "estimate / previous measured point of the same series - 1; a heuristic, not a verdict",
             "noise": f"median of |consecutive rel_change| over the last {RECENT} points of the series; NULL below 3 points",
         },
