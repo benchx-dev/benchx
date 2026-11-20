@@ -201,6 +201,12 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
     listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
         say.warning(f"asv: skipped module {failure['module']}: {failure['error']}")
+        # the traceback, beside the console warning; a failed package's submodules are not scanned
+        log.harness_output(logger, f"module {failure['module']}", "traceback", failure.get("traceback"), failed=False)
+        logger.debug("module %s failed to import, so its submodules were not scanned", failure["module"])
+    if listing.get("left_out"):
+        logger.debug("%d benchmark(s) the suite switched off with skip_benchmark: %s%s", len(listing["left_out"]),
+                     ", ".join(listing["left_out"][:40]), ", …" if len(listing["left_out"]) > 40 else "")
     cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
@@ -279,6 +285,31 @@ def _plan(info: dict, invocation: dict) -> dict:
             "loops_from": loops_from, "setup_scope": scope}
 
 
+def _note_plan(info: dict, invocation: dict, plan: dict) -> None:
+    """The case's plan, each setting with where it came from, and what the order asked for that did not
+    apply. The sources are worked out here, for the log: the plan itself is written into the `asv-case`
+    artifact and gets no new keys."""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    declared = info["declared"]
+    sources = {"min_time": "order" if invocation["min_time"] is not None
+               else "sample_time" if "sample_time" in declared else "default",
+               "warmups": "order" if invocation["warmups"] is not None
+               else "warmup_time" if "warmup_time" in declared else "default",
+               "timeout": "timeout" if "timeout" in declared else "default"}
+    logger.debug("plan: values %s (%s), loops %s (%s), min_time %s (%s), warmups %s (%s), timeout %s (%s)",
+                 plan["values"], plan["values_from"], plan["loops"], plan["loops_from"] or "adaptive calibration",
+                 plan["min_time"], sources["min_time"], plan["warmups"], sources["warmups"], plan["timeout"],
+                 sources["timeout"])
+    if invocation["min_time"] is not None and plan["loops"] is not None and plan["loops_from"] != "order":
+        logger.debug("the order's min_time %g s is lost: the loops are fixed at %s by %s", invocation["min_time"],
+                     plan["loops"], "a declared number" if plan["loops_from"] == "number"
+                     else "the default setup_scope of call (any benchmark with a setup hook has it)")
+    if invocation["values"] is None and plan["values_from"] == "default" and declared.get("repeat") is not None:
+        logger.debug("repeat %r is not a form asv_runner reads here, so the default %s values are used",
+                     declared["repeat"], plan["values"])
+
+
 def _flags(plan: dict) -> list[str]:
     flags = ["--processes", str(plan["processes"]), "--values", str(plan["values"]),
              "--warmups", str(plan["warmups"]), "--timeout", str(math.ceil(plan["timeout"])), "--copy-env"]
@@ -353,7 +384,9 @@ finally:
 def _read_json(path: Path):
     try:
         return json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        if path.exists():  # an absent file is how a skipped case or a missing probe looks: not worth a line
+            logger.debug("%s exists but cannot be read: %s", path, e)
         return None
 
 
@@ -364,6 +397,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
     name, index = runnable["cases"][case]
     info = runnable["benchmarks"][name]
     plan = _plan(info, invocation)
+    _note_plan(info, invocation, plan)
     stem = native_path.name.removesuffix(".native.json")
     driver = native_path.with_name(f"{stem}.driver.py")
     worker_env = native_path.with_name(f"{stem}.worker-env.json")
@@ -413,6 +447,9 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             "stdout": stdout or "", "stderr": stderr or "",
             "native": {**(native or {"benchmarks": []}), "benchx_asv": asv}, "artifacts": artifacts,
             "worker_env": _read_json(worker_env), "passed_env_digest": pyperf.env_digest(env)}
+
+
+explain_warnings = pyperf.explain_warnings  # the workers are pyperf's
 
 
 def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict:

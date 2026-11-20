@@ -250,3 +250,76 @@ def test_validate_logs_its_kind_and_each_valid_file(tmp):
     text = log_file.read_text()
     assert " INFO validating 1 file(s) as measurement-result" in text
     assert f" DEBUG {example} is a valid measurement-result" in text
+
+
+# --- the rest of §5's rows
+
+def test_series_and_head_say_when_the_store_has_nothing_to_list(tmp):
+    log_file = tmp / "empty.log"
+    assert cli.main(["series", "--log-file", str(log_file)]) == cli.EXIT_OK
+    assert cli.main(["head", "--log-file", str(log_file)]) == cli.EXIT_OK
+    text = log_file.read_text()
+    assert " INFO no series in the store" in text and " holds no result" in text
+
+
+def test_the_tables_say_how_many_rows_they_showed_and_what_they_hid(session, tmp):
+    log_file = tmp / "t.log"
+    assert cli.main(["compare", "--run", "S", "--profile", "revisions", "--baseline", session, "--tables",
+                     "--log-file", str(log_file)]) == cli.EXIT_OK
+    assert re.search(r" INFO --tables: \d+ row\(s\) shown; hidden by verdict: ", log_file.read_text())
+
+
+def test_a_schema_error_is_logged_with_its_path_and_keyword(tmp):
+    bad = tmp / "bad.json"
+    bad.write_text('{"schema_version": "benchx/measurement-result/0.1.0", "surprise": 1}')
+    log_file = tmp / "v.log"
+    assert cli.main(["validate", str(bad), "--log-file", str(log_file)]) == cli.EXIT_INVALID
+    assert re.search(r" DEBUG schema error at /[^:]*: \w+: ", log_file.read_text())
+
+
+def test_the_asv_runtime_returns_what_the_suite_switched_off(tmp):
+    from benchx.adapters import asv_runtime
+    suite = tmp / "benchmarks"
+    suite.mkdir()
+    (suite / "__init__.py").write_text("")
+    (suite / "bench.py").write_text(
+        "def time_on():\n    pass\n\n"
+        "def time_off():\n    pass\n\n"
+        "time_off.skip_benchmark = True\n\n"
+        "class Suite:\n    def time_method(self):\n        pass\n    def time_hidden(self):\n        pass\n"
+        "    time_hidden.skip_benchmark = True\n")
+    found, failed, left_out = asv_runtime.discover(str(suite))
+    assert failed == [] and sorted(b.name for b in found) == ["bench.Suite.time_method", "bench.time_on"]
+    assert sorted(left_out) == ["benchmarks.bench.Suite.time_hidden", "benchmarks.bench.time_off"]
+
+
+def test_a_plan_says_where_each_setting_came_from_and_what_the_order_asked_for_in_vain(caplog):
+    from benchx.adapters import asv
+    info = {"declared": {"setup_scope": "call", "repeat": 0}, "has_setup": True}
+    invocation = {"processes": 20, "values": None, "loops": None, "min_time": 0.2, "warmups": None}
+    plan = asv._plan(info, invocation)
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        asv._note_plan(info, invocation, plan)
+    messages = [m for _, m in records(caplog)]
+    assert any(m.startswith("plan: values 5 (default), loops 1 (setup_scope), min_time 0.2 (order)") for m in messages)
+    assert any("the order's min_time 0.2 s is lost: the loops are fixed at 1 by the default setup_scope" in m
+               for m in messages)
+    assert any("repeat 0 is not a form" in m and "the default 5 values are used" in m for m in messages)
+
+
+def test_a_partial_case_line_gives_completed_over_attempted_and_a_warning_its_reason():
+    from benchx import runner
+    document = {"provenance": {"info": {}}, "measurement": {"status": "partial"},
+                "procedure": {"completed_repetitions": 3, "attempted_repetitions": 5}}
+    level, text, bad = runner._case_line([("partial", "harness.partial", document)], ["env-mismatch"],
+                                         {"timed_out": False, "exit_status": 0}, 1.0, 0.5,
+                                         {"env-mismatch": "2 of 3 worker(s) had the environment the manager passed"})
+    assert text.startswith("partial (harness.partial) 3/5 [env-mismatch: 2 of 3 worker(s) had the environment the "
+                           "manager passed], exit 0, 1.0 s, load 0.50") and (level, bad) == (logging.WARNING, True)
+
+
+def test_the_overlap_of_two_sets_of_facts_names_paths_never_values():
+    from benchx import runner
+    base = {"os": {"family": "Linux", "kernel": "6"}, "process": {"environment": {"A": "1"}}}
+    facts = {"os": {"family": "Linux"}, "process": {"environment": {"A": "2"}}, "cpu": {"x": 1}}
+    assert runner._overlap(base, facts) == ["/process/environment/A"]

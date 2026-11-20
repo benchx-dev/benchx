@@ -504,7 +504,10 @@ def cmd_series(args):
         return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "series")) is None:
         return EXIT_REFUSED
-    for s in Store(cfg.store_path).series(args.workload, args.quantity):
+    listed = Store(cfg.store_path).series(args.workload, args.quantity)
+    if not listed:
+        logger.info("no series%s", " matches the filter" if args.workload or args.quantity else " in the store")
+    for s in listed:
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
@@ -542,6 +545,8 @@ def cmd_head(args):
         for row in rows:
             print(row["document"])
         return EXIT_OK
+    if not total:
+        logger.info("%s holds no result%s", store.path, "s that match the filter" if args.project or args.workload else "")
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
     if args.table:  # the columns of `bx bench`, led by where each result came from; measurands only
         print(bench_mod.render([{**bench_mod.row_of(json.loads(r["document"])), "revision": r["revision"][:10],
@@ -767,6 +772,7 @@ def _compare(store, args, policy):
             parameter = args.vary or compare_mod.infer_parameter(documents, args.run)
             if not args.vary:  # the choice is recorded in the document's `varying`, and said here too
                 say.info(f"varying: {parameter} (the only parameter)")
+                logger.info("%s was inferred from %d result document(s) of run %s", parameter, len(documents), args.run)
         doc = compare_mod.compare(documents, run_key=args.run, profile=policy["profile"],
                                   baseline=args.baseline, label=args.label, parameter=parameter, k=policy["k"],
                                   min_rounds=policy["min_rounds"])

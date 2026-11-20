@@ -80,6 +80,7 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
     try:
         description = target_mod.resolve(spec, operation=operation, provider=provider)
     except target_mod.TargetError as e:
+        logger.debug("%s: the target could not be resolved: %s", name or "target", e)
         raise SessionError(str(e)) from None
     source = None
     if description:
@@ -105,6 +106,8 @@ def _side(spec: str, suite: str, operation: str, harness, environment_variables=
         adapters.get(harness.name).locate(path, suite, {**os.environ, **(environment_variables or {})},
                                           timeout=timeout)
     except Unsupported as e:
+        logger.debug("%s: the %s adapter refused %s: %s", name or "target", harness.name, spec,
+                     " | ".join(str(problem) for problem in e.problems))
         raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
     if kind == "build" and ":" in spec and not spec.startswith("@"):
         source = parse_target(spec)[1] or source
@@ -174,6 +177,7 @@ def _order(side: dict, *, harness, suite, filter, quantities, precision, environ
                                  environment_variables=environment_variables, round_=round_, slot=slot,
                                  benchmark=side.get("benchmark"), collectors=collectors)
     except orders.OrderError as e:
+        logger.debug("the work order is not valid: %s", e)  # the problems, before the SessionError replaces them
         raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
 
 
@@ -189,6 +193,8 @@ def _harness(adapter, flags, file_precision=None, quantities=None) -> tuple:
     try:
         adapters.get(harness.name).protocol(precision)
     except Unsupported as e:
+        logger.debug("the %s adapter cannot apply the precision: %s", harness.name,
+                     " | ".join(str(problem) for problem in e.problems))
         raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
     unknown = sorted(set(quantities or ()) - set(adapters.get(harness.name).QUANTITIES))
     if unknown:
@@ -516,6 +522,7 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
         runnable = module.locate(side["path"], suite, env, timeout=order_s)
         cases = module.list_cases(runnable, filter, env, timeout=order_s)
     except Unsupported as e:
+        logger.debug("listing the cases was refused: %s", " | ".join(str(problem) for problem in e.problems))
         raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
     if parameter is None:
         parameter = _infer_parameter(runnable, environment_variables)

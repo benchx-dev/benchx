@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import os
+import statistics
 import time
 import urllib.parse
 from collections.abc import Iterator
@@ -147,6 +148,18 @@ def _partial(state, total, out_dir):
         raise
 
 
+def _overlap(base: dict, facts: dict, path="") -> list[str]:
+    """The paths at which `facts` replaces a different value of `base`: names only, never values."""
+    found = []
+    for key, value in facts.items():
+        if key in base:
+            if isinstance(value, dict) and isinstance(base[key], dict):
+                found += _overlap(base[key], value, f"{path}/{key}")
+            elif base[key] != value:
+                found.append(f"{path}/{key}")
+    return found
+
+
 def _path_of(uri) -> str:
     return urllib.parse.unquote(urllib.parse.urlparse(uri).path)
 
@@ -155,21 +168,24 @@ def _path_of(uri) -> str:
 SHARED_ARTIFACTS = ("params-helper", "asv-runtime")
 
 
-def _case_line(results, warnings, run_, duration, load) -> tuple[int, str, bool]:
+def _case_line(results, warnings, run_, duration, load, details=None) -> tuple[int, str, bool]:
     """The case's line: its statuses with their reasons (the message the producer gave, as `bx bench`
     and `bx compare` show it), the warnings that differ from case to case, the exit status, the
     duration and the load average. The level, and whether the case did badly: a status that is not
     `success` or `skipped`, or a non-zero exit (R35), or a warning that says the environment recorded may
     not be the one the workers had."""
     statuses = []
-    for status, reason, _ in results:
+    for status, reason, document in results:
         text = status + (f" ({reason})" if reason else "")
+        counts = document.get("procedure", {})
+        if status == "partial" and "completed_repetitions" in counts and "attempted_repetitions" in counts:
+            text += f" {counts['completed_repetitions']}/{counts['attempted_repetitions']}"
         if text not in statuses:
             statuses.append(text)
     message = next((m for m in (said(document) for _, _, document in results) if m), None)
     line = ", ".join(statuses) + (f": {message}" if message else "")
     if warnings:
-        line += f" [{', '.join(warnings)}]"
+        line += f" [{', '.join(f'{w}: {details[w]}' if w in (details or {}) else w for w in warnings)}]"
     ended = "timeout" if run_["timed_out"] else f"exit {run_['exit_status']}"
     bad = (any(status not in ("success", "skipped") for status, _, _ in results)
            or run_["timed_out"] or run_["exit_status"] not in (0, None))
@@ -359,6 +375,9 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             if hasattr(adapter, "observed_environment"):
                 facts, case_warnings = adapter.observed_environment(run_, case, env_names)
                 case_system = snapshot.merge(case_system, facts)
+            if log.once("overlap") and (clash := _overlap(system, case_system)):
+                # what the harness reported replaces what the runner read (snapshot.merge: the harness wins)
+                logger.debug("the harness's facts replace the context's at: %s", ", ".join(clash))
             attempt_key = f"urn:benchx:attempt:{ref[7:23]}:{index}"
             workload_name, case_parameters = workloads[index]
             case_parameters = {**case_parameters, **parameters}
@@ -469,7 +488,15 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
                 case_paths.append(path)
                 if not condition:
                     results.append((document["measurement"]["status"], document["measurement"].get("reason"), document))
-            level, line, bad = _case_line(results, case_warnings, run_, duration, load)
+            details = adapter.explain_warnings(run_, case, case_warnings) if hasattr(adapter, "explain_warnings") else {}
+            if "setup-per-call-unbatched" in case_warnings:
+                observations = next((d["measurement"]["observations"] for _, _, d in results
+                                     if d["measurement"].get("observations")), None)
+                values = [o["value"] if isinstance(o, dict) else o for o in observations or []]  # as the comparator reads them
+                if values:
+                    details["setup-per-call-unbatched"] = (f"median {statistics.median(values):.3g} s, "
+                                                           f"minimum {min(values):.3g} s")
+            level, line, bad = _case_line(results, case_warnings, run_, duration, load, details)
             logger.log(level, "%s: %s", label, line)
             if logger.isEnabledFor(logging.DEBUG):
                 shown = [f"{a['kind']} {_path_of(a['uri'])}" for a in artifacts

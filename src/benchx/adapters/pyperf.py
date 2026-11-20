@@ -519,6 +519,22 @@ def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[st
     return facts, warnings
 
 
+def explain_warnings(run: dict, case: str, warnings: list[str]) -> dict[str, str]:
+    """The reason behind each of `observed_environment`'s warnings, for the case's line in the log."""
+    details = {}
+    native = run["native"]
+    benchmark = _benchmark(native, case)
+    if "env-mismatch" in warnings and benchmark is not None:
+        digests = [md.get(ENV_DIGEST_KEY) for r, md in _runs(native, benchmark) if r.get("values")]
+        matched = sum(1 for digest in digests if digest == run["passed_env_digest"])
+        details["env-mismatch"] = f"{matched} of {len(digests)} worker(s) had the environment the manager passed"
+    if "env-capture-missing" in warnings:
+        written = any(kind == "worker-environment" for kind, _, _ in run.get("artifacts", []))
+        details["env-capture-missing"] = ("the worker-environment file did not parse" if written
+                                          else "no worker-environment file was written")
+    return details
+
+
 def default_precision() -> dict:
     """pyperf's own defaults, spelled as a work-order `precision`."""
     return {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": DEFAULTS["processes"]},
