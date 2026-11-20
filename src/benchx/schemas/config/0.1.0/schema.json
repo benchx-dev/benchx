@@ -42,6 +42,7 @@
           "type": "string",
           "minLength": 1
         },
+        "verbosity": { "description": "How much the harness itself is asked to say: 0 (the default), or more (pyperf and asv: --verbose; Google Benchmark: --v=N). The same as --harness-verbosity.", "type": "integer", "minimum": 0 },
         "quantities": {
           "description": "What one run collects, from those the harness reports.",
           "type": "array",

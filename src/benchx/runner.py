@@ -174,6 +174,9 @@ def _path_of(uri) -> str:
     return urllib.parse.unquote(urllib.parse.urlparse(uri).path)
 
 
+# The log's cap on a stream of harness output: 40 lines, or this many when the harness was asked to say more.
+VERBOSE_OUTPUT_LINES = 2000
+
 # Written once into the artifacts folder and overwritten by every case: named on the first case's line only.
 SHARED_ARTIFACTS = ("params-helper", "asv-runtime")
 
@@ -334,6 +337,10 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
     order_file.write_bytes(core.pretty(order))
 
     attempted = adapter.attempted(applied_protocol)
+    harness_verbosity = order.get("harness_verbosity", 0)
+    if harness_verbosity:
+        logger.info("the harness is asked to say more (harness_verbosity %d): its output is logged up to %d lines a "
+                    "stream", harness_verbosity, VERBOSE_OUTPUT_LINES)
     logger.info("listing the benchmarks of %s", order["suites"][0]["suite"])  # an asv listing imports a whole suite
     listing_started = time.monotonic()
     try:
@@ -367,7 +374,8 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             # The wall clock can step backwards mid-case (NTP, WSL2 resyncs): the duration comes from a monotonic clock.
             started, clock = time.time(), time.monotonic()
             run_ = adapter.run_case(runnable, case, invocation, child_env, order["timeouts"]["case_s"], native_path,
-                                  env_names=env_names)
+                                  env_names=env_names,
+                                  **({"harness_verbosity": harness_verbosity} if harness_verbosity else {}))
             duration = time.monotonic() - clock
             (artifacts_dir / f"{stem}.stdout").write_text(run_["stdout"])
             (artifacts_dir / f"{stem}.stderr").write_text(run_["stderr"])
@@ -414,6 +422,8 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
                 if hasattr(adapter, "repetition_levels") and not condition:
                     procedure["repetition_levels"] = adapter.repetition_levels(applied_protocol, run_, case)
                 info = {"workorder_ref": ref, "requester": order["requester"], **output["info"]}
+                if harness_verbosity:  # the output between samples is the harness's own: say that it was asked for
+                    info["harness_verbosity"] = harness_verbosity
                 if native_info:
                     info[adapter.CONTEXT_KEY] = native_info
                 if "reason" in order:
@@ -517,8 +527,11 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
                 named_once.update(a["kind"] for a in artifacts if a["kind"] in SHARED_ARTIFACTS)
                 logger.debug("%s files: %s, results %d %s", label, ", ".join(shown), len(case_paths),
                              case_paths[0] if case_paths else "")
-            log.harness_output(logger, label, "stdout", run_["stdout"], failed=bad, kept_at=artifacts_dir / f"{stem}.stdout")
-            log.harness_output(logger, label, "stderr", run_["stderr"], failed=bad, kept_at=artifacts_dir / f"{stem}.stderr")
+            cap = VERBOSE_OUTPUT_LINES if harness_verbosity else 40
+            log.harness_output(logger, label, "stdout", run_["stdout"], failed=bad, kept_at=artifacts_dir / f"{stem}.stdout",
+                               limit=cap)
+            log.harness_output(logger, label, "stderr", run_["stderr"], failed=bad, kept_at=artifacts_dir / f"{stem}.stderr",
+                               limit=cap)
             counts.update(status for status, _, _ in results)
             nonzero = nonzero or run_["exit_status"] not in (0, None)
             state["done"] += 1

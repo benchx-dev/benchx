@@ -112,7 +112,7 @@ flag or value leaves no folder; a run refused later, by the session, leaves `RUN
 holding only `bx.log`, which says why. What
 `bx` prints to the terminal does not change: the log is the full record, and `-v` shows its
 INFO records on the terminal (`-vv` DEBUG too), `-q` only warnings and errors, `-qq` only
-errors (`$BENCHX_VERBOSE` sets it, from -2 to 2). The log's own level is `--log-level`
+errors (`$BENCHX_VERBOSE` sets it: -2 or more). Each `-v` past `-vv` also asks the harness itself to say more, as `--harness-verbosity N` does: `-vvv` is `-vv` and 1, `-vvvv` is `-vv` and 2. pyperf and asv are then given `--verbose`, and Google Benchmark `--v=N`; the output is logged in full (up to 2000 lines a stream, 40 otherwise). The default, 0, asks for nothing more. The harness prints between values, outside the timed call, but it is output on the machine between samples, so the order records it (`harness_verbosity`, not part of the measurement's identity) and so does each result's `provenance.info`. `$BENCHX_HARNESS_VERBOSITY` and `adapter.verbosity` in the config file set it too, below the flag. The log's own level is `--log-level`
 (`debug`, the default, `info`, `warning`, `error`; `$BENCHX_LOG_LEVEL`, or `log_level` in the
 file). `--no-log` turns it off, `--log` sends it to stderr instead, `--log-file PATH` appends it
 to a file (`{out}` is the run's output folder, `{root}` the project root); the file's key
@@ -121,7 +121,7 @@ output folder, while a flag works for any command. A file named `*.json` is refu
 `bx ingest` reads such files in a directory. **A `bx.log` records the command line as given,
 `-e` values and credentials in a `--source-uri` included, and a command's output as it was
 printed. It does not claim to hide secrets: like `workorder-….json` in the same folder, it can
-contain them, and a results folder that is archived or shared carries it.** It never holds the environment `bx` inherited, only names of variables, with one exception: the variables benchx itself reads (`BENCHX_HOME`, `BENCHX_VERBOSE`, `BENCHX_LOG_LEVEL`, `BENCHX_SETUP_FILE`, `BENCHX_ENV_ALLOWLIST`, `BENCHX_SCHEMAS`) are logged with their values, since they are settings someone typed for benchx and decide what it does.
+contain them, and a results folder that is archived or shared carries it.** It never holds the environment `bx` inherited, only names of variables, with one exception: the variables benchx itself reads (`BENCHX_HOME`, `BENCHX_VERBOSE`, `BENCHX_LOG_LEVEL`, `BENCHX_HARNESS_VERBOSITY`, `BENCHX_SETUP_FILE`, `BENCHX_ENV_ALLOWLIST`, `BENCHX_SCHEMAS`) are logged with their values, since they are settings someone typed for benchx and decide what it does.
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets (one for
 `--profile variants`) select measure mode and `--run` selects read mode; mixing them is an error.

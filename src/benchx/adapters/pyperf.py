@@ -290,8 +290,9 @@ runner.bench_func({case!r}, func, *args)
 '''
 
 
-def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -> dict:
-    """Run one case; never raises for harness failures, which become results."""
+def run_case(runnable, case, flags, env, timeout, native_path, env_names=None, harness_verbosity=0) -> dict:
+    """Run one case; never raises for harness failures, which become results. A `harness_verbosity` above 0
+    asks pyperf for `--verbose`: its workers then print a line after every value they measure."""
     if env_names is None:
         env_names = snapshot.env_allowlist(env, ENV_ALLOWLIST)
     stem = native_path.name.removesuffix(".native.json")
@@ -307,7 +308,8 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
         module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case, function=function, index=index,
         params=str(params.resolve())))
     # Absolute: the child runs in the tree, not where the output directory was named.
-    args = [runnable["python"], str(driver.resolve()), *flags, "-o", str(native_path.resolve())]
+    args = [runnable["python"], str(driver.resolve()), *flags, *(["--verbose"] if harness_verbosity else []),
+            "-o", str(native_path.resolve())]
     # Its own process group, so a timeout takes the workers down with the manager.
     note_case(logger, args, cwd=runnable["root"], timeout=timeout)
     proc = subprocess.Popen(args, env=env, cwd=runnable["root"], text=True, start_new_session=True,

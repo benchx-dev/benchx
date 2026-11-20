@@ -391,7 +391,7 @@ def _read_json(path: Path):
         return None
 
 
-def run_case(runnable, case, invocation, env, timeout, native_path, env_names=None) -> dict:
+def run_case(runnable, case, invocation, env, timeout, native_path, env_names=None, harness_verbosity=0) -> dict:
     """One pyperf run for the case; never raises for harness failures, which become results."""
     if env_names is None:
         env_names = snapshot.env_allowlist(env, ENV_ALLOWLIST)
@@ -416,7 +416,8 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             env_names=list(env_names), benchmark_dir=str(runnable["benchmark_dir"]), module=info["module"],
             attr=info["attr"], index=index, case=case, has_cache=bool(info["setup_cache_key"]),
             skipped=str(skipped), facts=str(facts), project=runnable["project"] or ""))
-        args = [runnable["python"], str(driver.resolve()), *_flags(plan), "-o", str(native_path.resolve())]
+        args = [runnable["python"], str(driver.resolve()), *_flags(plan), *(["--verbose"] if harness_verbosity else []),
+                "-o", str(native_path.resolve())]  # the workers are pyperf's: its --verbose
         # Its own process group, so a timeout takes the workers down with the manager.
         note_case(logger, args, cwd=scratch, timeout=timeout)
         proc = subprocess.Popen(args, env=env, cwd=scratch, text=True, start_new_session=True,

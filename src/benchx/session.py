@@ -166,7 +166,7 @@ def run_directory(results_dir, run_key: str) -> Path:
 
 def _order(side: dict, *, harness, suite, filter, quantities, precision, environment_variables, project, run_key,
            source_uri, round_=None, slot=None, labels=None, case_s=orders.CASE_TIMEOUT_S,
-           order_s=orders.ORDER_TIMEOUT_S, collectors=None) -> dict:
+           order_s=orders.ORDER_TIMEOUT_S, collectors=None, harness_verbosity=0) -> dict:
     """One side's order; for one round and slot of a comparison, or neither (`bx bench`)."""
     target = {"kind": side["kind"], "path": str(side["path"]), "source_dir": side["source"],
               "source": {"uri": source_uri, "type": "git"}, **side["text"]}
@@ -175,7 +175,8 @@ def _order(side: dict, *, harness, suite, filter, quantities, precision, environ
                                  quantities=quantities, run_key=run_key, project=project,
                                  labels={**side["labels"], **(labels or {})}, case_s=case_s, order_s=order_s,
                                  environment_variables=environment_variables, round_=round_, slot=slot,
-                                 benchmark=side.get("benchmark"), collectors=collectors)
+                                 benchmark=side.get("benchmark"), collectors=collectors,
+                                 harness_verbosity=harness_verbosity)
     except orders.OrderError as e:
         logger.debug("the work order is not valid: %s", e)  # the problems, before the SessionError replaces them
         raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
@@ -276,7 +277,7 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
                  environment_variables=None, filter=None, quantities=("wall-time",), project=None, run_key=None,
                  out=None, source_uri=None, case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S,
                  progress=None, build=True, provider=None, config_path=None, results_dir=None,
-                 collectors=None, round_=None, slot=None, labels=None) -> dict:
+                 collectors=None, round_=None, slot=None, labels=None, harness_verbosity=0) -> dict:
     """Run one target once: a comparison session of one order, with no comparison.
     It has a round, a slot and labels when the caller places it in a session that
     other calls join through the same run key. Results are delivered to `store`
@@ -305,6 +306,7 @@ def bench_target(target: str, *, suite: str, adapter: str, store=None, flags=Non
                                  filter=filter, quantities=quantities, precision=precision,
                                  environment_variables=environment_variables, project=project, run_key=run_key,
                                  source_uri=source_uri, case_s=case_s, order_s=order_s, collectors=collectors,
+                                 harness_verbosity=harness_verbosity,
                                  round_=round_, slot=slot, labels=labels)
     return {**summary, "outcome": outcome, "precision": precision}
 
@@ -338,7 +340,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                     quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
                     k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
                     case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
-                    collectors=None) -> dict:
+                    collectors=None, harness_verbosity=0) -> dict:
     """Alternate baseline and contender over `rounds` rounds, deliver every
     result to `store`, and return the run-mode comparison document.
 
@@ -400,7 +402,8 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
                                              precision=precision, environment_variables=environment_variables,
                                              project=project, run_key=run_key, source_uri=source_uri,
                                              round_=round_, slot=slot, labels=side_labels, case_s=case_s,
-                                             order_s=order_s, collectors=collectors)
+                                             order_s=order_s, collectors=collectors,
+                                             harness_verbosity=harness_verbosity)
                 if outcome["rejected"]:
                     _rejected(outcome, title)
                     codes = sorted({r["code"] for r in outcome["rejected"]})
@@ -490,7 +493,7 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
                      quantities=("wall-time",), project=None, run_key=None, out=None, source_uri=None,
                      k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
                      case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
-                     collectors=None) -> dict:
+                     collectors=None, harness_verbosity=0) -> dict:
     """Alternate the two values of one workload parameter of one target over `rounds` rounds,
     deliver every result to `store`, and return the run-mode comparison document (UC-02).
 
@@ -563,7 +566,8 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
                                              quantities=quantities, precision=precision,
                                              environment_variables=environment_variables, project=project,
                                              run_key=run_key, source_uri=source_uri, round_=round_, slot=slot,
-                                             case_s=case_s, order_s=order_s, collectors=collectors)
+                                             case_s=case_s, order_s=order_s, collectors=collectors,
+                                             harness_verbosity=harness_verbosity)
                 if outcome["rejected"]:
                     _rejected(outcome, title)
                     codes = sorted({r["code"] for r in outcome["rejected"]})

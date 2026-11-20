@@ -199,7 +199,7 @@ def test_verbosity_from_the_environment_and_its_refusal(build, monkeypatch, caps
     assert " DEBUG " not in capsys.readouterr().err  # the bare message, not the log's line
     monkeypatch.setenv("BENCHX_VERBOSE", "loud")
     assert bench(build) == cli.EXIT_REFUSED
-    assert "bx bench: error: BENCHX_VERBOSE=loud: not a whole number from -2 to 2" in capsys.readouterr().err
+    assert "bx bench: error: BENCHX_VERBOSE=loud: not a whole number, -2 or more" in capsys.readouterr().err
 
 
 def test_config_show_has_the_three_rows_with_their_sources(monkeypatch, capsys):

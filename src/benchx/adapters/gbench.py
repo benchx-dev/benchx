@@ -127,10 +127,11 @@ def list_cases(binary, case_filter, env, timeout=None) -> list[str]:
     return note_cases(logger, [line.strip() for line in out.stdout.splitlines() if line.strip()], case_filter)
 
 
-def run_case(binary, case, flags, env, timeout, native_path, env_names=()) -> dict:
+def run_case(binary, case, flags, env, timeout, native_path, env_names=(), harness_verbosity=0) -> dict:
     """Run one case; never raises for harness failures, which become results."""
     args = [str(binary), f"--benchmark_filter=^{re.escape(case)}$",
-            f"--benchmark_out={native_path}", "--benchmark_out_format=json", *flags]
+            f"--benchmark_out={native_path}", "--benchmark_out_format=json", *flags,
+            *([f"--v={harness_verbosity}"] if harness_verbosity else [])]  # the library's own logging, on stderr
     note_case(logger, args, cwd=None, timeout=timeout)
     try:
         out = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)

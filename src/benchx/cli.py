@@ -32,11 +32,12 @@ EXIT_REFUSED = 2  # the command was refused or could not be carried out
 ASV_CASE_TIMEOUT_S = 1800
 VERBOSE_ENV = "BENCHX_VERBOSE"
 LOG_LEVEL_ENV = "BENCHX_LOG_LEVEL"
+HARNESS_VERBOSITY_ENV = "BENCHX_HARNESS_VERBOSITY"
 DEFAULT_LOG = "{out}/bx.log"
 # benchx's own control variables: every one the code reads. They are settings someone typed for benchx, a fixed
 # list, so the log gives their values; the rest of the inherited environment is never dumped (plan rule 3).
-CONTROL_ENV = ("BENCHX_HOME", "BENCHX_VERBOSE", "BENCHX_LOG_LEVEL", "BENCHX_SETUP_FILE", "BENCHX_ENV_ALLOWLIST",
-               "BENCHX_SCHEMAS")
+CONTROL_ENV = ("BENCHX_HOME", "BENCHX_VERBOSE", "BENCHX_LOG_LEVEL", "BENCHX_HARNESS_VERBOSITY", "BENCHX_SETUP_FILE",
+               "BENCHX_ENV_ALLOWLIST", "BENCHX_SCHEMAS")
 OUTCOMES = {EXIT_OK: "ok", EXIT_INVALID: "invalid", EXIT_REFUSED: "refused"}
 
 say = log.console(__name__)  # what `bx` shows its user: console messages (logging_plan.md §4)
@@ -65,21 +66,54 @@ def _source_text(source, env=None) -> str:
     return f"environment {env}" if source == "env" else source
 
 
-def _verbosity(args) -> tuple[int, str]:
-    """How much the terminal shows, -2 (`-qq`) to 2 (`-vv`), and where that came from: the net
-    count of `-v` and `-q`, else $BENCHX_VERBOSE, else 0. UsageError for a bad variable."""
+def _verbosity(args) -> tuple[int, str, int]:
+    """How much the terminal shows, -2 (`-qq`) to 2 (`-vv`), where that came from, and how many `v` there are
+    beyond two: the net count of `-v` and `-q`, else $BENCHX_VERBOSE, else 0. Each one past `-vv` asks the harness
+    to say more (`-vvv` is `-vv` and --harness-verbosity 1). UsageError for a bad variable."""
     if args.verbose is not None or args.quiet is not None:
-        return max(-2, min(2, (args.verbose or 0) - (args.quiet or 0))), "flag"
-    text = os.environ.get(VERBOSE_ENV)
-    if text:
+        net, source = (args.verbose or 0) - (args.quiet or 0), "flag"
+    else:
+        net, source = 0, "default"
+        if text := os.environ.get(VERBOSE_ENV):
+            try:
+                net = int(text)
+            except ValueError:
+                net = None
+            if net is None or net < -2:
+                raise UsageError(f"{VERBOSE_ENV}={text}: not a whole number, -2 or more")
+            source = _source_text("env", VERBOSE_ENV)
+    return max(-2, min(2, net)), source, max(0, net - 2)
+
+
+def _non_negative(text) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number from 0")
+    return value
+
+
+def _harness_verbosity(cfg, args) -> tuple[int, str]:
+    """How much the harness is asked to say, and where that came from: `--harness-verbosity`, else the `v`s past
+    `-vv`, else $BENCHX_HARNESS_VERBOSITY, else `adapter.verbosity` in the file, else 0 (nothing more)."""
+    given = getattr(args, "harness_verbosity", None)  # `bx config show` has no such option
+    extra = getattr(args, "verbose_extra", 0)
+    if given is None and extra:
+        given, label = extra, "flag: -v past -vv"
+    else:
+        label = None
+    value, source = cfg.pick_with_source(given, cfg.adapter.get("verbosity"), 0, flag="--harness-verbosity",
+                                         key="adapter.verbosity", env=HARNESS_VERBOSITY_ENV)
+    if source == "env":
         try:
-            value = int(text)
+            value = int(value)
         except ValueError:
-            value = None
-        if value is None or not -2 <= value <= 2:
-            raise UsageError(f"{VERBOSE_ENV}={text}: not a whole number from -2 to 2")
-        return value, _source_text("env", VERBOSE_ENV)
-    return 0, "default"
+            value = -1
+        if value < 0:
+            raise UsageError(f"{HARNESS_VERBOSITY_ENV}={os.environ[HARNESS_VERBOSITY_ENV]}: not a whole number from 0")
+    return value, label if source == "flag" and label else _source_text(source, HARNESS_VERBOSITY_ENV)
 
 
 def _log_level(cfg, args) -> tuple[int, str]:
@@ -344,6 +378,8 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
                     "flag over file over the harness's defaults"))
     if args.filter:
         sources.append(("filter", args.filter, "flag"))
+    harness_verbosity, verbosity_source = _harness_verbosity(cfg, args)
+    sources.append(("harness verbosity", harness_verbosity, verbosity_source))
     return {
         "adapter": adapter,
         "suite": suite,
@@ -364,6 +400,7 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         "case_s": case_s,
         "order_s": order_s,
         "config_path": cfg.path,
+        "harness_verbosity": harness_verbosity,
         "sources": sources,
     }
 
@@ -470,6 +507,8 @@ def _logging_rows(cfg, args):
     level, level_source = _log_level(cfg, args)
     yield "log level", logging.getLevelName(level).lower(), level_source
     yield "verbosity", str(args.verbosity), args.verbosity_source
+    harness, harness_source = _harness_verbosity(cfg, args)
+    yield "harness verbosity", str(harness), harness_source
 
 
 def _resolved(cfg):
@@ -854,6 +893,10 @@ def _add_target_options(parser, command):
     parser.add_argument("--run-key", help=f"default: {command}-<UTC timestamp>")
     parser.add_argument("--out", help="directory for orders and result files (default: RESULTS/RUN_KEY, "
                                       "RESULTS being paths.results, else ./results in the project root)")
+    parser.add_argument("--harness-verbosity", type=_non_negative, metavar="N",
+                        help="ask the harness to say more (default 0: nothing more). pyperf and asv: 1 or more passes "
+                             "--verbose; Google Benchmark: N is passed as --v=N. Its output is logged in full. "
+                             f"Each -v past -vv does the same (-vvv is 1). ${HARNESS_VERBOSITY_ENV}, adapter.verbosity")
     parser.add_argument("--no-build", action="store_true",
                         help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
     parser.add_argument("--source-uri", help="the source's URI (default: source.uri, else the checkout's origin remote)")
@@ -875,7 +918,8 @@ def _logging_options() -> argparse.ArgumentParser:
     parent.add_argument("--log-level", type=str.lower, choices=list(log.LEVELS), metavar="LEVEL",
                         help=f"what the log keeps: {', '.join(log.LEVELS)} (default debug; ${LOG_LEVEL_ENV})")
     parent.add_argument("-v", "--verbose", action="count", default=None,
-                        help=f"show more on the terminal: -v every INFO record, -vv DEBUG too (${VERBOSE_ENV})")
+                        help=f"show more on the terminal: -v every INFO record, -vv DEBUG too; each -v past -vv also asks the "
+                             f"harness to say more (--harness-verbosity) (${VERBOSE_ENV})")
     parent.add_argument("-q", "--quiet", action="count", default=None,
                         help="show less on the terminal: -q warnings and errors, -qq errors only")
     return parent
@@ -1026,7 +1070,7 @@ def main(argv=None):
         ap.error(f"unrecognized arguments: {' '.join(extra)}")
     args.argv = list(sys.argv[1:] if argv is None else argv)  # the header records the command as given
     try:
-        args.verbosity, args.verbosity_source = _verbosity(args)
+        args.verbosity, args.verbosity_source, args.verbose_extra = _verbosity(args)
     except UsageError as e:
         log.start_console(0)
         say.error(f"bx {args.cmd}: error: {e}")
