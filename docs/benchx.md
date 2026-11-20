@@ -56,7 +56,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json | --tables [--all]]
+           [--run-key KEY] [--out DIR] [--no-build] [--no-ingest] [--k 3] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R

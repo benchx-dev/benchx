@@ -20,20 +20,12 @@ import statistics
 import time
 from pathlib import Path
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ModuleNotFoundError as exc:
-    if exc.name and exc.name.split(".")[0] == "pyarrow":
-        raise ModuleNotFoundError(
-            "Parquet store support requires pyarrow; install it with `pip install 'benchx[parquet]'`.",
-            name="pyarrow",
-        ) from exc
-    raise
-
 from . import core, identity, parquet
 from .projection import Projection
 from .results import ingest_documents, store_project, sweep_paths, warning_codes
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 logger = logging.getLogger(__name__)
 

@@ -448,10 +448,12 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         sources.append(("filter", args.filter, "flag"))
     harness_verbosity, verbosity_source = _harness_verbosity(cfg, args)
     sources.append(("harness verbosity", harness_verbosity, verbosity_source))
+    flags = {name: getattr(args, name) for name in harnesses.FLAG_NAMES}
+    harnesses.get(adapter).flags_to_precision(**flags)
     return {
         "adapter": adapter,
         "suite": suite,
-        "flags": {name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+        "flags": flags,
         "file_precision": block.get("precision"),
         "quantities": quantities,
         "filter": args.filter,
@@ -753,7 +755,7 @@ class UsageError(Exception):
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
 _MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project", "no_project",
-                 "run_key", "out", "source_uri", "no_build")
+                 "run_key", "out", "source_uri", "no_build", "no_ingest")
 _READ_ONLY = ("baseline", "results")
 
 
@@ -856,13 +858,6 @@ def _read(cfg, args, policy, sources):
 
 def _measure(cfg, args, policy, sources):
     """The workbench's session loop: run both sides, deliver, compare."""
-    store = _open_store(
-        cfg.store_path,
-        "compare",
-        hint="run sides with `bx bench --no-ingest` and compare with `bx compare --run ... --results DIR`",
-    )
-    if store is None:
-        return EXIT_REFUSED
     try:  # the check phase: nothing has run, and no folder exists yet
         settings = _common(cfg, args)
         session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
@@ -877,11 +872,22 @@ def _measure(cfg, args, policy, sources):
     except session.SessionError as e:
         say.error(f"cannot compare: {e}")
         return EXIT_REFUSED
+    if args.no_ingest:
+        store = MemoryStore()
+    else:
+        store = _open_store(
+            cfg.store_path,
+            "compare",
+            hint="pass --no-ingest to compare in memory without persisting to the local store",
+        )
+        if store is None:
+            return EXIT_REFUSED
     run_key = args.run_key or orders.default_run_key("compare")
     out = Path(args.out) if args.out else session.run_directory(cfg.results_dir, run_key)
     if (cfg := _start_logging(cfg, args, out, "compare")) is None:
         return EXIT_REFUSED
-    say.info(f"{store.path}")  # stderr, so --json output stays clean; after the checks, so a refusal does not print it
+    if not args.no_ingest:
+        say.info(f"{store.path}")  # stderr, so --json output stays clean; after the checks, so a refusal does not print it
     _log_settings([*sources, *settings.pop("sources"), ("compare.rounds", rounds, rounds_source)])
     settings["run_key"], settings["out"] = run_key, out
     try:
@@ -1157,6 +1163,8 @@ def main(argv=None):
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
                          help="alternation rounds; each runs both sides once (default: compare.rounds)")
+    measure.add_argument("--no-ingest", action="store_true",
+                         help="write result files and compare in memory; skip the local store")
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
@@ -1187,6 +1195,11 @@ def main(argv=None):
     try:
         code = args.fn(args)
         outcome = OUTCOMES.get(code, "crashed")
+        return code
+    except core.catalog.FormatCheckerError as e:
+        say.error(f"bx {args.cmd}: error: {e}")
+        code = EXIT_REFUSED
+        outcome = OUTCOMES[code]
         return code
     except SystemExit as e:  # argparse, or a command that exits: let it through
         code = e.code if isinstance(e.code, int) else 0 if e.code is None else 1

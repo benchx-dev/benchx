@@ -7,12 +7,9 @@ import sys
 
 import pytest
 
-pytest.importorskip("pyarrow")
-
 from benchx import compare, config, core, runner, session, snapshot
 from benchx import target as target_mod
-from benchx.store import Store
-from conftest import SOURCE_URI, cases, make_build, order
+from conftest import SOURCE_URI, cases, make_build, order, requires_pyarrow
 
 PROVIDER = """#!{python}
 import json, sys
@@ -113,7 +110,9 @@ def test_provider_failure_and_missing_provider_are_errors(provider, tmp):
         config.load(tmp).require_provider("@plain")
 
 
+@requires_pyarrow
 def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, provider):
+    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=4,
                                   label=("build", "plain", "hardened"), project="demo", store=store,
@@ -138,7 +137,9 @@ def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, prov
     assert "hardened: activation: source env.sh" in compare.render(doc)
 
 
+@requires_pyarrow
 def test_no_build_asks_the_provider_to_describe(repo, tmp, provider):
+    from benchx.store import Store
     session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
                             label=("build", "plain", "hardened"), store=Store(tmp / "store.parquet"),
                             run_key="t2", out=tmp / "out", build=False, provider=provider_of("."))
@@ -146,7 +147,9 @@ def test_no_build_asks_the_provider_to_describe(repo, tmp, provider):
     assert json.loads(result.read_text())["provenance"]["info"]["target_provider"]["version"] == "describe"
 
 
+@requires_pyarrow
 def test_sidecar_route_needs_no_provider(repo, tmp):
+    from benchx.store import Store
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3), hardened=True)
     write_sidecar(hardened, repo["wt-head"], how_built="by hand")
@@ -157,7 +160,9 @@ def test_sidecar_route_needs_no_provider(repo, tmp):
     assert doc["sides"] == {"baseline": {}, "contender": {"how_built": "by hand"}}
 
 
+@requires_pyarrow
 def test_a_declared_build_is_refused_before_anything_runs(repo, tmp):
+    from benchx.store import Store
     build = make_build(tmp / "b", repo["wt-head"], cases())
     write_sidecar(build, repo["wt-head"], build={"type": "Release"})
     other = make_build(tmp / "o", repo["wt-head"], cases())
@@ -199,7 +204,8 @@ class _Stop(Exception):
 
 
 def _compare(tmp):
-    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, adapter="pyperf", store=Store(tmp / "s.parquet"),
+    from benchx.results import MemoryStore
+    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, adapter="pyperf", store=MemoryStore(),
                                    run_key="u", out=tmp / "out")
 
 

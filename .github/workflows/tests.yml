@@ -72,7 +72,7 @@ jobs:
         run: |
           uv run --extra test --python 3.13 python -c '
           import importlib.util
-          for mod in ("pyarrow", "jsonpointer", "fqdn", "idna", "isoduration", "rfc3987_syntax", "uri_template", "webcolors"):
+          for mod in ("pyarrow", "jsonpointer"):
               assert importlib.util.find_spec(mod) is None, f"unexpected dependency installed: {mod}"
           '
 
@@ -100,10 +100,20 @@ jobs:
         run: |
           uv venv --python 3.13 "$RUNNER_TEMP/venv"
           source "$RUNNER_TEMP/venv/bin/activate"
-          uv pip install "$(ls dist/*.whl)[test]"
+          uv pip install "$(ls dist/*.whl)"
           # Away from the checkout, so that nothing can import it instead of the installed package.
           cd "$RUNNER_TEMP"
+          python -c '
+          import importlib.metadata
+          reqs = importlib.metadata.requires("benchx") or []
+          default_reqs = [r for r in reqs if "extra ==" not in r]
+          parquet_reqs = [r for r in reqs if "extra ==" in r and "parquet" in r]
+          assert any(r.startswith("pyarrow") for r in parquet_reqs), reqs
+          for unwanted in ("pyarrow", "jsonpointer", "format-nongpl", "fqdn", "idna", "isoduration", "rfc3987-syntax", "uri-template", "webcolors"):
+              assert not any(unwanted in r for r in default_reqs), f"unexpected default dep {unwanted!r} in {default_reqs}"
+          '
           bx --help
+          uv pip install "$(ls "$GITHUB_WORKSPACE"/dist/*.whl)[test]"
           python -m pytest --pyargs benchx -ra
           uv pip install "$(ls "$GITHUB_WORKSPACE"/dist/*.whl)[parquet,test]"
           python -m pytest --pyargs benchx -ra
