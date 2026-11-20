@@ -41,7 +41,7 @@ from pathlib import Path
 from .. import snapshot
 from . import benchx_params
 from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
-                   note_case_ended, note_cases, parametrized_workload, run_bounded, stop_group)
+                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +239,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
         raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],
                        [name_only_note(unmatched)] if unmatched else [])
+    note_parameters(logger, runnable)
     return note_cases(logger, cases, case_filter)
 
 

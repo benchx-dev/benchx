@@ -55,7 +55,7 @@ from pathlib import Path
 from .. import log, snapshot
 from . import benchx_params, pyperf
 from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
-                   note_case_ended, note_cases, parametrized_workload, run_bounded, stop_group)
+                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
 
 # asv's skip warnings are shown to the user, as `bx` shows its other messages (plan §4): the one
 # library module that makes console messages, until `list_cases` returns them as data.
@@ -244,6 +244,7 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
                        {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
         say.warning(f"asv: not run (only time benchmarks map to wall-time): {not_run}")
+    note_parameters(logger, runnable)
     return note_cases(logger, cases, case_filter)
 
 

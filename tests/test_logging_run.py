@@ -210,3 +210,24 @@ def test_a_bench_with_a_failed_case_keeps_the_not_measured_section_on_stdout_wit
     assert re.search(r"not measured \(\d+\)", out.out) and "BM_Broken" in out.out
     assert not any(re.match(r"^\d{4}-\d\d-\d\dT", line) for line in out.out.splitlines())  # no log line on stdout
     assert any(re.match(r"^\d{4}-\d\d-\d\dT", line) for line in out.err.splitlines())  # the log is on stderr
+
+
+def test_a_parametrized_case_logs_its_workload_and_parameter_values_before_it_runs(tmp, monkeypatch):
+    pytest.importorskip("pyperf")
+    import subprocess
+    (tmp / "m.py").write_text(
+        "def bench_matmul(n, kind):\n    sum(range(10))\n\n"
+        "bench_matmul.params = [[10, 100], ['a', 'b']]\n"
+        "bench_matmul.param_names = ['n', 'kind']\n")
+    for command in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "m"]):
+        subprocess.run(["git", *command], cwd=tmp, check=True)
+    assert cli.main(["bench", "m.py", "--run-key", "p1", "--no-ingest", "--processes", "2", "--values", "1",
+                     "--warmups", "0", "--loops", "1", "-e", "A=1", "bench_matmul"]) == cli.EXIT_OK
+    lines = lines_of(tmp, "p1")
+    listed = next(l for l in lines if " DEBUG " in l and "bench_matmul: 4 combination(s) of n: 10, 100, kind: 'a', 'b'" in l)
+    first = next(i for i, l in enumerate(lines) if " INFO case 1/4 bench_matmul-0: starting" in l)
+    shown = lines[first + 1]
+    assert " DEBUG case 1/4 bench_matmul-0: workload bench_matmul; parameters n=10, kind='a'; " \
+           "environment variables of the order A=1" in shown
+    assert "n=100, kind='b'" in next(l for l in lines if "case 4/4 bench_matmul-3: workload" in l)
+    assert lines.index(listed) < first  # listed once, before the first case

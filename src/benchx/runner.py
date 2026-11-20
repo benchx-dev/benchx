@@ -160,6 +160,16 @@ def _overlap(base: dict, facts: dict, path="") -> list[str]:
     return found
 
 
+def _parameters_text(declared: dict, from_order: dict) -> str:
+    """A case's workload parameters for the log: the benchmark's own (asv's `repr()` strings), and the
+    order's `-e` variables, which the runner records as workload parameters too. Values as given."""
+    parts = ["parameters " + ", ".join(f"{name}={value}" for name, value in declared.items())
+             if declared else "no parameters of its own"]
+    if from_order:
+        parts.append("environment variables of the order " + ", ".join(f"{n}={v}" for n, v in from_order.items()))
+    return "; ".join(parts)
+
+
 def _path_of(uri) -> str:
     return urllib.parse.unquote(urllib.parse.urlparse(uri).path)
 
@@ -350,6 +360,9 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             label = f"case {index + 1}/{len(cases)} {case}"
             # before the clock starts: nothing is logged while a case runs (plan §7, rule 5)
             logger.info("%s: starting, limit %g s", label, order["timeouts"]["case_s"])
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("%s: workload %s; %s", label, workloads[index][0],
+                             _parameters_text(workloads[index][1], parameters))
             load = snapshot.load_average()
             # The wall clock can step backwards mid-case (NTP, WSL2 resyncs): the duration comes from a monotonic clock.
             started, clock = time.time(), time.monotonic()

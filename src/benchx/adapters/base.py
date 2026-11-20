@@ -70,6 +70,7 @@ Optional hooks (the runner calls them when present)
 import difflib
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -234,6 +235,19 @@ def note_cases(adapter_logger, cases, case_filter, limit=40) -> list:
     adapter_logger.debug("%d case(s)%s: %s%s", len(cases), f" for the filter {case_filter!r}" if case_filter else "",
                          ", ".join(shown), more)
     return cases
+
+
+def note_parameters(adapter_logger, runnable, limit=40) -> None:
+    """The parametrized benchmarks `list_cases` found: each one's parameters with their values (asv's `repr()`
+    strings) and the number of combinations, one case each. At most `limit` benchmarks."""
+    found = [(name, info) for name, info in runnable.get("benchmarks", {}).items() if info.get("param_names")]
+    for name, info in found[:limit]:
+        values = ", ".join(f"{parameter}: {', '.join(shown[:10])}{', …' if len(shown) > 10 else ''}"
+                           for parameter, shown in zip(info["param_names"], info["params"]))
+        adapter_logger.debug("%s: %d combination(s) of %s", name, math.prod(len(shown) for shown in info["params"]),
+                             values)
+    if len(found) > limit:
+        adapter_logger.debug("and %d more parametrized benchmark(s)", len(found) - limit)
 
 
 def note_case(adapter_logger, args, *, cwd, timeout) -> None:
