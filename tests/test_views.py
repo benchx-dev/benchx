@@ -583,3 +583,71 @@ def test_path_traversal_and_orphan_results_in_runs_dir(repo, tmp, capsys):
     by_sha = {c["sha"]: c for c in landing["recent_commits"]}
     assert by_sha[repo["base"]]["commit_order"] > 0
     assert (site_dir / "data" / "views" / "commits" / f"{repo['base']}.json").is_file()
+
+
+def test_validation_errors_do_not_create_out_and_rebuild_prunes_stale_files(tmp, monkeypatch):
+    _block_pyarrow(monkeypatch)
+    res_dir = tmp / "res"
+    res_dir.mkdir()
+
+    # Invalid/missing --project-file fails before creating --out.
+    bad_out = tmp / "bad-proj-out"
+    assert cli.main([
+        "view", "--results", str(res_dir), "--project-file", str(tmp / "missing.json"), "--out", str(bad_out),
+    ]) == cli.EXIT_REFUSED
+    assert not bad_out.exists()
+
+    # --marts without pyarrow fails before creating --out.
+    marts_out = tmp / "marts-out"
+    assert cli.main(["view", "--results", str(res_dir), "--marts", "--out", str(marts_out)]) == cli.EXIT_REFUSED
+    assert not marts_out.exists()
+
+    # Rebuilding with --no-marts prunes stale .parquet marts and stale logs.
+    site_dir = tmp / "rebuild-site"
+    stale_parquet = site_dir / "data" / "points.parquet"
+    stale_log = site_dir / "data" / "logs" / "oldsha" / "n1.txt"
+    stale_parquet.parent.mkdir(parents=True)
+    stale_parquet.write_bytes(b"stale")
+    stale_log.parent.mkdir(parents=True)
+    stale_log.write_text("old log", encoding="utf-8")
+
+    assert cli.main(["view", "--results", str(res_dir), "--no-marts", "--out", str(site_dir)]) == cli.EXIT_OK
+    assert not stale_parquet.exists()
+    assert not stale_log.exists()
+
+
+def test_safe_path_segment_strips_windows_unsafe_and_traversal_chars():
+    assert inputs.safe_path_segment("../../../../escaped") == "________escaped"
+    assert inputs.safe_path_segment("tag:v1*2?3<4>5|6") == "tag_v1_2_3_4_5_6"
+    assert inputs.safe_path_segment(".") == "_"
+    assert inputs.safe_path_segment("") == "_"
+    assert inputs.safe_path_segment("mod.py") == "mod.py"
+
+
+@requires_pyarrow
+def test_runs_dir_collapses_duplicate_attempts_without_self_changes(repo, tmp):
+    from benchx.store import Store
+
+    runs_dir = tmp / "runs"
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    out = run_rounds(
+        tmp,
+        [{"build": base, "source": repo["wt-base"]}],
+        rounds=2,
+        run_key="dup-run",
+        out=tmp / "raw-dup",
+    )
+    store = Store(runs_dir / repo["base"] / "m5" / "results.parquet")
+    store.ingest_paths([out])
+    node = inputs.read_store(store.path)[0][0]["node"]
+    views.write_run(
+        runs_dir / repo["base"] / "m5",
+        {"sha": repo["base"], "parents": [], "committer_date": "2026-01-01T10:00:00+00:00", "subject": "base"},
+        {"state": "finished", "node": node},
+    )
+
+    site_dir = tmp / "site"
+    assert cli.main(["view", "--runs", str(runs_dir), "--out", str(site_dir)]) == cli.EXIT_OK
+    manifest = _load(site_dir / "data" / "manifest.json")
+    assert manifest["counts"]["points"] == 2  # 2 cases collapsed across 2 rounds
+    assert manifest["counts"]["changes"] == 0  # no self-comparison on the same commit
