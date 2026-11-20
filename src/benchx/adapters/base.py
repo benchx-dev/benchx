@@ -175,6 +175,34 @@ def last_json(out: subprocess.CompletedProcess, what: str):
                           "the listing ends with") from None
 
 
+# How long a benchmark's manager gets to tidy up after Ctrl-C before its group is killed. pyperf, given Ctrl-C on its
+# own, had stopped its worker and exited within a second.
+STOP_GRACE_S = 1.0
+
+
+def stop_group(proc, grace=STOP_GRACE_S) -> None:
+    """`bx` was interrupted while `proc`, which leads a process group of its own, ran. The terminal's SIGINT reached
+    `bx` and not that group, so give the group what the terminal would have: SIGINT, so that pyperf's manager prints
+    its "interrupted" message and kills its worker, as it does when it is run alone. Then wait up to `grace` seconds
+    (a second Ctrl-C ends the wait), kill what is left, a process the benchmark started itself included, and reap.
+    The wait on the pipes is bounded: a process that left the group and holds them cannot hold `bx`."""
+    def send(signum):
+        try:
+            os.killpg(proc.pid, signum)
+        except ProcessLookupError:  # already gone
+            pass
+    send(signal.SIGINT)
+    try:
+        proc.communicate(timeout=grace)  # keeps draining the pipes, so a chatty manager can finish
+    except BaseException:  # the grace ran out, or another Ctrl-C: no more waiting
+        pass
+    send(signal.SIGKILL)
+    proc.wait()
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()
+
+
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True, **kwargs)` with a time limit.
 

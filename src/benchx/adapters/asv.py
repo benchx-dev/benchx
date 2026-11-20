@@ -56,7 +56,8 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params, pyperf
-from .base import Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded
+from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
+                   stop_group)
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -385,6 +386,9 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             os.killpg(proc.pid, signal.SIGKILL)
             stdout, stderr = proc.communicate()
             status = None
+        except KeyboardInterrupt:
+            stop_group(proc)  # the group is a session of its own: the terminal's Ctrl-C did not reach it
+            raise
         skip = _read_json(skipped)
         observed = _read_json(facts) or {}
     native = _read_json(native_path)
