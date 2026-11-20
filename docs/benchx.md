@@ -291,6 +291,12 @@ outside the checkout is identified by one file): put it inside the checkout.
   regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
   times it), and `Ratio` is After over Before. A text view: not with `--json`.
 
+**Stopping a run.** Ctrl-C stops the benchmarks `bx` started, within about a second; pyperf gets the Ctrl-C and stops its worker.
+A second Ctrl-C does not wait. Results already stored
+stay, and the case that was running writes nothing. Only Ctrl-C is handled: `SIGTERM`, a closed terminal
+(`SIGHUP`) and `SIGKILL` end `bx` at once, as they end pyperf, and a pyperf worker may then keep running until its
+current process ends.
+
 ## Run it
 
 ```console

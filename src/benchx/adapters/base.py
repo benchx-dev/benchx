@@ -175,6 +175,51 @@ def last_json(out: subprocess.CompletedProcess, what: str):
                           "the listing ends with") from None
 
 
+# How long a benchmark's manager gets to tidy up after Ctrl-C before its group is killed. pyperf, given Ctrl-C on its
+# own, had stopped its worker and exited within a second.
+STOP_GRACE_S = 1.0
+
+
+# After a group is killed, how long to wait for its pipes to reach their end. They do at once, unless something that
+# left the group (a daemon, `setsid`) still holds them: then what has arrived is taken, and the rest is not waited for.
+KILL_DRAIN_S = 0.5
+
+
+def kill_group(proc) -> tuple[str, str]:
+    """`SIGKILL` to the group `proc` leads (what a benchmark started itself included), reap `proc`, and return what
+    its pipes held, stdout and stderr, as text. The wait on the pipes is bounded (`KILL_DRAIN_S`): a plain
+    `communicate()` would wait for a process that left the group and holds them, for as long as it lives."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:  # already gone
+        pass
+    proc.wait()
+    try:
+        return proc.communicate(timeout=KILL_DRAIN_S)
+    except subprocess.TimeoutExpired as holding:
+        for pipe in (proc.stdout, proc.stderr):  # what arrived is in the exception, as bytes
+            if pipe is not None:
+                pipe.close()
+        return tuple(data.decode(errors="backslashreplace") if isinstance(data, bytes) else data or ""
+                     for data in (holding.stdout, holding.stderr))
+
+
+def stop_group(proc, grace=STOP_GRACE_S) -> None:
+    """`bx` was interrupted while `proc`, which leads a process group of its own, ran. The terminal's SIGINT reached
+    `bx` and not that group, so give the group what the terminal would have: SIGINT, so that pyperf's manager prints
+    its "interrupted" message and kills its worker, as it does when it is run alone. Then wait up to `grace` seconds
+    (a second Ctrl-C ends the wait), then `kill_group`."""
+    try:
+        os.killpg(proc.pid, signal.SIGINT)
+    except ProcessLookupError:  # already gone
+        pass
+    try:
+        proc.communicate(timeout=grace)  # keeps draining the pipes, so a chatty manager can finish
+    except BaseException:  # the grace ran out, or another Ctrl-C: no more waiting
+        pass
+    kill_group(proc)
+
+
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True, **kwargs)` with a time limit.
 
@@ -189,11 +234,7 @@ def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as error:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.communicate()
+        kill_group(proc)
         if isinstance(error, subprocess.TimeoutExpired):
             raise Unsupported(f"{what} did not finish within {timeout:g} s (timeouts.order_s)") from None
         raise
