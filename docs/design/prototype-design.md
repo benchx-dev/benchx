@@ -42,7 +42,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity NAMES] [-e NAME=VALUE ...]
          [precision flags, as for bx compare]
          [--project P | --no-project] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
+         [--label NAME=VALUE ... --round R[/N] --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: the module's checkout, pyperf → result files → store → table
@@ -140,7 +140,9 @@ what the user needs to see: progress, refusals, rejections. Both stay as they we
 `benchx.<module>`, the package installs only a `NullHandler`, and `cli.main` installs the
 handlers. What `bx` shows on stderr is emitted once, as a record marked `console=True`, and the
 console handler writes the bare message, so the default terminal output is byte for byte what
-`print` wrote; `-v` and `-vv` also show the records that are not marked. The file handler appends
+`print` wrote; `-v` and `-vv` also show the records that are not marked. What a run reports on
+stdout when it ends (`bx bench`'s table and counts) is such a record too, marked `stdout=True`: the
+stdout handler writes it unless `-q` or `-qq` hides it, and the log keeps it. The file handler appends
 every record at `--log-level` (DEBUG by default) in one line, `UTC-timestamp pid logger LEVEL
 message`, with a header and a footer for each invocation (`logging_plan.md` §3, §4). The default
 file is `bx.log` in the run's output folder, which the CLI now settles, with the run key, before

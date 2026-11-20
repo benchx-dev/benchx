@@ -40,7 +40,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
          [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
+         [--label NAME=VALUE ... --round R[/N] --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
@@ -112,7 +112,18 @@ flag or value leaves no folder; a run refused later, by the session, leaves `RUN
 holding only `bx.log`, which says why. What
 `bx` prints to the terminal does not change: the log is the full record, and `-v` shows its
 INFO records on the terminal (`-vv` DEBUG too), `-q` only warnings and errors, `-qq` only
-errors (`$BENCHX_VERBOSE` sets it: -2 or more). Each `-v` past `-vv` also asks the harness itself to say more, as `--harness-verbosity N` does: `-vvv` is `-vv` and 1, `-vvvv` is `-vv` and 2. pyperf and asv are then given `--verbose`, and Google Benchmark `--v=N`; the output is logged in full (up to 2000 lines a stream, 40 otherwise). The default, 0, asks for nothing more. The harness prints between values, outside the timed call, but it is output on the machine between samples, so the order records it (`harness_verbosity`, not part of the measurement's identity) and so does each result's `provenance.info`. `$BENCHX_HARNESS_VERBOSITY` and `adapter.verbosity` in the config file set it too, below the flag. The log's own level is `--log-level`
+errors (`$BENCHX_VERBOSE` sets it: -2 or more). A `bx bench` call starts with a line saying what
+it measures and where it sits (`measuring np_mean.py on @numpy (round 1/5, slot 3)`), and `bx run`
+with one naming the order; `-q` keeps it, `-qq` does not. What `bx bench` and `bx run` report on
+stdout when they finish, the table of results, the cases that were not measured and the result
+line, is in the log as well, a line a record, and `-q` and `-qq` hide it by tiers: `-q` leaves
+the not-measured section and the result line (`N result(s) -> DIR`), `-qq` only the
+not-measured section (a failed case does not change the exit status, so it must not vanish). A
+run that measured everything is silent at `-qq`. The ingest counts that follow a run
+(`STORE: ingested 12, duplicate 0`) are a progress message on stderr, like `precision:`: shown
+by default and with `-v`, not with `-q`. `bx ingest`, `bx compare`, the queries and everything
+`--json` prints are answers, shown at every level. A target provider's own stderr, such as a build's output, is the provider's: `-qq`
+does not silence it. Each `-v` past `-vv` also asks the harness itself to say more, as `--harness-verbosity N` does: `-vvv` is `-vv` and 1, `-vvvv` is `-vv` and 2. pyperf and asv are then given `--verbose`, and Google Benchmark `--v=N`; the output is logged in full (up to 2000 lines a stream, 40 otherwise). The default, 0, asks for nothing more. The harness prints between values, outside the timed call, but it is output on the machine between samples, so the order records it (`harness_verbosity`, not part of the measurement's identity) and so does each result's `provenance.info`. `$BENCHX_HARNESS_VERBOSITY` and `adapter.verbosity` in the config file set it too, below the flag. The log's own level is `--log-level`
 (`debug`, the default, `info`, `warning`, `error`; `$BENCHX_LOG_LEVEL`, or `log_level` in the
 file). `--no-log` turns it off, `--log` sends it to stderr instead, `--log-file PATH` appends it
 to a file (`{out}` is the run's output folder, `{root}` the project root); the file's key
@@ -174,8 +185,8 @@ order, so `bx run results/KEY/orders/order.json` replays any bench run.
 is a runnable walk-through.
 
 Environments that cannot share a process, such as two venvs with different numpy versions, are
-measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
-and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
+measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round R[/N]`
+and `--slot K` place each call in the session (`--round 2/5` also says the session has 5 rounds, numbered 0 to 4, which the start line shows), and `bx compare --run KEY --profile environments
 --label NAME --baseline VALUE` compares the sides ([UC-04](https://benchx-dev.github.io/benchx/use-cases/UC-04-cross-env/)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
