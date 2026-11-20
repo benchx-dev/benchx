@@ -104,7 +104,19 @@ function shortSuite(s) {
   if (prefix && out.startsWith(prefix)) out = out.slice(prefix.length);
   return out;
 }
-function safeFile(s) { return String(s).replace(/\//g, "_"); }
+function safeFile(s) {
+  const cleaned = String(s).replace(/[/\\\x00:*?"<>|]+/g, "_").replace(/\.\.+/g, "_");
+  return cleaned && cleaned !== "." ? cleaned : "_";
+}
+function shortSha(sha, len = 12) {
+  if (!sha) return "";
+  if (sha.includes("-dirty-")) {
+    const [base, tree] = sha.split("-dirty-", 2);
+    return `${base.slice(0, 7)}+dirty-${tree.slice(0, 4)}`;
+  }
+  return sha.slice(0, len);
+}
+function isFailed(status) { return Boolean(status && !["success", "partial", "skipped"].includes(status)); }
 function upstreamCommit(sha) {
   if (!sha || sha.includes("-dirty-")) return null;
   const tpl = state.project?.upstream?.commit_url;
@@ -116,7 +128,7 @@ function runFiles(sha, node) {
   return repo ? `${repo}/tree/main/runs/${sha}/${node}` : null;
 }
 function runLog(sha, node, hasLog = true) {
-  return hasLog === false ? null : `data/logs/${encodeURIComponent(safeFile(sha))}/${encodeURIComponent(node)}.txt`;
+  return hasLog === false ? null : `data/logs/${encodeURIComponent(safeFile(sha))}/${encodeURIComponent(safeFile(node))}.txt`;
 }
 function multiNode() { return (state.landing?.stats.nodes || []).length > 1; }
 
@@ -181,7 +193,7 @@ function chip(label, value, tone) {
 function failTag(reason, text = "failed") { return h("span", { class: "tag failed", title: reason || "" }, text); }
 function gapTag(ch) {
   if (ch.prev_is_parent) return null;
-  const title = `The baseline ${ch.prev_sha.slice(0, 12)} is not this commit's parent: the commits in between were not measured for this series, so this change may belong to any of them.`;
+  const title = `The baseline ${shortSha(ch.prev_sha)} is not this commit's parent: the commits in between were not measured for this series, so this change may belong to any of them.`;
   return h("span", { class: "tag gap", title }, "not parent");
 }
 function stateTag(c) {
@@ -207,7 +219,7 @@ function groupSeries(list, extra = () => ({})) {
 
 function benchCard(g, { showSuite = true } = {}) {
   const n = g.newest;
-  const failed = g.status && g.status !== "success";
+  const failed = isFailed(g.status);
   const plot = h("div", { class: "spark" });
   const sub = [g.quantity !== "wall-time" ? g.quantity : null, showSuite ? shortSuite(g.suite) : null, n && multiNode() ? n.node : null].filter(Boolean).join(" · ");
   const points = n?.points ?? 0;
@@ -218,7 +230,9 @@ function benchCard(g, { showSuite = true } = {}) {
     h("div", { class: "mini-value" }, h("span", { class: "num" }, n ? fmtValue(n.estimate ?? n.latest, g.unit) : "–"), sub && h("span", { class: "note" }, sub)),
     plot,
     h("div", { class: "mini-foot" },
-      failed ? failTag(g.reason, "failed last run") : h("span", {}, points === 1 ? "1 measurement" : `${points} measurements`),
+      failed ? failTag(g.reason, "failed last run")
+        : g.status === "skipped" ? h("span", { class: "tag", title: g.reason || "" }, "skipped")
+        : h("span", {}, points === 1 ? "1 measurement" : `${points} measurements`),
       h("span", {}, n?.noise != null ? `noise ${fmtAbsPct(n.noise)}` : points ? "noise: needs 3+" : "")));
   return [card, plot];
 }
@@ -523,15 +537,15 @@ async function renderBench(suite, kase, query) {
       variants.length > 1 ? select("variant", "params", variants, params, (v) => v || "(default)") : null,
       quantities.length > 1 ? select("quantity", "q", quantities, quantity) : null,
       nodes.length > 1 ? select("node", "node", ["all", ...nodes], nodeFilter) : null),
-    failing.map((f) => h("div", { class: "banner bad" }, `The latest attempt on ${f.node} (commit `, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, f.attempt_sha.slice(0, 12)), ") failed: ",
+    failing.map((f) => h("div", { class: "banner bad" }, `The latest attempt on ${f.node} (commit `, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, shortSha(f.attempt_sha)), ") failed: ",
       h("code", {}, f.reason || f.status), f.points ? ". The values below are from the last successful measurement." : ". It has never succeeded.")),
     kpi ? h("div", { class: "tiles" },
-      tile(`latest · ${kpi.node}`, fmtValue(kpi.estimate, unit), h("span", {}, "commit ", h("a", { href: `#/c/${encodeURIComponent(kpi.sha)}`, class: "mono" }, kpi.sha.slice(0, 12)))),
+      tile(`latest · ${kpi.node}`, fmtValue(kpi.estimate, unit), h("span", {}, "commit ", h("a", { href: `#/c/${encodeURIComponent(kpi.sha)}`, class: "mono" }, shortSha(kpi.sha)))),
       tile("vs previous measurement", delta(kpi.vs_prev, direction, { ...opts, noise: kpi.noise })),
       tile("vs 10 measurements back", delta(kpi.vs_10, direction, opts), kpi.points <= 10 ? `needs 11+, has ${kpi.points}` : null),
       tile("vs 100 measurements back", delta(kpi.vs_100, direction, opts), kpi.points <= 100 ? `needs 101+, has ${kpi.points}` : null),
       tile("noise", few ? "–" : fmtAbsPct(kpi.noise), few ? "needs 3+ measurements" : kpi.noise_rank != null ? `quieter than ${Math.round((1 - kpi.noise_rank) * 100)}% of the suite` : null),
-      tile("measured commits", kpi.points, reps != null ? `${reps} repetition${reps === 1 ? "" : "s"} each, median shown` : null)) : failing.length ? null : h("p", { class: "empty" }, "no successful measurement yet"),
+      tile("measured commits", kpi.points, reps == null ? null : reps === 0 ? "producer summary" : `${reps} repetition${reps === 1 ? "" : "s"} each, median shown`)) : failing.length ? null : h("p", { class: "empty" }, "no successful measurement yet"),
     few ? h("p", { class: "note" }, `With ${kpi.points} measurement${kpi.points > 1 ? "s" : ""} there is no noise estimate yet, so a change here cannot be told apart from run-to-run variation.`) : null,
     h("h3", {}, "History"),
     h("p", { class: "note" }, "One point per measured commit, in commit order. Hover for details, click a point to open its commit, drag to zoom, double-click to reset. Failed attempts are marked under the axis."));
@@ -541,7 +555,7 @@ async function renderBench(suite, kase, query) {
   main.append(h("h3", {}, "Biggest moves in this series"),
     table(["commit", "subject", "node", "baseline", ">from", ">to", ">change"], moves.slice(0, 12).map((m) => [
       h("a", { href: `#/c/${encodeURIComponent(m.sha)}`, class: "mono" }, m.short), m.subject.length > 70 ? m.subject.slice(0, 68) + "…" : m.subject, m.node,
-      h("span", {}, h("a", { href: `#/c/${encodeURIComponent(m.baseSha)}`, class: "mono" }, m.baseSha.slice(0, 7)),
+      h("span", {}, h("a", { href: `#/c/${encodeURIComponent(m.baseSha)}`, class: "mono" }, shortSha(m.baseSha, 7)),
         m.skipped > 0 ? h("span", { class: "tag gap", title: `${m.skipped} measured commit${m.skipped > 1 ? "s" : ""} in between had no successful result for this series, so this change spans ${m.skipped > 1 ? "them" : "it"}` }, `spans ${m.skipped + 1}`) : null),
       fmtValue(m.from, unit), fmtValue(m.to, unit), delta(m.rel, direction, { ...opts, noise: kpi?.noise })]), { empty: "needs two successful measurements" }),
     footer());
@@ -639,7 +653,7 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
             h("span", { class: "s num" }, rel == null ? "" : fmtPct(rel)), seriesList.length > 1 ? h("span", { class: "s" }, s.node) : null,
             spread[k][i] ? h("span", { class: "s spread" }, spread[k][i].n > 1
               ? `median of ${spread[k][i].n}, range ${fmtNum(spread[k][i].min / scale[1])}–${fmtNum(spread[k][i].max / scale[1])}`
-              : "1 repetition: no spread") : null);
+              : spread[k][i].n === 1 ? "1 repetition: no spread" : "summary only: no spread") : null);
         });
         tip.replaceChildren(h("div", { class: "when" }, `${c.short} · ${fmtDate(c.date)}`), ...rows, h("div", { class: "subj" }, c.subject));
         tip.style.display = "block";
@@ -675,7 +689,7 @@ async function renderCommit(sha) {
       && (!needle || `${ch.suite} ${ch.case} ${ch.params} ${ch.node}`.toLowerCase().includes(needle)));
     body.replaceChildren(table(["benchmark", "suite", "node", ">baseline", ">before", ">after", ">change", ">noise"], rows.map((ch) => [
       h("a", { href: benchHref(ch, { node: ch.node }) }, caseLabel(ch)), shortSuite(ch.suite), ch.node,
-      h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, ch.prev_sha.slice(0, 7))),
+      h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, shortSha(ch.prev_sha, 7))),
       fmtValue(ch.prev_estimate, ch.unit), fmtValue(ch.estimate, ch.unit),
       delta(ch.rel_change, ch.direction, { noise: ch.noise, unit: ch.unit }), fmtAbsPct(ch.noise)]), { empty: "no changes match" }),
       h("p", { class: "note" }, `${rows.length} of ${c.changes.length} compared series`));
@@ -686,7 +700,7 @@ async function renderCommit(sha) {
   const leadParts = joinParts([
     c.committer_date ? fmtDate(c.committer_date) : null,
     upUrl ? h("a", { href: upUrl, target: "_blank", rel: "noopener" }, "upstream commit") : null,
-    c.parent ? h("span", {}, "parent ", h("a", { href: `#/c/${encodeURIComponent(c.parent)}`, class: "mono" }, c.parent.slice(0, 12))) : null,
+    c.parent ? h("span", {}, "parent ", h("a", { href: `#/c/${encodeURIComponent(c.parent)}`, class: "mono" }, shortSha(c.parent))) : null,
   ]);
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / commit"),

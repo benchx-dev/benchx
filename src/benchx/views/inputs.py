@@ -27,7 +27,7 @@ from ..results import MemoryStore
 UTC = dt.timezone.utc
 _HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
-_PATH_UNSAFE_RE = re.compile(r"[/\\\x00]+")
+_PATH_UNSAFE_RE = re.compile(r'[/\\\x00:*?"<>|]+')
 _DOTS_RUN_RE = re.compile(r"\.\.+")
 
 
@@ -379,16 +379,6 @@ def _collapse_duplicate_points(points: list[dict]) -> list[dict]:
     return out
 
 
-def _strip_internal(points: list[dict]) -> list[dict]:
-    out = []
-    for pt in points:
-        clean = dict(pt)
-        clean.pop("_vals", None)
-        clean.pop("_dirty_parent", None)
-        out.append(clean)
-    return out
-
-
 def _git_commit_info(shas: list[str], repo: Path) -> dict[str, dict]:
     """Batch-read commit parents, timestamps, and subject from a local git repo."""
     candidates = sorted({s for s in shas if _HEX_RE.match(s)})
@@ -552,12 +542,16 @@ def read_runs_dir(runs_dir: str | Path) -> tuple[list[dict], list[dict], int]:
     _require_pyarrow("reading runs/ Parquet files")
     if not runs_path.is_dir():
         raise ViewError(f"runs directory not found: {runs_path}")
-    runs = read_runs_metadata(runs_path)
+    raw_runs = read_runs_metadata(runs_path)
+    dedup_runs: dict[tuple[str, str], dict] = {}
+    for run in raw_runs:
+        dedup_runs[(run["sha"], run["node"])] = run
+    runs = list(dedup_runs.values())
     ingest_problems = sum(r["ingest_problems"] for r in runs)
     raw_points: list[dict] = []
     for path in sorted(runs_path.glob("*/*/results.parquet")):
         raw_points.extend(_read_parquet_points(path, distinguish_dirty=False))
-    return runs, _strip_internal(raw_points), ingest_problems
+    return runs, _collapse_duplicate_points(raw_points), ingest_problems
 
 
 def read_store(store_path: str | Path, *, repo: Path | None = None) -> tuple[list[dict], list[dict], int]:

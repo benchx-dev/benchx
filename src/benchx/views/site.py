@@ -90,6 +90,8 @@ def _write_static(out: Path, stamp: str) -> None:
 
 def _write_logs(runs: list[dict], data_dir: Path) -> int:
     logs_root = (Path(data_dir) / "logs").resolve()
+    if logs_root.is_dir():
+        shutil.rmtree(logs_root)
     written = 0
     for run in runs:
         log = run.get("log") or ""
@@ -124,6 +126,15 @@ def build_site(
     if chosen != 1:
         raise inputs.ViewError("give exactly one of store_path, results_paths, or runs_dir")
 
+    # Validate project metadata and optional PyArrow requirements before touching `out`.
+    project = resolve_project(project_file=project_file, title=title, config=config)
+    if write_marts is None:
+        emit_marts = _has_pyarrow()
+    else:
+        emit_marts = bool(write_marts)
+    if emit_marts:
+        inputs._require_pyarrow("writing Parquet marts")
+
     outcome = None
     if runs_dir is not None:
         source = "runs"
@@ -136,11 +147,6 @@ def build_site(
     else:
         source = "store"
         runs, raw_points, ingest_problems = inputs.read_store(store_path, repo=repo)
-
-    if write_marts is None:
-        emit_marts = _has_pyarrow()
-    else:
-        emit_marts = bool(write_marts)
 
     marts = marts_mod.build_marts(
         runs,
@@ -156,9 +162,13 @@ def build_site(
 
     if emit_marts:
         marts_mod.write_parquet_marts(marts, data_dir)
+    else:
+        for name in ("commits", "points", "changes", "latest", "movers"):
+            stale = data_dir / f"{name}.parquet"
+            if stale.exists():
+                stale.unlink()
 
     logs_written = _write_logs(runs, data_dir)
-    project = resolve_project(project_file=project_file, title=title, config=config)
     (data_dir / "project.json").write_text(json.dumps(project, indent=1) + "\n", encoding="utf-8")
     (data_dir / "manifest.json").write_text(json.dumps(marts["manifest"], indent=1) + "\n", encoding="utf-8")
     view_counts = payloads.build_views(marts, data_dir)
