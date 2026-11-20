@@ -18,9 +18,13 @@ from conftest import NOISY, QUIET, cases, git, make_build, order, requires_pyarr
 
 def _block_pyarrow(monkeypatch):
     """Simulate an environment without pyarrow, even when pyarrow is installed."""
+    import benchx
+
     for name in list(sys.modules):
         if name == "pyarrow" or name.startswith("pyarrow.") or name in ("benchx.store", "benchx.parquet"):
             monkeypatch.delitem(sys.modules, name, raising=False)
+    for attr in ("store", "parquet"):
+        monkeypatch.delattr(benchx, attr, raising=False)
     monkeypatch.setitem(sys.modules, "pyarrow", None)
     monkeypatch.setitem(sys.modules, "pyarrow.parquet", None)
 
