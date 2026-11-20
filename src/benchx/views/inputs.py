@@ -15,21 +15,49 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-import statistics
 import subprocess
 from collections import defaultdict
 from pathlib import Path
 
 import rfc8785
 
+from .. import identity, projection
 from ..results import MemoryStore
 
 UTC = dt.timezone.utc
 _HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+_PATH_UNSAFE_RE = re.compile(r"[/\\\x00]+")
+_DOTS_RUN_RE = re.compile(r"\.\.+")
 
 
 class ViewError(Exception):
     """The view inputs could not be read or built."""
+
+
+def check_local_path(value: str | Path) -> Path:
+    """Reject remote URIs (such as s3:// or https://) before turning them into Paths."""
+    text = str(value)
+    if _URI_SCHEME_RE.match(text):
+        raise ViewError(
+            f"remote URI {text!r} is not supported directly; "
+            "sync the files locally first (for example with `aws s3 sync`)"
+        )
+    return Path(value)
+
+
+def safe_path_segment(value: str) -> str:
+    """Flatten path separators and traversal dots so generated filenames stay inside out/."""
+    cleaned = _DOTS_RUN_RE.sub("_", _PATH_UNSAFE_RE.sub("_", str(value)))
+    return "_" if cleaned in ("", ".") else cleaned
+
+
+def short_sha(sha: str) -> str:
+    """Short display label for a commit SHA, preserving a visible marker for dirty trees."""
+    if "-dirty-" in sha:
+        base, tree = sha.split("-dirty-", 1)
+        return f"{base[:7]}+dirty-{tree[:4]}"
+    return sha[:12]
 
 
 def _require_pyarrow(feature: str = "Parquet view support"):
@@ -173,13 +201,6 @@ def _extract_suite(work_order: dict, doc_or_row: dict) -> str:
     info = _parse_json_obj(provenance.get("info"))
     if info.get("suite"):
         return str(info["suite"]).rsplit("/", 1)[-1]
-    benchmark = doc_or_row.get("benchmark") or {}
-    if isinstance(benchmark, dict) and benchmark.get("suite"):
-        return str(benchmark["suite"]).rsplit("/", 1)[-1]
-    measurement = doc_or_row.get("measurement") or {}
-    harness = measurement.get("harness") or {}
-    if isinstance(harness, dict) and harness.get("name"):
-        return str(harness["name"])
     return "default"
 
 
@@ -192,7 +213,8 @@ def _extract_node(run_key: str, env_identity: dict) -> str:
     return str(runner) if runner else "local"
 
 
-def _extract_values(measurement: dict) -> list[float]:
+def _extract_estimate(measurement: dict) -> tuple[list[float], float | None, float | None, float | None, float | None]:
+    """Extract observation values and (estimate, mean, min, max) following identity.points()."""
     obs = measurement.get("observations") or []
     vals: list[float] = []
     for item in obs:
@@ -205,14 +227,35 @@ def _extract_values(measurement: dict) -> list[float]:
         if v is not None:
             vals.append(float(v))
     if vals:
-        return vals
+        est = projection.estimate(identity.MEDIAN, vals)
+        return vals, float(est) if est is not None else None, sum(vals) / len(vals), min(vals), max(vals)
+
+    # Producer-supplied summaries (schema §4.5): {"type": "estimate", "estimator": {"name": ...}, "value": ...}.
     summaries = measurement.get("summaries") or []
+    estimates: dict[str, float] = {}
+    first_estimate: float | None = None
+    stats: dict[str, float] = {}
     if isinstance(summaries, list):
-        for preferred in ("median", "mean"):
-            for s in summaries:
-                if isinstance(s, dict) and s.get("kind") == preferred and s.get("value") is not None:
-                    return [float(s["value"])]
-    return []
+        for s in summaries:
+            if not isinstance(s, dict) or s.get("value") is None:
+                continue
+            val = float(s["value"])
+            if s.get("type") == "estimate":
+                if first_estimate is None:
+                    first_estimate = val
+                name = (s.get("estimator") or {}).get("name")
+                if name and name not in estimates:
+                    estimates[str(name)] = val
+            elif s.get("type") == "statistic" and s.get("name"):
+                stats.setdefault(str(s["name"]), val)
+
+    est = estimates.get("median", estimates.get("mean", first_estimate))
+    if est is None:
+        return [], None, None, None, None
+    mean = estimates.get("mean", stats.get("mean", est))
+    lo = stats.get("min", est)
+    hi = stats.get("max", est)
+    return [], est, mean, lo, hi
 
 
 def _point_from_row(row: dict, *, distinguish_dirty: bool) -> dict | None:
@@ -241,16 +284,9 @@ def _point_from_row(row: dict, *, distinguish_dirty: bool) -> dict | None:
     work_order = _parse_json_obj(row.get("work_order"))
 
     quantity = measurement.get("quantity") or {}
-    vals = _extract_values(measurement)
-    if vals:
-        estimate = float(statistics.median(vals))
-        mean = sum(vals) / len(vals)
-        lo = min(vals)
-        hi = max(vals)
-    else:
-        estimate = mean = lo = hi = None
+    vals, estimate, mean, lo, hi = _extract_estimate(measurement)
 
-    point = {
+    return {
         "sha": sha,
         "node": _extract_node(run_key, env_identity),
         "suite": _extract_suite(work_order, row),
@@ -272,7 +308,6 @@ def _point_from_row(row: dict, *, distinguish_dirty: bool) -> dict | None:
         "_vals": vals,
         "_dirty_parent": dirty_parent,
     }
-    return point
 
 
 _PARQUET_POINT_COLUMNS = [
@@ -323,18 +358,19 @@ def _collapse_duplicate_points(points: list[dict]) -> list[dict]:
             continue
 
         group.sort(key=lambda p: (p["started_at"] or dt.datetime.min.replace(tzinfo=UTC), p["ingest_key"]))
-        succeeded = [p for p in group if p["status"] == "success" and p["estimate"] is not None]
-        if succeeded:
+        measured = [p for p in group if p["status"] in ("success", "partial") and p["estimate"] is not None]
+        if measured:
             vals: list[float] = []
-            for p in succeeded:
+            for p in measured:
                 vals.extend(p.get("_vals") or ([p["estimate"]] if p["estimate"] is not None else []))
-            latest = succeeded[-1]
+            latest = measured[-1]
             merged = dict(latest)
-            merged["estimate"] = float(statistics.median(vals))
+            est = projection.estimate(identity.MEDIAN, vals)
+            merged["estimate"] = float(est) if est is not None else None
             merged["mean"] = sum(vals) / len(vals)
             merged["min"] = min(vals)
             merged["max"] = max(vals)
-            merged["n"] = len(vals)
+            merged["n"] = sum(p["n"] for p in measured)
         else:
             merged = dict(group[-1])
         merged.pop("_vals", None)
@@ -390,9 +426,7 @@ def _git_commit_info(shas: list[str], repo: Path) -> dict[str, dict]:
         pos += obj_len + 1  # trailing newline after object body
         if obj_type != "commit":
             continue
-        parsed = _parse_git_commit(body.decode("utf-8", errors="replace"))
-        info[obj_sha] = parsed
-    # Match abbreviated candidates back to the requested key if needed.
+        info[obj_sha] = _parse_git_commit(body.decode("utf-8", errors="replace"))
     by_requested: dict[str, dict] = {}
     for sha in candidates:
         if sha in info:
@@ -449,7 +483,12 @@ def _find_git_repo(start: Path | None) -> Path | None:
     return None
 
 
-def _synthesize_runs(raw_points: list[dict], *, repo: Path | None = None) -> list[dict]:
+def synthesize_runs(
+    raw_points: list[dict],
+    *,
+    repo: Path | None = None,
+    default_state: str = "finished",
+) -> list[dict]:
     """Synthesize per-(sha, node) run rows when no `run.parquet` files exist."""
     by_pair: dict[tuple[str, str], list[dict]] = defaultdict(list)
     dirty_parents: dict[str, str] = {}
@@ -469,7 +508,7 @@ def _synthesize_runs(raw_points: list[dict], *, repo: Path | None = None) -> lis
 
         suite_ok: dict[str, bool] = {}
         for p in pts:
-            suite_ok[p["suite"]] = suite_ok.get(p["suite"], False) or (p["status"] == "success")
+            suite_ok[p["suite"]] = suite_ok.get(p["suite"], False) or (p["status"] in ("success", "partial"))
         suites_ok = sum(1 for ok in suite_ok.values() if ok)
         suites_failed = sum(1 for ok in suite_ok.values() if not ok)
 
@@ -494,7 +533,7 @@ def _synthesize_runs(raw_points: list[dict], *, repo: Path | None = None) -> lis
             "subject": subject,
             "branch": "",
             "node": node,
-            "state": "finished",
+            "state": default_state,
             "reason": None,
             "started_at": started_at,
             "finished_at": finished_at,
@@ -507,31 +546,29 @@ def _synthesize_runs(raw_points: list[dict], *, repo: Path | None = None) -> lis
     return runs
 
 
-def read_runs_dir(runs_dir: Path) -> tuple[list[dict], list[dict], int]:
+def read_runs_dir(runs_dir: str | Path) -> tuple[list[dict], list[dict], int]:
     """Read a CI/node `runs/<sha>/<node>/{run.parquet, results.parquet}` tree."""
+    runs_path = check_local_path(runs_dir)
     _require_pyarrow("reading runs/ Parquet files")
-    runs_dir = Path(runs_dir)
-    if not runs_dir.is_dir():
-        raise ViewError(f"runs directory not found: {runs_dir}")
-    runs = read_runs_metadata(runs_dir)
+    if not runs_path.is_dir():
+        raise ViewError(f"runs directory not found: {runs_path}")
+    runs = read_runs_metadata(runs_path)
     ingest_problems = sum(r["ingest_problems"] for r in runs)
     raw_points: list[dict] = []
-    for path in sorted(runs_dir.glob("*/*/results.parquet")):
+    for path in sorted(runs_path.glob("*/*/results.parquet")):
         raw_points.extend(_read_parquet_points(path, distinguish_dirty=False))
     return runs, _strip_internal(raw_points), ingest_problems
 
 
-def read_store(store_path: Path, *, repo: Path | None = None) -> tuple[list[dict], list[dict], int]:
+def read_store(store_path: str | Path, *, repo: Path | None = None) -> tuple[list[dict], list[dict], int]:
     """Read a single local benchx Parquet store (`store.parquet`)."""
+    path = check_local_path(store_path)
     _require_pyarrow("reading a Parquet store")
-    store_path = Path(store_path)
-    if not store_path.is_file():
-        raise ViewError(f"store not found: {store_path}")
-    raw_points = _read_parquet_points(store_path, distinguish_dirty=True)
+    if not path.is_file():
+        raise ViewError(f"store not found: {path}")
+    raw_points = _read_parquet_points(path, distinguish_dirty=True)
     collapsed = _collapse_duplicate_points(raw_points)
-    # Preserve dirty parent links for commit synthesis using raw_points before stripping.
-    runs = _synthesize_runs(raw_points, repo=repo)
-    # Update result counts on synthesized runs to match collapsed points.
+    runs = synthesize_runs(raw_points, repo=repo)
     counts_by_pair: dict[tuple[str, str], int] = defaultdict(int)
     for pt in collapsed:
         counts_by_pair[(pt["sha"], pt["node"])] += 1
@@ -540,10 +577,11 @@ def read_store(store_path: Path, *, repo: Path | None = None) -> tuple[list[dict
     return runs, collapsed, 0
 
 
-def read_results(paths: list[Path], *, repo: Path | None = None) -> tuple[list[dict], list[dict], int, dict]:
+def read_results(paths: list[str | Path], *, repo: Path | None = None) -> tuple[list[dict], list[dict], int, dict]:
     """Read JSON result files and work orders via MemoryStore without PyArrow."""
+    local_paths = [check_local_path(p) for p in paths]
     store = MemoryStore()
-    outcome = store.ingest_paths(paths)
+    outcome = store.ingest_paths(local_paths)
     raw_points: list[dict] = []
     for doc in store._documents:
         ref = (doc.get("provenance") or {}).get("info", {}).get("workorder_ref")
@@ -553,7 +591,7 @@ def read_results(paths: list[Path], *, repo: Path | None = None) -> tuple[list[d
         if pt is not None:
             raw_points.append(pt)
     collapsed = _collapse_duplicate_points(raw_points)
-    runs = _synthesize_runs(raw_points, repo=repo)
+    runs = synthesize_runs(raw_points, repo=repo)
     counts_by_pair: dict[tuple[str, str], int] = defaultdict(int)
     for pt in collapsed:
         counts_by_pair[(pt["sha"], pt["node"])] += 1

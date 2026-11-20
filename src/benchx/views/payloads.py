@@ -19,7 +19,8 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from .inputs import UTC
+from .inputs import UTC, ViewError, safe_path_segment, short_sha
+from .marts import is_failed_status, is_measured
 
 NOTABLE = 0.05
 RECENT_COMMITS = 30
@@ -34,6 +35,14 @@ def _iso(value) -> str | None:
     if isinstance(value, dt.datetime):
         return value.astimezone(UTC).isoformat() if value.tzinfo else value.replace(tzinfo=UTC).isoformat()
     return str(value)
+
+
+def _safe_child(parent: Path, stem: str, suffix: str = ".json") -> Path:
+    base = parent.resolve()
+    target = (base / f"{safe_path_segment(stem)}{suffix}").resolve()
+    if not target.is_relative_to(base):
+        raise ViewError(f"refusing to write outside {base}: {stem!r}")
+    return target
 
 
 def _dump(doc, path: Path) -> None:
@@ -51,10 +60,6 @@ def signed(direction: str, rel_change) -> str | None:
 
 def series_key(r: dict) -> tuple:
     return (r["suite"], r["case"], r["params"], r["quantity"], r["node"])
-
-
-def _safe_filename(name: str) -> str:
-    return name.replace("/", "_")
 
 
 def newest_commits(commits: list[dict]) -> dict[str, dict]:
@@ -128,7 +133,7 @@ def _write_commit_pages(
                 "failures": failures_by_sha.get(sha, []),
                 "changes": changes_by_sha.get(sha, []),
             },
-            commits_dir / f"{_safe_filename(sha)}.json",
+            _safe_child(commits_dir, sha),
         )
     return len(by_sha)
 
@@ -195,7 +200,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
                 elif kind == "improved":
                     entry["improved"] += 1
         for pt in points:
-            if pt["status"] != "success":
+            if is_failed_status(pt["status"]):
                 failed_results[(pt["sha"], pt["node"])] += 1
 
     commits = [
@@ -211,7 +216,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
 
     counts: dict[str, int] = {}
 
-    # Latest attempt of every series (successful or not).
+    # Latest attempt of every series (measured, skipped, or failed).
     attempts: dict[tuple, dict] = {}
     for pt in points:
         key = series_key(pt)
@@ -309,7 +314,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
             "direction": ch["direction"],
             "node": ch["node"],
             "sha": ch["sha"],
-            "short": ch["sha"][:12],
+            "short": short_sha(ch["sha"]),
             "estimate": ch["estimate"],
             "prev_estimate": ch["prev_estimate"],
             "rel_change": ch["rel_change"],
@@ -336,7 +341,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
     for key in sorted(attempts):
         a = attempts[key]
         top = newest_by_node.get(key[4])
-        if top and a["attempt_sha"] == top["sha"] and a["status"] != "success":
+        if top and a["attempt_sha"] == top["sha"] and is_failed_status(a["status"]):
             last_ok = latest_by_key[key]
             failures.append({
                 "suite": key[0],
@@ -389,9 +394,9 @@ def build_views(marts: dict, data_dir: Path) -> dict:
             "suite": suite,
             "node": node,
             "sha": sha,
-            "short": sha[:12],
+            "short": short_sha(sha),
             "cases": len(pts),
-            "failed": sum(1 for p in pts if p["status"] != "success"),
+            "failed": sum(1 for p in pts if is_failed_status(p["status"])),
             "seconds": seconds,
         })
     suite_time.sort(key=lambda r: (-r["seconds"], r["suite"], r["node"]))
@@ -418,7 +423,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
     _dump(landing, out / "landing.json")
     counts["recent_commits"] = len(landing["recent_commits"])
 
-    # Sparks: last SPARK_POINTS commits and per-series successful points.
+    # Sparks: last SPARK_POINTS commits and per-series measured points.
     axis_by_order: dict[int, dict] = {}
     for pt in points:
         order = pt["commit_order"]
@@ -426,14 +431,14 @@ def build_views(marts: dict, data_dir: Path) -> dict:
             axis_by_order[order] = {
                 "commit_order": order,
                 "sha": pt["sha"],
-                "short": pt["sha"][:12],
+                "short": short_sha(pt["sha"]),
                 "date": _iso(pt["committer_date"]),
             }
     spark_axis = [axis_by_order[o] for o in sorted(axis_by_order)[-SPARK_POINTS:]]
 
     ok_by_series: dict[tuple, list[dict]] = defaultdict(list)
     for pt in points:
-        if pt["status"] == "success" and pt["estimate"] is not None:
+        if is_measured(pt):
             ok_by_series[series_key(pt)].append(pt)
 
     spark_series = []
@@ -484,7 +489,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
                 axis_map[axis_key] = {
                     "commit_order": pt["commit_order"],
                     "sha": pt["sha"],
-                    "short": pt["sha"][:12],
+                    "short": short_sha(pt["sha"]),
                     "date": _iso(pt["committer_date"]),
                     "subject": subject_by_pair.get((pt["sha"], pt["node"]), ""),
                 }
@@ -510,7 +515,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
                 "statuses": [p["status"] for p in pts],
                 "reasons": [p["reason"] for p in pts],
             }
-        _dump({"suite": suite, "commits": axis, "series": series_map}, history_dir / f"{_safe_filename(suite)}.json")
+        _dump({"suite": suite, "commits": axis, "series": series_map}, _safe_child(history_dir, suite))
     counts["history_suites"] = len(points_by_suite)
 
     # Per-commit pages: nodes, failures, and every change (largest first).
@@ -538,7 +543,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
 
     failures_by_sha: dict[str, list[dict]] = defaultdict(list)
     for pt in points:
-        if pt["status"] != "success":
+        if is_failed_status(pt["status"]):
             failures_by_sha[pt["sha"]].append({
                 "suite": pt["suite"],
                 "case": pt["case"],

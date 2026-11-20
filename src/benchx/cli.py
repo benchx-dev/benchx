@@ -574,11 +574,11 @@ def cmd_view(args):
 
     source_kwargs: dict = {}
     if args.runs is not None:
-        source_kwargs["runs_dir"] = Path(args.runs)
+        source_kwargs["runs_dir"] = args.runs
     elif args.results is not None:
-        source_kwargs["results_paths"] = [Path(p) for p in args.results]
+        source_kwargs["results_paths"] = list(args.results)
     else:
-        source_kwargs["store_path"] = Path(args.store) if args.store is not None else cfg.store_path
+        source_kwargs["store_path"] = args.store if args.store is not None else cfg.store_path
 
     if args.marts:
         write_marts: bool | None = True
@@ -619,8 +619,9 @@ def cmd_view(args):
     fallback_port = args.port is None
 
     def _finish(summary: dict, out_dir: Path) -> int:
+        exit_code = EXIT_OK
         if summary["outcome"] and summary["outcome"]["rejected"]:
-            return _report(summary["outcome"])
+            exit_code = _report(summary["outcome"])
         counts = summary["counts"]
         if args.out is not None:
             print(
@@ -644,7 +645,7 @@ def cmd_view(args):
             except OSError as exc:
                 print(f"bx view: error: cannot serve on {args.host}:{port}: {exc}", file=sys.stderr)
                 return EXIT_REFUSED
-        return EXIT_OK
+        return exit_code
 
     if args.out is not None:
         out_dir = Path(args.out)

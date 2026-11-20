@@ -89,12 +89,17 @@ def _write_static(out: Path, stamp: str) -> None:
 
 
 def _write_logs(runs: list[dict], data_dir: Path) -> int:
+    logs_root = (Path(data_dir) / "logs").resolve()
     written = 0
     for run in runs:
         log = run.get("log") or ""
         if not log:
             continue
-        log_path = data_dir / "logs" / run["sha"].replace("/", "_") / f"{run['node']}.txt"
+        sha_seg = inputs.safe_path_segment(run["sha"])
+        node_seg = inputs.safe_path_segment(run["node"])
+        log_path = (logs_root / sha_seg / f"{node_seg}.txt").resolve()
+        if not log_path.is_relative_to(logs_root):
+            raise inputs.ViewError(f"refusing to write log outside {logs_root}: {run['sha']!r}/{run['node']!r}")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(log, encoding="utf-8")
         written += 1
@@ -104,9 +109,9 @@ def _write_logs(runs: list[dict], data_dir: Path) -> int:
 def build_site(
     out: Path,
     *,
-    store_path: Path | None = None,
-    results_paths: list[Path] | None = None,
-    runs_dir: Path | None = None,
+    store_path: str | Path | None = None,
+    results_paths: list[str | Path] | None = None,
+    runs_dir: str | Path | None = None,
     project_file: Path | None = None,
     title: str | None = None,
     repo: Path | None = None,
@@ -122,15 +127,15 @@ def build_site(
     outcome = None
     if runs_dir is not None:
         source = "runs"
-        runs, raw_points, ingest_problems = inputs.read_runs_dir(Path(runs_dir))
+        runs, raw_points, ingest_problems = inputs.read_runs_dir(runs_dir)
     elif results_paths is not None:
         source = "results"
         runs, raw_points, ingest_problems, outcome = inputs.read_results(
-            [Path(p) for p in results_paths], repo=repo
+            list(results_paths), repo=repo
         )
     else:
         source = "store"
-        runs, raw_points, ingest_problems = inputs.read_store(Path(store_path), repo=repo)
+        runs, raw_points, ingest_problems = inputs.read_store(store_path, repo=repo)
 
     if write_marts is None:
         emit_marts = _has_pyarrow()
