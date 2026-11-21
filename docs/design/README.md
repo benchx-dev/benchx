@@ -12,11 +12,12 @@ designed around it (see the repository README for the philosophy).
 | [`harness-adapter.md`](harness-adapter.md) | Translating native harness output into results: the context document, mapping rules, driving half, context collectors, adapter catalog | draft |
 | [`benchmark-environments.md`](benchmark-environments.md) | Who prepares the environment, what the runner controls on its launched process, and what benchx records, with recommendations per kind of environment | draft |
 | [`comparator.md`](comparator.md) | Verdicts in history mode and run mode: the eligibility guard, dispersion-scaled verdicts, the comparison document | draft |
+| [`ci-workbench.md`](ci-workbench.md) | Unattended CI workbenches: the provisioning handoff, lifecycle, durable unit staging and restarts, trust and repository boundaries | draft |
 | [`prototype-scope.md`](prototype-scope.md) | What the minimal implementation demonstrates and the decisions locked for it | agreed |
 | [`prototype-design.md`](prototype-design.md) | How the implementation is built: one CLI over a Python API, a Parquet store, three JSON documents | draft |
 | [`measurement-result-parquet.md`](measurement-result-parquet.md) | The Parquet form of a result: the mapping from the result schema to Arrow types, the message columns of the store's row | agreed |
 
 Not yet designed (roles fixed in the decomposition, documents pending):
-workbench, scheduler internals, change detector, alerting & annotations,
+local workbench, scheduler internals, change detector, alerting & annotations,
 views, series continuity and identity-policy authoring, the environment
 plugin interface, importers (beyond schema §6).
