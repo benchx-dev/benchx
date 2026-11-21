@@ -27,21 +27,19 @@ Two rules shape the decomposition:
 ## 2. Overview
 
 ```
-                 produce results                consume results
-  ┌────────────┐  ┌────────────┐   ┌───────┐   ┌────────────┐  ┌──────────┐
-  │ Workbench  │  │  Runner +  │   │       │   │ Comparator │  │  Views   │
-  │ (local CLI)│─▶│  Adapters  │──▶│ Store │──▶│  Detector  │─▶│  Alerts  │
-  └────────────┘  └────────────┘   │       │   └────────────┘  └──────────┘
-  ┌────────────┐        ▲          └───────┘
-  │ Importers  │────────┼──────────────▲
-  └────────────┘        │
-                  ┌───────────────┐
-                  │ CI job driver │  runs one unattended job on a CI node
-                  └───────────────┘
-                        ▲
-                  ┌───────────┐
-                  │ Scheduler │  decides what runs, where, when
-                  └───────────┘
+                      produce results               consume results
+  ┌───────────────┐  ┌────────────┐   ┌───────┐   ┌────────────┐  ┌──────────┐
+  │   Workbench   │─▶│            │   │       │   │ Comparator │  │  Views   │
+  │  (local CLI)  │  │  Runner +  │──▶│ Store │──▶│  Detector  │─▶│  Alerts  │
+  └───────────────┘  │  Adapters  │   │       │   └────────────┘  └──────────┘
+  ┌───────────────┐  │            │   └───▲───┘
+  │ CI job driver │─▶│            │       │
+  │ (unattended)  │  └────────────┘       │
+  └───────▲───────┘  ┌───────────┐        │
+          │          │ Importers │────────┘
+  ┌───────┴───────┐  └───────────┘
+  │   Scheduler   │  decides what runs, where, when
+  └───────────────┘
 ```
 
 Everything to the left of the store produces schema results; everything to the
