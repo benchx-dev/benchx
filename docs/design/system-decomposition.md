@@ -35,6 +35,10 @@ Two rules shape the decomposition:
   ┌────────────┐        ▲          └───────┘
   │ Importers  │────────┼──────────────▲
   └────────────┘        │
+                  ┌───────────────┐
+                  │ CI job driver │  runs one unattended job on a CI node
+                  └───────────────┘
+                        ▲
                   ┌───────────┐
                   │ Scheduler │  decides what runs, where, when
                   └───────────┘
@@ -231,6 +235,16 @@ issues the work order; it does not ask the runner to build.
 job, or script may author work orders directly. The scheduler exists for
 contention — shared fleets, queues, priorities, automated backfill — and
 nothing else in the system depends on its existence.
+
+**CI job driver (unattended counterpart to the workbench).** Between a
+scheduler or CI trigger and the runner on a remote node sits a thin job driver
+(`ci-execution.md`) using `requester.kind: "ci"`. Like the workbench locally,
+it calls the target provider (`prepare`), authors resolved work orders, and
+invokes the runner; for unattended and ephemeral CI machines it also handles
+the provisioning handoff (stable logical machine identity and declared L0/L1
+facts), time-budgeted and resumable unit execution, and incremental staging for
+idempotent store ingest. CI platforms and machine provisioning themselves
+remain outside benchx (§5).
 
 ### 3.6 Comparator
 
