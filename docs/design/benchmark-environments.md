@@ -170,7 +170,7 @@ A machine reserved for benchmarking, as in Apache Arrow's Conbench deployment, i
 Self-hosted runners provisioned on demand, as OpenBLAS does through cirun, are the practical way for a volunteer project to reach several architectures. They sit between hosted runners and dedicated nodes.
 
 - Fix the instance type and declare it. For an ephemeral machine, identity is the instance type and image rather than the host, since no host outlives a job.
-- Assign a stable logical machine name before benchx runs (by setting the hostname or declaring the runner name) and prefer single-CPU-model instance families. Fresh cloud hostnames otherwise start a new series on every boot; see `ci-execution.md` §3 for the provisioning handoff.
+- Assign a stable logical machine name before benchx runs (by setting the hostname or declaring the runner name) and prefer single-CPU-model instance families. Fresh cloud hostnames otherwise start a new series on every boot; see `ci-workbench.md` §3 for the provisioning handoff.
 - Avoid burstable instance families. Their CPU allocation depends on a credit balance, which is invisible in the results.
 - Prefer instance types that map to whole sockets or bare metal, and dedicated tenancy where the budget allows. Neighbors on the same host are the dominant noise source and cannot be detected from inside the guest.
 - Expect each instance to be different hardware. Two instances of one type are two machines; series on such environments have a wider floor than on one physical node, and the comparator's noise estimate will reflect it.

@@ -1,4 +1,4 @@
-# CI Execution
+# CI Workbench
 
 **Status:** Draft for review
 **Companion to:** `system-decomposition.md` §3.4–§3.5, `runner.md`, `benchmark-environments.md` §5.2–§5.4, `comparator.md`
@@ -6,24 +6,39 @@
 
 ## 1. Role
 
-The **CI job driver** is the unattended, non-interactive counterpart to the
-workbench (`system-decomposition.md` §3.4). It carries out one remote benchmark
-job on a CI-provisioned compute node and delivers its results durably, even
-across crashes, timeouts, or preempted instances.
+A **CI workbench** is an unattended workbench (`system-decomposition.md` §3.4)
+that carries out one benchmark job on a CI-provisioned compute node and
+delivers its results durably, even across crashes, timeouts, or preempted
+instances.
+
+It sits in the same architectural slot as a local workbench (`bx` or
+`spin bench`), wrapping the target provider, runner, store, and comparator for
+an unattended remote environment instead of an interactive terminal:
+
+| Responsibility | Local workbench (`bx`, `spin`) | CI workbench (e.g. GitHub Actions + EC2) |
+|---|---|---|
+| **Trigger** | Developer at a terminal | Scheduler or CI event (cron, PR command, manual dispatch) |
+| **Target prep** | Calls target provider (`prepare` / `describe`) | Calls target provider (`prepare`, typically with shared build cache) |
+| **Loop above runner** | Single run or interactive comparison session | Time-budgeted, resumable unit loop (or PR comparison rounds) |
+| **Work orders** | `requester.kind: "workbench"` | `requester.kind: "ci"` |
+| **Delivery** | Local store (`store.parquet`) | Write-once raw staging (e.g. S3) → serialized idempotent compaction (`bx ingest`) |
 
 Two boundaries govern this design (`system-decomposition.md` §5, `runner.md`
 §7):
 
-- **CI platforms and machine provisioning are not components of benchx.**
-  Launching cloud VMs, registering CI runners, enforcing wall-clock caps, and
-  managing secrets belong to the CI platform and its cloud integration.
-- **The runner remains unchanged.** It executes one resolved work order against
-  a prepared target on whatever machine it is given, and never builds,
-  provisions, or queues.
+- **It is a workbench, not a new kind of runner.** The runner (`runner.md`) is
+  already complete for remote and cloud nodes: it takes one resolved work order
+  against a prebuilt target on the current host and emits schema results. There
+  is no "EC2 runner" inside benchx — the same runner executes unchanged inside
+  an EC2 instance or a dedicated host.
+- **CI platforms and cloud provisioning remain outside benchx.** Launching VMs,
+  registering CI runners, enforcing wall-clock caps, and managing cloud secrets
+  belong to the CI platform and its cloud integration.
 
 What belongs in benchx's design is the contract where CI meets benchx: the
-**provisioning handoff** (L0/L1 into benchx), the **job driver's lifecycle**,
-**durable delivery and restart semantics**, and the **trust boundary**.
+**provisioning handoff** (L0/L1 into benchx), the **CI workbench lifecycle**,
+**durable delivery and restart semantics**, the **trust boundary**, and **where
+implementations live**.
 
 ## 2. Overview
 
@@ -32,7 +47,7 @@ What belongs in benchx's design is the contract where CI meets benchx: the
              │                              │
              ▼                              ▼  provisions & names node
       ┌─────────────┐               ┌───────────────┐
-      │  Scheduler  │───triggers───▶│ CI job driver │  (requester: ci)
+      │  Scheduler  │───triggers───▶│ CI workbench  │  (requester: ci)
       │ (or CI YAML)│               └───────┬───────┘
       └─────────────┘                       │ 1. declare machine / L0–L1 facts
                                             │ 2. call target provider (prepare)
@@ -54,13 +69,13 @@ Mapped onto the environment layers of `benchmark-environments.md` §2.1:
 | **L0 Provisioning** | Launch and terminate VM/host, assign logical machine name, enforce max-lifetime watchdog, attach least-privilege role | CI platform / provisioner (outside benchx) |
 | **L1 Machine session** | Apply OS/kernel/governor tuning (or use a fixed image), declare L0/L1 facts | Provisioner / image |
 | **L2 Software environment** | Check out revision(s), set up dependencies, build with cache via target provider (`prepare`) | Target provider (`system-decomposition.md` §3.4) |
-| **L3 Process** | Emit work orders (`requester.kind: "ci"`), enforce launch settings on measured processes | CI job driver → Runner |
+| **L3 Process** | Emit work orders (`requester.kind: "ci"`), enforce launch settings on measured processes | CI workbench → Runner |
 | **L4–L5 Measurement** | Run harness per unit/round, capture context, emit schema results | Runner + Harness adapters |
-| **Delivery & publishing** | Upload raw unit archives incrementally; compact/ingest into store; derive views and verdicts | CI job driver → Store ingest / Comparator |
+| **Delivery & publishing** | Upload raw unit archives incrementally; compact/ingest into store; derive views and verdicts | CI workbench → Store ingest / Comparator |
 
 ## 3. Provisioning handoff (L0/L1 to benchx)
 
-The job driver is agnostic to how the compute node is provisioned or entered.
+A CI workbench is agnostic to how the compute node is provisioned or entered.
 Three common deployment shapes sit behind the same handoff boundary:
 
 | Shape | How a job reaches the node | Strengths | Tradeoffs |
@@ -75,7 +90,7 @@ drift, carry security risks on pull requests, and lose their same-host noise
 advantage whenever stopped and started on a new physical host.
 
 Whichever shape is used, the provisioner must satisfy three handoff rules
-before invoking the job driver:
+before invoking the CI workbench:
 
 1. **Stable logical machine identity.** Ephemeral cloud instances receive a
    fresh hostname on every boot, which would split every run into a new series.
@@ -92,9 +107,9 @@ before invoking the job driver:
    instance-side max-lifetime shutdown/self-termination guard and periodic
    cleanup of orphaned instances so a failed CI workflow cannot leak compute.
 
-## 4. Job driver lifecycle
+## 4. CI workbench lifecycle
 
-A CI job runs in one of two modes, matching the comparator's two modes
+A CI workbench runs in one of two modes, matching the comparator's two modes
 (`comparator.md` §1):
 
 ### 4.1 Tracking mode (continuous history)
@@ -127,7 +142,7 @@ one job (`comparator.md` §2.3, UC-03):
    provider (`prepare` for baseline and contender).
 2. **Run an interleaved session:** share one `run_key`, emit one work order per
    side and round (`round`, `slot`, `requester.kind: "ci"`), and alternate
-   sides across rounds — the same session loop the workbench uses
+   sides across rounds — the same session loop a local workbench uses
    (`system-decomposition.md` §3.4).
 3. **Ingest and compare:** ingest the run's results into an ephemeral or
    project store, invoke the comparator in run mode, and hand the resulting
@@ -138,7 +153,7 @@ one job (`comparator.md` §2.3, UC-03):
 Following `system-decomposition.md` §3.4 and `runner.md` §6:
 
 - A **target-provider failure** (checkout, dependency setup, or compile error)
-  happens before any work order exists. The job driver records it in the
+  happens before any work order exists. The CI workbench records it in the
   attempt metadata and log and exits; it does not synthesize runner results.
 - A **benchmark case failure or timeout** inside a unit is handled by the
   runner and recorded as an explicit schema result (`status: error` or
@@ -176,8 +191,8 @@ never lost and restarts are safe:
    idempotent (`benchmark-result-schema.md` §5.4), partial runs can be
    published immediately and re-compacted safely whenever later attempts finish.
 
-For small, fast suites where incremental staging is unnecessary, a CI job may
-alternatively ingest directly into a local or remote store at job end; the
+For small, fast suites where incremental staging is unnecessary, a CI workbench
+may alternatively ingest directly into a local or remote store at job end; the
 contract with the runner and store is identical.
 
 ## 6. Trust and security boundary
@@ -194,17 +209,34 @@ enforce three boundaries:
    - *CI control plane / workflow role:* may launch and terminate instances
      scoped to the project's tags/network, read staging, and write to the
      compacted store and published views.
-   - *Compute node role:* may only append to the raw staging prefix (and read/write
-     a build cache such as `sccache`). It must **not** hold credentials to
-     modify or delete compacted store history, push to git repositories, or
-     administer CI runners.
+   - *Compute node role:* may only append to the raw staging prefix (and
+     read/write a build cache such as `sccache`). It must **not** hold
+     credentials to modify or delete compacted store history, push to git
+     repositories, or administer CI runners.
 3. **Secret hygiene.** The runner records only allowlisted environment
    variables (`benchmark-environments.md` §3.1) so CI tokens are never swept
    into results. Provisioning scripts and target providers must never place
    secrets in declared provenance (`how_built`, `activation`, or
    `.benchx/setup.json`).
 
-## 7. Reference deployment mappings
+## 7. Packaging and repository boundaries
+
+To keep the core `benchx` package small, cloud-free, and CI-vendor-neutral,
+responsibilities split across three layers:
+
+1. **Core `benchx` repository:** schemas, runner, adapters, local workbench
+   (`bx`), store, comparator, and this design contract. Contains no cloud
+   templates (CloudFormation/Terraform) or CI-platform workflows.
+2. **Reusable CI workbench repository (companion repo, once shared across
+   projects):** generic CI workflows, infrastructure templates (e.g. AWS
+   setup), unit-budget ratchet, and staging compaction scripts parameterized by
+   project configuration.
+3. **Project benchmark repository (e.g. per-project tracking repo):**
+   project-specific files only — `benchx.conf.json`, the project's target
+   provider (`provider/`), machine catalog (`machines.json`), and project
+   metadata.
+
+## 8. Reference deployment mappings
 
 The same contract supports minimal dedicated deployments and cloud-ephemeral
 deployments without changing benchx itself:
@@ -214,11 +246,11 @@ deployments without changing benchx itself:
 | **Scheduler / trigger** | Scheduled & comment-dispatch workflows checking staged objects | Cron / systemd timer + file queue in repo |
 | **Provisioner (L0/L1)** | `start`/`stop` jobs (ephemeral self-hosted runner or direct EC2 launch) + hostname & max-lifetime watchdog | Fixed physical host, tuned once by operator |
 | **Target provider (L2)** | Commit-specific env setup + incremental build with S3 `sccache` | Reused worktree + local incremental build |
-| **CI job driver** | Unit loop with wall-clock budget, `bx bench --no-ingest`, write-once S3 upload | Per-commit script calling `bx bench` |
+| **CI workbench** | Unit loop with wall-clock budget, `bx bench --no-ingest`, write-once S3 upload | Per-commit script calling `bx bench` |
 | **Compaction / store** | Serialized hosted publish workflow running `bx ingest` into Parquet on S3 | Local `bx ingest` into Parquet committed to repo |
 | **Views & alerts** | Derived tables + static site / PR comments | Derived tables + static site |
 
-## 8. Boundaries
+## 9. Boundaries
 
 - **Not the scheduler:** does not decide which commits to benchmark, manage
   fleet priorities, or perform regression bisection (`system-decomposition.md`
@@ -232,11 +264,11 @@ deployments without changing benchx itself:
 - **Not the store:** stages raw results and triggers ingest; identity
   assignment, validation, and deduplication remain in the store.
 
-## 9. Open questions
+## 10. Open questions
 
-1. **Reusable driver vs. deployment scripts:** Should benchx ship a thin
-   reusable CLI helper for the unit-budget loop and attempt manifest, or should
-   the CI job driver stay a small deployment-side script calling `bx bench`,
+1. **Reusable CLI helpers vs. deployment scripts:** Should core `benchx` ship a
+   thin cloud-agnostic helper for the unit-budget loop and attempt manifest, or
+   should CI workbenches stay small deployment-side scripts calling `bx bench`,
    `bx run`, and `bx ingest`?
 2. **Attempt and staging manifest schema:** Should the staging layout and
    attempt record (units expected, units completed, provider failure log,
@@ -244,5 +276,5 @@ deployments without changing benchx itself:
    of object-storage deployments?
 3. **Cross-revision environments in PR comparison mode:** When baseline and
    contender revisions require different dependency sets on an ephemeral
-   instance, how should the job driver budget setup/build time against
+   instance, how should a CI workbench budget setup/build time against
    measurement rounds?
