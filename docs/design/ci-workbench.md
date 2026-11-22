@@ -249,7 +249,7 @@ responsibilities split across three layers:
    project configuration.
 3. **Project benchmark repository (reference implementation:
    [`benchx-dev/benchx-arrow`](https://github.com/benchx-dev/benchx-arrow),
-   live dashboard at <https://benchx-dev.github.io/benchx-arrow/#/>):**
+   live dashboard at <https://arrow.benchx.dev/>):**
    project-specific files only — `benchx.conf.json`, the project's target
    provider (`provider/`), machine catalog (`machines.json`), thin caller
    workflows, and project metadata.

@@ -7,7 +7,7 @@ Live continuous-benchmarking deployments and local worked examples built on
 
 | Project | Live dashboard | Tracking repository | Harness / scope | Infrastructure |
 |---|---|---|---|---|
-| **Apache Arrow C++** | <https://benchx-dev.github.io/benchx-arrow/#/> | [`benchx-dev/benchx-arrow`](https://github.com/benchx-dev/benchx-arrow) | Google Benchmark (Arrow C++ suites on `main`) | GitHub Actions + ephemeral AWS EC2 / S3 via [`benchx-dev/benchx-ci`](https://github.com/benchx-dev/benchx-ci), published to GitHub Pages |
+| **Apache Arrow C++** | <https://arrow.benchx.dev/> | [`benchx-dev/benchx-arrow`](https://github.com/benchx-dev/benchx-arrow) | Google Benchmark (Arrow C++ suites on `main`) | GitHub Actions + ephemeral AWS EC2 / S3 via [`benchx-dev/benchx-ci`](https://github.com/benchx-dev/benchx-ci), published to GitHub Pages |
 
 If your project publishes a `benchx` deployment and would like it listed here,
 open a pull request adding a row to this table.

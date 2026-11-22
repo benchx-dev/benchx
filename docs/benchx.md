@@ -15,8 +15,8 @@ We welcome contributions of all sorts: add a user story, tell us about your use 
 implement a missing feature.
 
 - Documentation: <https://benchx-dev.github.io/benchx/>
-- Live deployment (Apache Arrow C++): <https://benchx-dev.github.io/benchx-arrow/#/>
-- Examples & deployments: <https://benchx-dev.github.io/benchx/examples/>
+- Live deployment (Apache Arrow C++): <https://arrow.benchx.dev/>
+- Examples & deployments: <https://benchx.dev/examples/>
 - Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
 - Worked examples repo: <https://github.com/benchx-dev/benchx_examples>
 - Reusable CI workbench (GitHub Actions + AWS EC2/S3): <https://github.com/benchx-dev/benchx-ci>

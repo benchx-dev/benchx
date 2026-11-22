@@ -43,14 +43,14 @@ We welcome contributions of all sorts: add a user story, tell us about your use 
 implement a missing feature.
 
 - Documentation: <https://benchx-dev.github.io/benchx/>
-- Live deployment (Apache Arrow C++): <https://benchx-dev.github.io/benchx-arrow/#/>
+- Live deployment (Apache Arrow C++): <https://arrow.benchx.dev/>
 - Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
 - Worked examples: <https://github.com/benchx-dev/benchx_examples>
 
 ## Live deployment and companion repositories
 
 A live continuous-benchmarking deployment tracking Apache Arrow C++ benchmarks
-on `main` is published at <https://benchx-dev.github.io/benchx-arrow/#/>.
+on `main` is published at <https://arrow.benchx.dev/>.
 
 In line with the three-layer split described in
 [`docs/design/ci-workbench.md`](docs/design/ci-workbench.md#7-packaging-and-repository-boundaries),
@@ -60,7 +60,7 @@ repositories so that `benchx` itself stays cloud-free and CI-vendor-neutral:
 - [benchx-arrow](https://github.com/benchx-dev/benchx-arrow) — Apache Arrow C++
   benchmark tracking repository (project config, target provider, machine
   catalog, and GitHub Pages publishing for the
-  [live dashboard](https://benchx-dev.github.io/benchx-arrow/#/)).
+  [live dashboard](https://arrow.benchx.dev/)).
 - [benchx-ci](https://github.com/benchx-dev/benchx-ci) — reusable GitHub Actions
   workflows and AWS EC2/S3 infrastructure templates for ephemeral continuous
   benchmarking.
