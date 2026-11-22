@@ -12,7 +12,7 @@ const PAGE = 48;
 const MARK = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="10" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 24 L46 52 M46 24 L18 52" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>';
 const MARK_SMALL = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="8" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 26 L46 52 M46 26 L18 52" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg>';
 function wordmark(small) { return h("span", { class: "benchx" }, h("span", { html: small ? MARK_SMALL : MARK }), h("span", { class: "wm" }, "bench", h("b", {}, "x"))); }
-const state = { v: "", project: null, manifest: null, landing: null, series: null, sparks: null, histories: new Map(), commits: new Map(), charts: [], cleanup: [], nodeSlots: new Map() };
+const state = { v: "", project: null, manifest: null, landing: null, series: null, sparks: null, histories: new Map(), commits: new Map(), charts: [], cleanup: [], nodeSlots: new Map(), routeSeq: 0 };
 
 // ---- utilities ------------------------------------------------------------------
 
@@ -258,16 +258,20 @@ function drawSpark(el, seriesList, axis) {
   state.charts.push(chart);
 }
 
-function drawCards(grid, cards, axisFor) {
-  requestAnimationFrame(() => { for (const [g, plot] of cards) drawSpark(plot, g.list, axisFor(g)); });
+function drawCards(grid, cards, axisFor, seq) {
+  requestAnimationFrame(() => {
+    if (seq != null && seq !== state.routeSeq) return;
+    for (const [g, plot] of cards) drawSpark(plot, g.list, axisFor(g));
+  });
 }
 
 // ---- overview -----------------------------------------------------------------------
 
-async function renderLanding() {
+async function renderLanding(seq) {
   const L = state.landing;
   if (!L.stats.results) return renderEmpty();
   if (!state.sparks) state.sparks = await getJSON("views/sparks.json");
+  if (seq != null && seq !== state.routeSeq) return null;
   const S = state.sparks;
   // sparks.json holds successful points only; a series that never succeeded
   // still gets a card (an empty chart and its failure) from series.json.
@@ -286,7 +290,7 @@ async function renderLanding() {
   const nodes = [...new Set(S.series.map((s) => s.node))].sort();
   const q = new URLSearchParams((location.hash.split("?")[1]) || "");
   const ctl = { suite: q.get("suite") || "all", sort: q.get("sort") || "change", text: q.get("f") || "", n: PAGE };
-  const setHash = () => { const p = new URLSearchParams(); if (ctl.suite !== "all") p.set("suite", ctl.suite); if (ctl.sort !== "change") p.set("sort", ctl.sort); if (ctl.text) p.set("f", ctl.text); history.replaceState(null, "", "#/" + (p.toString() ? "?" + p : "")); };
+  const setHash = () => { if (seq != null && seq !== state.routeSeq) return; const p = new URLSearchParams(); if (ctl.suite !== "all") p.set("suite", ctl.suite); if (ctl.sort !== "change") p.set("sort", ctl.sort); if (ctl.text) p.set("f", ctl.text); history.replaceState(null, "", "#/" + (p.toString() ? "?" + p : "")); };
   // Missing comparisons sort last; changes within noise rank below real ones of the same size.
   const size = (g) => (g.change == null ? -1 : Math.abs(g.change) * (withinNoise(g.change, g.noise) ? 0.5 : 1));
   const sorters = {
@@ -310,7 +314,7 @@ async function renderLanding() {
     if (!shown.length) grid.append(h("p", { class: "empty" }, "no benchmark matches"));
     status.textContent = `${shown.length} of ${rows.length} benchmarks`;
     more.hidden = shown.length >= rows.length;
-    drawCards(grid, cards, () => S.axis);
+    drawCards(grid, cards, () => S.axis, seq);
     setHash();
   };
   const select = (label, key, values, fmt = (x) => x) => h("label", {}, label, h("select", { onchange: (e) => { ctl[key] = e.target.value; ctl.n = PAGE; draw(); } }, values.map((v) => h("option", { value: v, selected: v === ctl[key] }, fmt(v)))));
@@ -464,10 +468,11 @@ async function loadHistory(suite) {
   return hist;
 }
 
-async function renderSuite(suite) {
+async function renderSuite(suite, seq) {
   const rows = state.series.filter((s) => s.suite === suite);
   const nodes = [...new Set(rows.map((r) => r.node))].sort();
   const hist = await loadHistory(suite);
+  if (seq != null && seq !== state.routeSeq) return null;
   const latestBy = new Map(rows.map((r) => [`${r.case}|${r.params}|${r.quantity}|${r.node}`, r]));
   const groups = groupSeries(Object.values(hist.series).map((s) => ({ ...s, suite })), (g) => {
     const mine = g.list.map((s) => latestBy.get(`${s.case}|${s.params}|${s.quantity}|${s.node}`)).filter(Boolean);
@@ -484,7 +489,7 @@ async function renderSuite(suite) {
     const shown = groups.filter((g) => !needle || caseLabel(g).toLowerCase().includes(needle));
     const cards = shown.map((g) => { const [card, plot] = benchCard(g, { showSuite: false }); grid.append(card); return [g, plot]; });
     status.textContent = `${shown.length} of ${groups.length} benchmarks`;
-    drawCards(grid, cards, () => hist.commits);
+    drawCards(grid, cards, () => hist.commits, seq);
   };
   const filter = h("input", { type: "search", placeholder: "filter by name", "aria-label": "filter benchmarks", oninput: (e) => drawSuite(e.target.value.trim().toLowerCase()) });
   const failing = groups.filter((g) => isFailed(g.status)).length;
@@ -506,11 +511,12 @@ async function renderSuite(suite) {
 
 // ---- one benchmark ----------------------------------------------------------------
 
-async function renderBench(suite, kase, query) {
+async function renderBench(suite, kase, query, seq) {
   const params = query.get("params") || "";
   const quantity = query.get("q") || "wall-time";
   const nodeFilter = query.get("node") || "all";
   const hist = await loadHistory(suite);
+  if (seq != null && seq !== state.routeSeq) return null;
   const all = Object.values(hist.series).filter((s) => s.case === kase);
   const variants = [...new Set(all.map((s) => s.params))];
   const quantities = [...new Set(all.map((s) => s.quantity))];
@@ -559,7 +565,7 @@ async function renderBench(suite, kase, query) {
         m.skipped > 0 ? h("span", { class: "tag gap", title: `${m.skipped} measured commit${m.skipped > 1 ? "s" : ""} in between had no successful result for this series, so this change spans ${m.skipped > 1 ? "them" : "it"}` }, `spans ${m.skipped + 1}`) : null),
       fmtValue(m.from, unit), fmtValue(m.to, unit), delta(m.rel, direction, { ...opts, noise: kpi?.noise })]), { empty: "needs two successful measurements" }),
     footer());
-  requestAnimationFrame(() => drawHistory(chartWrap, shown, hist.commits, unit, kase));
+  requestAnimationFrame(() => { if (seq == null || seq === state.routeSeq) drawHistory(chartWrap, shown, hist.commits, unit, kase); });
   return main;
 }
 
@@ -676,9 +682,10 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
 
 // ---- one commit ---------------------------------------------------------------------
 
-async function renderCommit(sha) {
+async function renderCommit(sha, seq) {
   let c = state.commits.get(sha);
   if (!c) { c = await getJSON(`views/commits/${encodeURIComponent(safeFile(sha))}.json`); state.commits.set(sha, c); }
+  if (seq != null && seq !== state.routeSeq) return null;
   const filter = h("input", { type: "search", placeholder: "filter benchmarks", "aria-label": "filter benchmarks" });
   const minPct = h("select", {}, [0, 1, 2, 5, 10].map((p) => h("option", { value: p, selected: p === 0 }, p ? `≥ ${p}%` : "all changes")));
   const hideNoise = h("input", { type: "checkbox" });
@@ -832,6 +839,7 @@ function destroyCharts() {
 }
 
 async function route() {
+  const seq = ++state.routeSeq;
   const root = document.getElementById("app");
   const hash = location.hash || "#/";
   const [path, qs] = hash.slice(1).split("?");
@@ -846,13 +854,14 @@ async function route() {
   try {
     if (parts[0] === "suites") view = renderSuites();
     else if (parts[0] === "about") view = renderAbout();
-    else if (parts[0] === "s" && parts[1]) view = await renderSuite(parts[1]);
-    else if (parts[0] === "b" && parts[2]) view = await renderBench(parts[1], parts.slice(2).join("/"), query);  // a case name may itself contain '/'
-    else if (parts[0] === "c" && parts[1]) view = await renderCommit(parts[1]);
-    else view = await renderLanding();
+    else if (parts[0] === "s" && parts[1]) view = await renderSuite(parts[1], seq);
+    else if (parts[0] === "b" && parts[2]) view = await renderBench(parts[1], parts.slice(2).join("/"), query, seq);  // a case name may itself contain '/'
+    else if (parts[0] === "c" && parts[1]) view = await renderCommit(parts[1], seq);
+    else view = await renderLanding(seq);
   } catch (e) {
     view = h("main", {}, h("h2", {}, "Could not load this view"), h("p", { class: "note" }, String(e.message || e)), h("p", {}, h("a", { href: "#/" }, "back to the overview")));
   }
+  if (seq !== state.routeSeq || !view) return;
   root.replaceChildren(view);
   window.scrollTo(0, 0);
 }
