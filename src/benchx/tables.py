@@ -8,12 +8,16 @@ medians (the estimator the verdict uses) and its `±` the sd of those medians: b
 not asv's.
 """
 
+import collections
+import logging
 import math
 import statistics
 
 from .compare import WORKLOAD, _c, _estimate, _run_documents, _unit_order, _workload, profile_projection
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
+
+logger = logging.getLogger(__name__)
 
 ROLES = ("baseline", "contender")
 CHANGED = {"regressed": "+", "improved": "-", "changed": "~"}  # as asv continuous marks them
@@ -93,10 +97,12 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
     projection = _projection(doc)
     names = {_c(doc["baseline"]): "baseline", _c(doc["contender"]): "contender"}
     grouped, sides = {}, {role: [] for role in ROLES}
+    skipped = 0
     for d in _run_documents(documents, doc["run_key"]):
         projected = projection.apply(d, store_project(d))
         role = names.get(_c(projected.axis[0]))
         if role is None:
+            skipped += 1
             continue
         variant = {ptr: v for ptr, v in projected.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
         quantity = d["measurement"]["quantity"]
@@ -104,6 +110,11 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
                                   {"quantity": quantity, "docs": {r: [] for r in ROLES}})
         unit["docs"][role].append(d)
         sides[role].append(d)
+    if skipped:
+        logger.debug("--tables skipped %d document(s) that fit neither side", skipped)
+    if len(grouped) != len(doc["units"]):  # side tables regroup every attempt: units the comparison dropped show up
+        logger.debug("the side tables hold %d unit(s), the comparison %d: units dropped for sides-agree, "
+                     "equal-attempts or a missing side still appear in the side tables", len(grouped), len(doc["units"]))
     units = []
     for unit in grouped.values():
         units.append({"workload": _workload(unit["docs"], projection.axis), "quantity": unit["quantity"],
@@ -194,10 +205,11 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
     """asv's comparison table, and the verdict. As `asv continuous` does, only the rows that
     changed, unless `all_rows`."""
     by_workload = {(_c(u["workload"]), u["quantity"]["name"]): u for u in units}
-    rows = []
+    rows, hidden = [], collections.Counter()
     for verdict_unit in doc["units"]:
         mark = "x" if verdict_unit.get("reason") == "benchmark-changed" else MARKS[verdict_unit["verdict"]]
         if mark not in (*CHANGED.values(), "x") and not all_rows:  # asv lists "not comparable" by default
+            hidden[verdict_unit["verdict"]] += 1
             continue
         unit = by_workload[(_c(verdict_unit["workload"]), verdict_unit["quantity"])]
         before, after = unit["baseline"], unit["contender"]
@@ -205,6 +217,8 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
         noise = f"{verdict_unit['noise']:.2%}" if "noise" in verdict_unit else "n/a"
         rows.append([mark, *(_cell(unit, role) for role in ROLES), ratio, noise, _verdict(verdict_unit),
                      _label(unit["workload"])])
+    logger.info("--tables: %d row(s) shown; hidden by verdict: %s", len(rows),
+                ", ".join(f"{verdict} {n}" for verdict, n in sorted(hidden.items())) or "none")
     if not rows:
         return "No benchmark changed (the verdict is benchx's; --all lists every row)."
     headers = ["Change", f"Before [{info['baseline']['tag']}]", f"After [{info['contender']['tag']}]",

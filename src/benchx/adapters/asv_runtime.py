@@ -249,8 +249,10 @@ class Benchmark:
         return run_isolated
 
 
-def _benchmark(attr_name, module, klass, func):
+def _benchmark(attr_name, module, klass, func, left_out=None):
     if getattr(func, "skip_benchmark", False):
+        if left_out is not None:  # a benchmark the suite switched off: the parent can say so
+            left_out.append(f"{module.__name__}.{klass.__name__ + '.' if klass else ''}{attr_name}")
         return None
     name = getattr(func, "benchmark_name", None)
     search = name.split(".")[-1] if name else attr_name
@@ -280,9 +282,9 @@ def _modules(name, failed):
 
 
 def discover(benchmark_dir: str):
-    """(benchmarks, failed imports), in asv's order."""
+    """(benchmarks, failed imports, names left out by `skip_benchmark`), in asv's order."""
     package = use_package(benchmark_dir)
-    failed, found = [], []
+    failed, found, left_out = [], [], []
     for module in _modules(package, failed):
         for attr_name, value in list(module.__dict__.items()):
             if attr_name.startswith("_"):
@@ -290,14 +292,14 @@ def discover(benchmark_dir: str):
             if inspect.isclass(value) and not inspect.isabstract(value):
                 for name, member in inspect.getmembers(value):
                     if inspect.isfunction(member) or inspect.ismethod(member):
-                        benchmark = _benchmark(name, module, value, member)
+                        benchmark = _benchmark(name, module, value, member, left_out)
                         if benchmark is not None:
                             found.append(benchmark)
             elif inspect.isfunction(value):
-                benchmark = _benchmark(attr_name, module, None, value)
+                benchmark = _benchmark(attr_name, module, None, value, left_out)
                 if benchmark is not None:
                     found.append(benchmark)
-    return found, failed
+    return found, failed, left_out
 
 
 def load(benchmark_dir: str, module: str, attr: list, index=None) -> Benchmark:
@@ -318,8 +320,8 @@ def main(argv):
     command, benchmark_dir = argv[:2]
     if command != "list":
         raise SystemExit(f"unknown command {command!r}")
-    found, failed = discover(benchmark_dir)
-    print(json.dumps({"benchmarks": [b.describe() for b in found], "failed": failed}))
+    found, failed, left_out = discover(benchmark_dir)
+    print(json.dumps({"benchmarks": [b.describe() for b in found], "failed": failed, "left_out": left_out}))
 
 
 if __name__ == "__main__":

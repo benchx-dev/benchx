@@ -6,4 +6,10 @@ identity, parquet, store, compare, session (the workbench's loop over runner
 and comparator).
 """
 
+import logging
+
 __version__ = "0.1.0"
+
+# A library caller sees no log output unless it configures logging itself; `bx` (cli.main)
+# installs its own handlers (log.py).
+logging.getLogger(__name__).addHandler(logging.NullHandler())

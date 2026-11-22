@@ -419,7 +419,8 @@ def test_missing_build_is_refused_for_every_reason(tmp):
     assert all(type(problem) is core.Refusal for problem in problems)
     assert [str(problem).split(":")[0] for problem in problems] == [
         "suite binary not found",
-        "cannot locate the checkout the target was built from; set target.source_dir",
+        f"cannot locate the checkout the target was built from (there is no CMakeCache.txt in {tmp / 'absent'}); "
+        "set target.source_dir",  # the refusal says why
     ]
 
 
@@ -590,7 +591,7 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
     store_path = tmp / "store.parquet"  # no benchx.conf.json: the working directory is the root
     assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
-    assert "ingested 4, duplicate 0" in capsys.readouterr().out  # this run's files only, with load averages
+    assert "ingested 4, duplicate 0" in capsys.readouterr().err  # this run's files only, with load averages
     assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store(store_path).head()

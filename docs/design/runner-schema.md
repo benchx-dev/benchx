@@ -34,6 +34,7 @@ A work order (`benchx/work-order/0.1.0`) has four required groups matching `runn
 | `project` | token | no | what | Project in the store; omit for an ad hoc run (results are then thin) | `project` |
 | `suites[]` | array | yes | what | `{adapter, suite, filter, include[], exclude[], parameters}` per harness suite; `filter` is a harness-native string, an alternative to `include`/`exclude` for adapters with only single-pattern selection | `coordinates.workload` via the adapter |
 | `quantities[]` | array of names | yes | what | Quantities to collect, e.g. `wall-time`, `peak-rss` | `measurement.quantity` |
+| `harness_verbosity` | integer | no | what | benchx extension: how much the harness itself is asked to say, 0 (absent) for nothing more; pyperf and asv `--verbose`, Google Benchmark `--v=N`; not part of the identity | `provenance.info.harness_verbosity` |
 | `environment_variables` | string map | no | what | `{NAME: value}` set on the measured process, on top of what the runner inherited; a workload coordinate, not a machine fact — `OMP_NUM_THREADS=1` and `=10` are different, non-pooling variants | `coordinates.workload.parameters` |
 | `workload_parameters` | map | no | what | Parameters passed to the runner or harness, never as environment variables; a name may not appear in both maps | `coordinates.workload.parameters` |
 | `target` | one of 3 kinds | yes | at what | What code to measure (§3.1) | `source`, `revision`, dirty flags, tree ids |

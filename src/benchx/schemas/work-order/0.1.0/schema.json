@@ -205,6 +205,11 @@
         "version": { "$ref": "#/$defs/nonEmptyString" }
       }
     },
+    "harness_verbosity": {
+      "description": "How much the harness itself is asked to say (benchx extension): 0 or absent, nothing more than today. pyperf and asv: 1 or more passes --verbose; Google Benchmark: N is passed as --v=N. It is not part of the measurement's identity.",
+      "type": "integer",
+      "minimum": 0
+    },
     "environment_variables": {
       "description": "Environment variables set for the measured process, on top of the environment the runner inherited. Workload coordinates, not machine facts: each name and value is copied into coordinates.workload.parameters, so a run at OMP_NUM_THREADS=1 and one at 10 are different, non-pooling workload variants. Values are strings; one order carries one assignment.",
       "type": "object",

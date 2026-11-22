@@ -40,7 +40,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
          [--processes N] [--values N] [--min-time S | --loops N] [--warmups N] [--repetitions N]
          [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
+         [--label NAME=VALUE ... --round R[/N] --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: Python functions under pyperf → results → store → table
@@ -78,6 +78,9 @@ bx target describe|prepare TARGET        # a target's description (a provider's 
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
 bx config init [--dir DIR] [--adapter …] # write a benchx.conf.json stating a harness's defaults
 bx config show                           # what benchx.conf.json and the defaults give, and where each value comes from
+
+# every command also takes: -v/-q (what the terminal shows), --log-level LEVEL,
+# and --no-log | --log | --log-file PATH (where the log goes; the default is bx.log in the run's folder)
 ```
 
 # Technical details
@@ -87,8 +90,8 @@ bx config show                           # what benchx.conf.json and the default
 working directory; its directory is the root) says how the project is measured: the
 `provider`, the `project` name and `source`, an `adapter` block (`name`, `suite`,
 `quantities`, `precision`), `environment_variables`, `timeouts`, `paths` for the store
-and the results (by default `store.parquet` and `results/` in the root), and the
-comparator's `compare` policy. Every value is the command line's, else the file's, else a
+and the results (by default `store.parquet` and `results/` in the root), the
+comparator's `compare` policy, and the log (`logging`, `log_level`: see "The log" below). Every value is the command line's, else the file's, else a
 built-in default; a required one (`adapter.name`, `adapter.suite`, the target, and for
 `bx compare` the profile and `--rounds`) that has none is a hard failure that names the
 flag and the key. `--no-project` makes one run ad hoc whatever the file's `project` says.
@@ -96,6 +99,42 @@ The schema is `schemas/config/0.1.0`, whose `examples/` hold recommended setting
 pyperf and for Google Benchmark. The store and the results directory are left out of a
 measured tree's identity when they sit inside it. `.benchx/setup.json` (declared
 environment facts) is a separate file, written by whoever prepares an environment.
+
+**The log.** `bx bench` and `bx compare` write `bx.log` in the run's output folder
+(`--out`, else `RESULTS/RUN_KEY`), and `bx run --out DIR` writes `DIR/bx.log`. Each
+invocation appends a header (the benchx version, its pid, the working directory and the
+command line as given), the config file it found, the settings it resolved with where each
+came from (flag, environment variable, file or default), and then what it decided, and ends
+with a footer: `end: ok (exit 0), 41 s`. The word is `ok`, `invalid` (exit 1), `refused`
+(exit 2), `crashed` or `interrupted` (Ctrl-C); a log that ends without a footer is the
+trace of a process that was killed (`SIGTERM`, `SIGHUP` or `SIGKILL`). A refusal for a bad
+flag or value leaves no folder; a run refused later, by the session, leaves `RUN_KEY/`
+holding only `bx.log`, which says why. At the default
+verbosity the terminal shows what `bx` printed before there was a log: the log is the full record, and `-v` shows its
+INFO records on the terminal (`-vv` DEBUG too), `-q` only warnings and errors, `-qq` only
+errors (`$BENCHX_VERBOSE` sets it: -2 or more). A `bx bench` call starts with a line saying what
+it measures and where it sits (`measuring np_mean.py on @numpy (round 1/5, slot 3)`), and `bx run`
+with one naming the order; `-q` keeps it, `-qq` does not. What `bx bench` and `bx run` report on
+stdout when they finish, the table of results, the cases that were not measured and the result
+line, is in the log as well, a line a record, and `-q` and `-qq` hide it by tiers: `-q` leaves
+the not-measured section and the result line (`N result(s) -> DIR`), `-qq` only the
+not-measured section (a failed case does not change the exit status, so it must not vanish; a case that failed
+without a message is counted on a line that both keep, and a case the harness skipped is expected, so what it
+said goes with the table). A
+run that measured everything is silent at `-qq`. The ingest counts that follow a run
+(`STORE: ingested 12, duplicate 0`) are a progress message on stderr, like `precision:`: shown
+by default and with `-v`, not with `-q`. `bx ingest`, `bx compare`, the queries and everything
+`--json` prints are answers, shown at every level. A target provider's own stderr, such as a build's output, is the provider's: `-qq`
+does not silence it. Each `-v` past `-vv` also asks the harness itself to say more, as `--harness-verbosity N` does: `-vvv` is `-vv` and 1, `-vvvv` is `-vv` and 2. pyperf and asv are then given `--verbose`, and Google Benchmark `--v=N`; the output is logged in full (up to 2000 lines a stream, 40 otherwise). The default, 0, asks for nothing more. The harness prints between values, outside the timed call, but it is output on the machine between samples, so the order records it (`harness_verbosity`, not part of the measurement's identity) and so does each result's `provenance.info`. `$BENCHX_HARNESS_VERBOSITY` and `adapter.verbosity` in the config file set it too, below the flag. The log's own level is `--log-level`
+(`debug`, the default, `info`, `warning`, `error`; `$BENCHX_LOG_LEVEL`, or `log_level` in the
+file). `--no-log` turns it off, `--log` sends it to stderr instead, `--log-file PATH` appends it
+to a file (`{out}` is the run's output folder, `{root}` the project root); the file's key
+`logging` takes `false`, `true` or such a path, and is honoured by the commands that have an
+output folder, while a flag works for any command. A file named `*.json` is refused, since
+`bx ingest` reads such files in a directory. **A `bx.log` records the command line as given,
+`-e` values and credentials in a `--source-uri` included, and a command's output as it was
+printed. It does not claim to hide secrets: like `workorder-….json` in the same folder, it can
+contain them, and a results folder that is archived or shared carries it.** It never holds the environment `bx` inherited, only names of variables, with one exception: the variables benchx itself reads (`BENCHX_HOME`, `BENCHX_VERBOSE`, `BENCHX_LOG_LEVEL`, `BENCHX_HARNESS_VERBOSITY`, `BENCHX_SETUP_FILE`, `BENCHX_ENV_ALLOWLIST`, `BENCHX_SCHEMAS`) are logged with their values, since they are settings someone typed for benchx and decide what it does.
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets (one for
 `--profile variants`) select measure mode and `--run` selects read mode; mixing them is an error.
@@ -148,8 +187,8 @@ order, so `bx run results/KEY/orders/order.json` replays any bench run.
 is a runnable walk-through.
 
 Environments that cannot share a process, such as two venvs with different numpy versions, are
-measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round N`
-and `--slot K` place each call in the session, and `bx compare --run KEY --profile environments
+measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round R[/N]`
+and `--slot K` place each call in the session (`--round 2/5` also says the session has 5 rounds, numbered 0 to 4, which the start line shows), and `bx compare --run KEY --profile environments
 --label NAME --baseline VALUE` compares the sides ([UC-04](https://benchx-dev.github.io/benchx/use-cases/UC-04-cross-env/)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
