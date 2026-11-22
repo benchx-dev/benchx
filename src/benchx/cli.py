@@ -262,19 +262,20 @@ def _report_unmeasured(rows) -> None:
 
 
 def _open_store(path, command: str, *, hint: str | None = None):
-    """Open the local Parquet store, or explain how to install pyarrow and return None."""
+    """Open the local store (Parquet or JSONL), or explain how to install pyarrow for a Parquet file."""
+    from .store import Store
+
     try:
-        from .store import Store
+        return Store(path)
     except ModuleNotFoundError as exc:
         if exc.name and exc.name.split(".")[0] == "pyarrow":
             suffix = f", or {hint}" if hint else ""
             say.error(
-                f"bx {command}: error: Parquet store requires pyarrow; "
+                f"bx {command}: error: Parquet store ({path}) requires pyarrow; "
                 f"install it with `pip install 'benchx[parquet]'`{suffix}"
             )
             return None
         raise
-    return Store(path)
 
 
 def cmd_run(args):
@@ -878,7 +879,7 @@ def _measure(cfg, args, policy, sources):
         store = _open_store(
             cfg.store_path,
             "compare",
-            hint="pass --no-ingest to compare in memory without persisting to the local store",
+            hint="pass --no-ingest to compare without persisting to the local store",
         )
         if store is None:
             return EXIT_REFUSED

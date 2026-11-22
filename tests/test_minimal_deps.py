@@ -158,7 +158,7 @@ def test_canonical_hashes_and_identities_unchanged(adhoc, arrow):
 def test_importing_cli_and_non_store_modules_does_not_import_pyarrow():
     code = (
         "import sys\n"
-        "import benchx.cli, benchx.bench, benchx.compare, benchx.tables, benchx.results, benchx.runner\n"
+        "import benchx.cli, benchx.bench, benchx.compare, benchx.tables, benchx.results, benchx.runner, benchx.store\n"
         "assert 'pyarrow' not in sys.modules, 'pyarrow was imported unexpectedly'\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
@@ -314,6 +314,72 @@ def test_compare_variants_measure_mode_no_ingest_without_pyarrow(tmp, monkeypatc
     assert not list(tmp.glob("*.parquet"))
 
 
+def test_default_cli_uses_jsonl_store_without_pyarrow(repo, tmp, monkeypatch, capsys):
+    """Without pyarrow, default bx bench/run/ingest/head/series/history/compare all work via store.jsonl."""
+    _block_pyarrow(monkeypatch)
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    head = make_build(tmp / "b-head", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3))
+
+    # 1. bx bench (default — no --no-ingest!) creates store.jsonl
+    assert cli.main([
+        "bench", f"{base}:{repo['wt-base']}",
+        "--adapter", "google-benchmark",
+        "--suite", "demo-bench",
+        "--run-key", "jsonl-bench",
+        "--out", str(tmp / "bench-out"),
+    ]) == cli.EXIT_OK
+    assert (tmp / "store.jsonl").is_file()
+    assert not (tmp / "store.parquet").exists()
+    capsys.readouterr()
+
+    # 2. bx run (default — no --no-ingest!) appends to store.jsonl
+    order_path = tmp / "order.json"
+    order_path.write_text(json.dumps(order(base, repo["wt-base"], "jsonl-run")))
+    assert cli.main(["run", str(order_path), "--out", str(tmp / "run-out")]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    # 3. bx ingest (idempotent re-ingest)
+    assert cli.main(["ingest", str(tmp / "run-out")]) == cli.EXIT_OK
+    assert "duplicate" in capsys.readouterr().out
+
+    # 4. bx head, bx head --table, bx series, bx history
+    assert cli.main(["head"]) == cli.EXIT_OK
+    assert "jsonl-run" in capsys.readouterr().out
+    assert cli.main(["head", "--table"]) == cli.EXIT_OK
+    assert QUIET in capsys.readouterr().out
+    assert cli.main(["series"]) == cli.EXIT_OK
+    series_lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert series_lines
+    fp = series_lines[0].split()[0]
+    assert cli.main(["history", fp]) == cli.EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+    # 5. bx compare in measure mode (no --no-ingest!) persists to store.jsonl and compares
+    assert cli.main([
+        "compare", f"{base}:{repo['wt-base']}", f"{head}:{repo['wt-head']}",
+        "--profile", "revisions",
+        "--adapter", "google-benchmark",
+        "--suite", "demo-bench",
+        "--rounds", "4",
+        "--run-key", "jsonl-cmp",
+        "--out", str(tmp / "cmp-out"),
+        "--json",
+    ]) == cli.EXIT_OK
+    measured = json.loads(capsys.readouterr().out)
+    assert core.check(measured, "comparison-document") == []
+    assert {u["workload"]["name"]: u["verdict"] for u in measured["units"]} == {
+        QUIET: "regressed", NOISY: "no-change-detected",
+    }
+
+    # 6. bx compare --run (read mode, no --results!) reads from store.jsonl
+    assert cli.main([
+        "compare", "--run", "jsonl-cmp", "--profile", "revisions",
+        "--baseline", repo["base"][:10], "--json",
+    ]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == measured
+    assert not list(tmp.glob("*.parquet"))
+
+
 @pytest.mark.parametrize("argv, extra_hint", [
     (["ingest", "results"], None),
     (["series"], None),
@@ -323,17 +389,21 @@ def test_compare_variants_measure_mode_no_ingest_without_pyarrow(tmp, monkeypatc
     (["compare", "--run", "r1", "--profile", "revisions", "--baseline", "abc"], "--results"),
     (["compare", "A", "B", "--profile", "revisions", "--adapter", "pyperf", "--suite", "s", "--rounds", "3"], "--no-ingest"),
 ])
-def test_store_commands_give_actionable_error_without_pyarrow(monkeypatch, capsys, argv, extra_hint):
+def test_existing_parquet_store_refuses_cleanly_without_pyarrow(tmp, monkeypatch, capsys, argv, extra_hint):
+    """When store.parquet already exists (or is explicitly configured), missing pyarrow refuses instead of splitting history."""
     _block_pyarrow(monkeypatch)
+    (tmp / "store.parquet").write_bytes(b"PAR1")
     assert cli.main(argv) == cli.EXIT_REFUSED
     err = capsys.readouterr().err
     assert "benchx[parquet]" in err
+    assert not (tmp / "store.jsonl").exists()
     if extra_hint:
         assert extra_hint in err
 
 
-def test_bench_without_no_ingest_gives_actionable_error_without_pyarrow(repo, tmp, monkeypatch, capsys):
+def test_bench_refuses_cleanly_when_parquet_store_exists_without_pyarrow(repo, tmp, monkeypatch, capsys):
     _block_pyarrow(monkeypatch)
+    (tmp / "store.parquet").write_bytes(b"PAR1")
     base = make_build(tmp / "b", repo["wt-base"], cases())
     assert cli.main([
         "bench", f"{base}:{repo['wt-base']}",
@@ -342,12 +412,26 @@ def test_bench_without_no_ingest_gives_actionable_error_without_pyarrow(repo, tm
     ]) == cli.EXIT_REFUSED
     err = capsys.readouterr().err
     assert "benchx[parquet]" in err and "--no-ingest" in err
+    assert not (tmp / "store.jsonl").exists()
 
 
-def test_direct_store_and_parquet_imports_explain_parquet_extra(monkeypatch):
+@requires_pyarrow
+def test_existing_jsonl_store_is_kept_when_pyarrow_is_installed(tmp):
+    """Installing pyarrow later does not orphan an existing store.jsonl."""
+    from benchx import config as config_mod
+
+    (tmp / "store.jsonl").write_text("")
+    assert config_mod.load(tmp).store_path == tmp / "store.jsonl"
+
+
+def test_direct_parquet_store_and_parquet_import_explain_parquet_extra(tmp, monkeypatch):
     _block_pyarrow(monkeypatch)
+    from benchx.store import Store
+
+    # JSONL Store works without pyarrow; Parquet Store and benchx.parquet fail clearly.
+    assert Store(tmp / "store.jsonl").head() == (0, [])
     with pytest.raises(ModuleNotFoundError, match=r"benchx\[parquet\]"):
-        importlib.import_module("benchx.store")
+        Store(tmp / "store.parquet")
     with pytest.raises(ModuleNotFoundError, match=r"benchx\[parquet\]"):
         importlib.import_module("benchx.parquet")
 
@@ -404,16 +488,23 @@ def test_json_only_and_parquet_store_parity_for_ingest_contract(repo, tmp, adhoc
     )
 
     parquet_store = Store(tmp / "store.parquet")
+    jsonl_store = Store(tmp / "store.jsonl")
     memory_store = MemoryStore()
 
     # Initial ingest and duplicate re-ingest
-    assert memory_store.ingest_paths([out]) == parquet_store.ingest_paths([out])
-    assert memory_store.ingest_paths([out]) == parquet_store.ingest_paths([out])
-    assert memory_store.documents("contract-1") == parquet_store.documents("contract-1")
+    assert memory_store.ingest_paths([out]) == parquet_store.ingest_paths([out]) == jsonl_store.ingest_paths([out])
+    assert memory_store.ingest_paths([out]) == parquet_store.ingest_paths([out]) == jsonl_store.ingest_paths([out])
+    assert memory_store.documents("contract-1") == parquet_store.documents("contract-1") == jsonl_store.documents("contract-1")
+    assert jsonl_store.head(n=50) == parquet_store.head(n=50)
+    assert jsonl_store.head(n=2, workload=QUIET, measurands=True) == parquet_store.head(n=2, workload=QUIET, measurands=True)
+    assert jsonl_store.entities() == parquet_store.entities()
+    assert jsonl_store.series() == parquet_store.series()
+    fp = parquet_store.series()[0]["fingerprint"]
+    assert jsonl_store.history(fp) == parquet_store.history(fp)
 
     doc = memory_store.documents("contract-1")[0]
     ref = doc["provenance"]["info"]["workorder_ref"]
-    assert memory_store.order(ref) == parquet_store.order(ref)
+    assert memory_store.order(ref) == parquet_store.order(ref) == jsonl_store.order(ref)
 
     # Every conflict and malformed rejection code matches identically
     cases_to_check = []
@@ -443,7 +534,7 @@ def test_json_only_and_parquet_store_parity_for_ingest_contract(repo, tmp, adhoc
     dup_key_text = json.dumps(doc)[:-1] + ', "ingest_key": "other"}'
     cases_to_check.append(("dupkey.json", dup_key_text))
 
-    assert memory_store.ingest(cases_to_check) == parquet_store.ingest(cases_to_check)
+    assert memory_store.ingest(cases_to_check) == parquet_store.ingest(cases_to_check) == jsonl_store.ingest(cases_to_check)
 
     # Unreadable files and bad workorders in a directory sweep
     bad_dir = tmp / "bad-sweep"
@@ -452,7 +543,7 @@ def test_json_only_and_parquet_store_parity_for_ingest_contract(repo, tmp, adhoc
     (bad_dir / "invalid-utf8.json").write_bytes(b"\xff\xfe\x00")
     (bad_dir / "workorder-bad.json").write_text("{broken")
     missing = tmp / "does-not-exist.json"
-    assert memory_store.ingest_paths([bad_dir, missing]) == parquet_store.ingest_paths([bad_dir, missing])
+    assert memory_store.ingest_paths([bad_dir, missing]) == parquet_store.ingest_paths([bad_dir, missing]) == jsonl_store.ingest_paths([bad_dir, missing])
 
     # CLI `--results` reports rejections identically and exits EXIT_INVALID
     assert cli.main([

@@ -18,8 +18,10 @@ that names the flag and the key (`Config.pick`).
 """
 
 import copy
+import importlib.util
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,8 +34,29 @@ CONFIG_FILE = "benchx.conf.json"
 LEGACY_FILES = (Path(".benchx") / "provider.json", Path(".benchx") / "config.json")
 HOME_ENV = "BENCHX_HOME"
 DEFAULT_STORE = "store.parquet"
+DEFAULT_JSON_STORE = "store.jsonl"
 DEFAULT_RESULTS = "results"
 REQUIRED = object()
+
+
+def _has_pyarrow() -> bool:
+    """Whether pyarrow is importable, without importing it."""
+    if "pyarrow" in sys.modules:
+        return sys.modules["pyarrow"] is not None
+    return importlib.util.find_spec("pyarrow") is not None
+
+
+def _default_store_in(directory: Path) -> Path:
+    """Pick the default store file in `directory`: keep whichever already exists
+    (preferring Parquet so an existing Parquet store is never silently split into
+    a second JSONL file), else Parquet when pyarrow is available and JSONL otherwise."""
+    parquet_path = directory / DEFAULT_STORE
+    if parquet_path.exists():
+        return parquet_path
+    jsonl_path = directory / DEFAULT_JSON_STORE
+    if jsonl_path.exists():
+        return jsonl_path
+    return parquet_path if _has_pyarrow() else jsonl_path
 
 
 class ConfigError(Exception):
@@ -92,11 +115,14 @@ class Config:
 
     @property
     def store_path(self) -> Path:
-        """The store: `$BENCHX_HOME/store.parquet` when that is set (it wins over the
-        file, as it relocates the store for tests and CI), else `paths.store`."""
+        """The store: `$BENCHX_HOME/store.{parquet,jsonl}` when that is set (it wins
+        over the file, as it relocates the store for tests and CI), else `paths.store`,
+        else `store.parquet` (with pyarrow) or `store.jsonl` (without) in the root."""
         if home := os.environ.get(HOME_ENV):
-            return Path(home).expanduser() / DEFAULT_STORE
-        return self._path(self.section("paths").get("store", DEFAULT_STORE))
+            return _default_store_in(Path(home).expanduser())
+        if configured := self.section("paths").get("store"):
+            return self._path(configured)
+        return _default_store_in(self.root)
 
     @property
     def results_dir(self) -> Path:

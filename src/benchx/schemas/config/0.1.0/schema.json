@@ -86,7 +86,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "store": { "description": "The local store (default store.parquet).", "type": "string", "minLength": 1 },
+        "store": { "description": "The local store (default store.parquet when pyarrow is installed, else store.jsonl).", "type": "string", "minLength": 1 },
         "results": { "description": "Where result files are written (default results).", "type": "string", "minLength": 1 }
       }
     },

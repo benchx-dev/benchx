@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from benchx import cli, compare, runner, snapshot
+from benchx import cli, compare, config, runner, snapshot
 from benchx import session as session_module  # `session` is a fixture here
 from benchx.store import Store
-from conftest import cases, make_build
+from conftest import HAS_PYARROW, cases, make_build
 from test_comparator import BASE, HEAD
 from test_parameter_order import NAME, case, evaluate, run_of
 
@@ -190,12 +190,15 @@ def test_the_store_says_what_it_swept_what_it_refused_and_what_it_read(session, 
                for level, m in messages)
     assert any(level == "DEBUG" and "ingest: 0 ingested, 0 duplicate, 4 rejected" in m for level, m in messages)
     caplog.clear()
+    store_path = config.load(tmp).store_path
     with caplog.at_level(logging.DEBUG, logger="benchx"):
-        Store(tmp / "store.parquet").documents("S")
-    assert any("read " in m and " row(s), provenance, document" in m for _, m in records(caplog))
+        Store(store_path).documents("S")
+    read_needle = " row(s), provenance, document" if HAS_PYARROW else " row(s)"
+    assert any("read " in m and read_needle in m for _, m in records(caplog))
     assert any(m.startswith("documents(S): ") for _, m in records(caplog))
+    absent_path = tmp / ("absent.parquet" if HAS_PYARROW else "absent.jsonl")
     with caplog.at_level(logging.DEBUG, logger="benchx"):
-        assert not Store(tmp / "absent.parquet").documents("S")
+        assert not Store(absent_path).documents("S")
     assert any("absent, read as an empty store" in m for _, m in records(caplog))
 
 
@@ -212,7 +215,7 @@ def test_compare_tables_keeps_stdout_clean_with_the_log_on(session, capsys, extr
 
 def test_a_store_that_cannot_be_written_says_where_the_results_are(session, tmp, monkeypatch, capsys):
     from benchx import store as store_mod
-    monkeypatch.setattr(store_mod.pq, "write_table", lambda *a, **k: (_ for _ in ()).throw(OSError(28, "No space left")))
+    monkeypatch.setattr(store_mod.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError(28, "No space left")))
     assert cli.main(["bench", str(tmp / "b-base"), *GBENCH, "--run-key", "fresh"]) == 1  # a crash: the status Python gives
     text = (tmp / "results" / "fresh" / "bx.log").read_text()
     assert " ERROR cannot write " in text and "No space left" in text
@@ -363,7 +366,7 @@ def test_a_dirty_benchmark_in_git_is_not_said_to_be_outside_git(caplog):
 def test_a_side_with_one_noisy_condition_does_not_spend_the_warning_of_a_side_with_the_other(repo, tmp, caplog):
     scaling = make_build(tmp / "scaling", repo["wt-base"], cases(), scaling=True)
     debug = make_build(tmp / "debug", repo["wt-head"], cases(), build_type="debug")
-    store = Store(tmp / "store.parquet")
+    store = Store(tmp / ("store.parquet" if HAS_PYARROW else "store.jsonl"))
     with caplog.at_level(logging.WARNING, logger="benchx"):
         session_module.compare_targets(
             f"{scaling}:{repo['wt-base']}", f"{debug}:{repo['wt-head']}", profile="revisions",

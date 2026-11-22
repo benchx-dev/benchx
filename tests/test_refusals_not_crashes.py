@@ -157,7 +157,7 @@ def test_missing_format_checker_in_custom_schemas_is_refused(tmp_path, adhoc, mo
     dest = schemas / "measurement-result" / "0.1.0"
     dest.mkdir(parents=True)
     schema = json.loads((catalog.SCHEMAS / "measurement-result" / "0.1.0" / "schema.json").read_text())
-    schema["$defs"]["uri"]["format"] = "iri"
+    schema["$defs"]["uri"]["format"] = "no-such-custom-format"
     (dest / "schema.json").write_text(json.dumps(schema))
 
     doc_dir = tmp_path / "results"
@@ -170,7 +170,7 @@ def test_missing_format_checker_in_custom_schemas_is_refused(tmp_path, adhoc, mo
     try:
         assert cli.main(["validate", str(doc_path)]) == cli.EXIT_REFUSED
         err = capsys.readouterr().err
-        assert "bx validate: error:" in err and "iri" in err and "Traceback" not in err
+        assert "bx validate: error:" in err and "no-such-custom-format" in err and "Traceback" not in err
 
         assert cli.main([
             "compare", "--run", adhoc["provenance"]["run_key"],
@@ -178,6 +178,6 @@ def test_missing_format_checker_in_custom_schemas_is_refused(tmp_path, adhoc, mo
             "--results", str(doc_dir),
         ]) == cli.EXIT_REFUSED
         err = capsys.readouterr().err
-        assert "bx compare: error:" in err and "iri" in err and "Traceback" not in err
+        assert "bx compare: error:" in err and "no-such-custom-format" in err and "Traceback" not in err
     finally:
         catalog.clear_cache()

@@ -3,7 +3,7 @@
 import pytest
 
 from benchx import cli, compare, tables
-from conftest import cases, make_build, requires_pyarrow
+from conftest import cases, make_build
 from test_comparator import BASE, HEAD, result
 
 MEAN = "bench_a.Mean.time_mean_axis"
@@ -205,7 +205,6 @@ def builds(repo, tmp):
     return {"baseline": f"{base}:{repo['wt-base']}", "contender": f"{head}:{repo['wt-head']}"}
 
 
-@requires_pyarrow
 def test_tables_after_a_measure_mode_comparison_and_the_same_in_read_mode(repo, tmp, builds, capsys):
     common = ["--profile", "revisions"]
     assert cli.main(["compare", builds["baseline"], builds["contender"], *common, "--adapter", "google-benchmark",
@@ -219,7 +218,6 @@ def test_tables_after_a_measure_mode_comparison_and_the_same_in_read_mode(repo, 
     assert capsys.readouterr().out == measured
 
 
-@requires_pyarrow
 def test_without_tables_the_output_is_what_it_was(repo, tmp, builds, capsys):
     cli.main(["compare", builds["baseline"], builds["contender"], "--profile", "revisions", "--adapter",
               "google-benchmark", "--suite", "demo-bench", "--rounds", "3", "--run-key", "t-2", "--out", str(tmp / "o")])
