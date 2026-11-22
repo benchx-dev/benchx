@@ -4,7 +4,7 @@ BenchX is a powerful and flexible benchmarking framework which aims to address m
 usage scenarios, from running one-off in-development benchmarks to tracking performance
 over history of large projects.
 
-The project is grounded in [user stories](https://benchx-dev.github.io/benchx/user_stories/)
+The project is grounded in [user stories](https://benchx.dev/user_stories/)
 collected from experience of multiple projects. We aim to address various pain points
 we faced and worked around while working on Apache Arrow, NumPy, SciPy, Pandas
 and related projects, so that `benchx` becomes the go-to solution for performance benchmarking
@@ -14,7 +14,7 @@ We welcome contributions of all sorts: add a user story, tell us about your use 
 `benchx` on your workflow/project, open an issue if you found a rough edge,
 implement a missing feature.
 
-- Documentation: <https://benchx-dev.github.io/benchx/>
+- Documentation: <https://benchx.dev/>
 - Live deployment (Apache Arrow C++): <https://arrow.benchx.dev/>
 - Examples & deployments: <https://benchx.dev/examples/>
 - Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
@@ -200,11 +200,11 @@ is a runnable walk-through.
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round R[/N]`
 and `--slot K` place each call in the session (`--round 2/5` also says the session has 5 rounds, numbered 0 to 4, which the start line shows), and `bx compare --run KEY --profile environments
---label NAME --baseline VALUE` compares the sides ([UC-04](https://benchx-dev.github.io/benchx/use-cases/UC-04-cross-env/)).
+--label NAME --baseline VALUE` compares the sides ([UC-04](https://benchx.dev/use-cases/UC-04-cross-env/)).
 `examples/numpy-venvs` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
 is the worked example, with a shell script that drives it.
 
-Two functions of one benchmark ([UC-02](https://benchx-dev.github.io/benchx/use-cases/UC-02-variants/)) are the two values of
+Two functions of one benchmark ([UC-02](https://benchx.dev/use-cases/UC-02-variants/)) are the two values of
 one parameter, declared as pyperf and asv benchmarks declare theirs. Build the data once, outside the
 function (at module level, or behind `functools.cache`), because pyperf times the whole body:
 

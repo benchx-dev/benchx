@@ -10,7 +10,7 @@
 [project]
 site_name = "benchx"
 site_description = "A schema-first design for continuous benchmarking"
-site_url = "https://benchx-dev.github.io/benchx/"
+site_url = "https://benchx.dev/"
 repo_url = "https://github.com/benchx-dev/benchx"
 repo_name = "benchx-dev/benchx"
 edit_uri = "edit/main/docs/"
