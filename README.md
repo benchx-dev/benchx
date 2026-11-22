@@ -43,23 +43,47 @@ We welcome contributions of all sorts: add a user story, tell us about your use 
 implement a missing feature.
 
 - Documentation: <https://benchx-dev.github.io/benchx/>
+- Live deployment (Apache Arrow C++): <https://benchx-dev.github.io/benchx-arrow/#/>
 - Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
-- A collection of worked examples: <https://github.com/benchx-dev/benchx_examples>
+- Worked examples: <https://github.com/benchx-dev/benchx_examples>
 
+## Live deployment and companion repositories
+
+A live continuous-benchmarking deployment tracking Apache Arrow C++ benchmarks
+on `main` is published at <https://benchx-dev.github.io/benchx-arrow/#/>.
+
+In line with the three-layer split described in
+[`docs/design/ci-workbench.md`](docs/design/ci-workbench.md#7-packaging-and-repository-boundaries),
+cloud CI automation and per-project benchmark configuration live in companion
+repositories so that `benchx` itself stays cloud-free and CI-vendor-neutral:
+
+- [benchx-arrow](https://github.com/benchx-dev/benchx-arrow) — Apache Arrow C++
+  benchmark tracking repository (project config, target provider, machine
+  catalog, and GitHub Pages publishing for the
+  [live dashboard](https://benchx-dev.github.io/benchx-arrow/#/)).
+- [benchx-ci](https://github.com/benchx-dev/benchx-ci) — reusable GitHub Actions
+  workflows and AWS EC2/S3 infrastructure templates for ephemeral continuous
+  benchmarking.
+- [benchx_examples](https://github.com/benchx-dev/benchx_examples) — local
+  end-to-end examples (NumPy, Arrow, pyperf, Google Benchmark, ASV).
 
 ## Contents
 
-- `docs/design/benchmark-result-schema.md` — the benchmark result schema and
-  migration contract (the core design document).
-- `docs/design/measurement-result-parquet.md` — how a result is stored in
-  Parquet (`src/benchx/parquet.py`), with a small converter in
-  `tools/json_to_parquet.py`.
-- `docs/user_stories/` — user story template and collected stories.
-- `src/benchx/` -- an in-progress implementation, with its tests in `tests/`.
-- `src/benchx/schemas/` -- JSON schemas for the benchmark result and other components
-  (shipped with the package).
-- worked examples of benchmarking setup(s) are in
-  [benchx_examples](https://github.com/benchx-dev/benchx_examples).
+- [`docs/benchx.md`](docs/benchx.md) — installation, CLI reference (`bx`), and
+  implementation details.
+- [`docs/design/benchmark-result-schema.md`](docs/design/benchmark-result-schema.md)
+  — the benchmark result schema and migration contract (the core design
+  document).
+- [`docs/design/ci-workbench.md`](docs/design/ci-workbench.md) — unattended CI
+  workbench lifecycle, staging, and repository boundaries.
+- [`docs/design/measurement-result-parquet.md`](docs/design/measurement-result-parquet.md)
+  — how a result is stored in Parquet (`src/benchx/parquet.py`), with a small
+  converter in `tools/json_to_parquet.py`.
+- [`docs/user_stories/README.md`](docs/user_stories/README.md) — user story
+  template and collected stories.
+- `src/benchx/` — the implementation, with its tests in `tests/`.
+- `src/benchx/schemas/` — JSON schemas for the benchmark result and other
+  components (shipped with the package).
 
 ## Documentation site
 
