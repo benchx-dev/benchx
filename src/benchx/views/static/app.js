@@ -4,7 +4,12 @@
 // #/suites, #/s/<suite>, #/b/<suite>/<case>?params=&q=&node=, #/c/<sha>, #/about.
 
 const DATA = "data/";
-const SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
+const SERIES_VARS = [
+  "--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6",
+  "--series-7", "--series-8", "--series-9", "--series-10", "--series-11", "--series-12",
+];
+const SERIES_DASHES = [null, [6, 3], [2, 2]];
+const MAX_AUTO_VARIANTS = 12;
 const PAGE = 50;
 const MARK = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="10" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 24 L46 52 M46 24 L18 52" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>';
 const MARK_SMALL = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="8" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 26 L46 52 M46 26 L18 52" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg>';
@@ -586,25 +591,185 @@ async function loadHistory(suite) {
   return hist;
 }
 
-function groupSeries(list, extra = () => ({})) {
+function splitCaseSlash(name) {
+  const parts = [];
+  let cur = "", inQuote = false, angle = 0;
+  for (let i = 0; i < name.length; i++) {
+    const ch = name[i];
+    if (ch === '"' && name[i - 1] !== "\\") { inQuote = !inQuote; cur += ch; }
+    else if (!inQuote && ch === "<") { angle++; cur += ch; }
+    else if (!inQuote && ch === ">" && angle > 0) { angle--; cur += ch; }
+    else if (!inQuote && angle === 0 && ch === "/") { parts.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  parts.push(cur);
+  return parts;
+}
+
+function natCmp(a, b) {
+  const sa = String(a), sb = String(b);
+  const na = /^-?\d+(\.\d+)?$/.test(sa), nb = /^-?\d+(\.\d+)?$/.test(sb);
+  if (na && nb) return Number(sa) - Number(sb);
+  return sa.localeCompare(sb, undefined, { numeric: true });
+}
+
+function axisDisplayName(key) {
+  const m = /^arg(\d+)$/.exec(key);
+  return m ? `Param ${m[1]}` : key;
+}
+
+function parseSeriesSpec(s) {
+  const rawParams = s.params || "";
+  if (rawParams) {
+    try {
+      const obj = JSON.parse(rawParams);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        const entries = Object.entries(obj).map(([k, v]) => [k, String(v)]);
+        return { family: s.case, map: Object.fromEntries(entries), keys: entries.map(([k]) => k), explicit: true };
+      }
+    } catch (_) { /* fall through */ }
+    return { family: s.case, map: { param: rawParams }, keys: ["param"], explicit: true };
+  }
+  const kase = s.case || "";
+  if (kase.includes("/")) {
+    const parts = splitCaseSlash(kase);
+    if (parts.length > 1) {
+      const map = {}, keys = [];
+      let pos = 0;
+      for (const seg of parts.slice(1)) {
+        let key, val;
+        if (seg === "real_time" || seg === "manual_time" || seg === "process_time") {
+          key = "timing"; val = seg;
+        } else {
+          const colon = seg.startsWith('"') ? -1 : seg.indexOf(":");
+          if (colon > 0) {
+            key = seg.slice(0, colon).trim();
+            val = seg.slice(colon + 1).trim();
+          } else {
+            key = `arg${++pos}`;
+            val = seg;
+          }
+        }
+        let uniqKey = key;
+        for (let n = 2; uniqKey in map; n++) uniqKey = `${key}_${n}`;
+        map[uniqKey] = val;
+        keys.push(uniqKey);
+      }
+      return { family: parts[0], map, keys, explicit: false };
+    }
+  }
+  return { family: kase, map: {}, keys: [], explicit: false };
+}
+
+function seriesVariantId(s) { return `${s.case}\0${s.params || ""}`; }
+
+function buildBenchFamily(suiteSeries, targetCase, targetParams) {
+  const targetSpec = parseSeriesSpec({ case: targetCase, params: targetParams });
+  let members;
+  if (targetParams) {
+    members = suiteSeries.filter((s) => s.case === targetCase);
+  } else if (targetCase.includes("/")) {
+    members = suiteSeries.filter((s) => !s.params && parseSeriesSpec(s).family === targetSpec.family);
+  } else {
+    const exact = suiteSeries.filter((s) => s.case === targetCase);
+    if (exact.length) {
+      members = exact;
+    } else {
+      const byFam = suiteSeries.filter((s) => !s.params && parseSeriesSpec(s).family === targetCase);
+      members = byFam.length ? byFam : exact;
+    }
+  }
+
+  const parsed = members.map((s) => ({ s, spec: parseSeriesSpec(s) }));
+  const keyOrder = [];
+  const keySeen = new Set();
+  for (const { spec } of parsed) {
+    for (const k of spec.keys) if (!keySeen.has(k)) { keySeen.add(k); keyOrder.push(k); }
+  }
+  const varyingAxes = [];
+  const constantParams = [];
+  for (const key of keyOrder) {
+    const vals = [...new Set(parsed.map(({ spec }) => (key in spec.map ? spec.map[key] : "(none)")))].sort(natCmp);
+    if (vals.length > 1) varyingAxes.push({ key, label: axisDisplayName(key), values: vals });
+    else if (vals.length === 1) constantParams.push([key, vals[0]]);
+  }
+
+  const allPositional = varyingAxes.length > 0 && varyingAxes.every((ax) => /^arg\d+$/.test(ax.key));
+  const labelForMember = (spec, s) => {
+    if (!varyingAxes.length) return s.params || "(default)";
+    if (varyingAxes.length === 1) {
+      const k = varyingAxes[0].key;
+      return k in spec.map ? spec.map[k] : "(none)";
+    }
+    if (allPositional) return varyingAxes.map((ax) => (ax.key in spec.map ? spec.map[ax.key] : "(none)")).join(" / ");
+    return varyingAxes.map((ax) => {
+      const v = ax.key in spec.map ? spec.map[ax.key] : "(none)";
+      return /^arg\d+$/.test(ax.key) ? v : `${ax.key}=${v}`;
+    }).join(", ");
+  };
+
+  parsed.sort((a, b) => {
+    for (const ax of varyingAxes) {
+      const va = ax.key in a.spec.map ? a.spec.map[ax.key] : "(none)";
+      const vb = ax.key in b.spec.map ? b.spec.map[ax.key] : "(none)";
+      const d = natCmp(va, vb);
+      if (d !== 0) return d;
+    }
+    return a.s.node.localeCompare(b.s.node) || a.s.quantity.localeCompare(b.s.quantity);
+  });
+
+  const enriched = parsed.map(({ s, spec }) => ({
+    ...s,
+    _spec: spec,
+    _vlabel: labelForMember(spec, s),
+    _vid: seriesVariantId(s),
+  }));
+  const focused = enriched.find((s) => s.case === targetCase && (s.params || "") === (targetParams || "")) || enriched[0] || null;
+  const familyName = varyingAxes.length > 0 ? targetSpec.family : (focused?.case || targetCase);
+  return { familyName, members: enriched, varyingAxes, constantParams, focused };
+}
+
+function groupFamilySeries(list, extra = () => ({})) {
   const groups = new Map();
   for (const s of list) {
-    const key = `${s.suite}|${s.case}|${s.params}|${s.quantity}`;
-    if (!groups.has(key)) groups.set(key, { suite: s.suite, case: s.case, params: s.params, quantity: s.quantity, unit: s.unit, direction: s.direction, list: [] });
-    groups.get(key).list.push(s);
+    const spec = parseSeriesSpec(s);
+    const key = `${s.suite}|${spec.family}|${s.quantity}`;
+    if (!groups.has(key)) {
+      groups.set(key, { suite: s.suite, family: spec.family, case: s.case, params: s.params, quantity: s.quantity, unit: s.unit, direction: s.direction, list: [] });
+    }
+    groups.get(key).list.push({ ...s, _spec: spec });
   }
-  return [...groups.values()].map((g) => ({ ...g, ...extra(g) }));
+  return [...groups.values()].map((g) => {
+    const vids = new Set(g.list.map(seriesVariantId));
+    g.variantCount = vids.size;
+    if (g.variantCount === 1) {
+      g.displayName = caseLabel(g.list[0]);
+      g.href = benchHref(g.list[0]);
+    } else {
+      g.displayName = g.family;
+      const q = new URLSearchParams();
+      if (g.quantity && g.quantity !== "wall-time") q.set("q", g.quantity);
+      const qs = q.toString();
+      g.href = `#/b/${encodeURIComponent(g.suite)}/${encodeURIComponent(g.family)}${qs ? "?" + qs : ""}`;
+    }
+    return { ...g, ...extra(g) };
+  });
 }
 
 function benchCard(g) {
   const n = g.newest;
   const failed = isFailed(g.status);
   const plot = h("div", { class: "spark" });
-  const sub = [g.quantity !== "wall-time" ? g.quantity : null, n && multiNode() ? n.node : null].filter(Boolean).join(" · ");
+  const sub = [
+    g.variantCount > 1 ? `${g.variantCount} params` : null,
+    g.quantity !== "wall-time" ? g.quantity : null,
+    n && multiNode() ? n.node : null,
+  ].filter(Boolean).join(" · ");
   const points = n?.points ?? 0;
-  const card = h("a", { class: `mini${failed ? " failed" : ""}`, href: benchHref(g, { node: n?.node }) },
+  const title = g.displayName || caseLabel(g);
+  const card = h("a", { class: `mini${failed ? " failed" : ""}`, href: g.href || benchHref(g, { node: n?.node }) },
     h("div", { class: "mini-head" },
-      h("span", { class: "mono name", title: caseLabel(g) }, caseLabel(g)),
+      h("span", { class: "mono name", title }, title),
       n ? delta(g.change, g.direction, { noise: n.noise, unit: g.unit }) : null),
     h("div", { class: "mini-value" }, h("span", { class: "num" }, n ? fmtValue(n.estimate ?? n.latest, g.unit) : "–"), sub && h("span", { class: "note" }, sub)),
     plot,
@@ -615,20 +780,25 @@ function benchCard(g) {
 }
 
 function drawSpark(el, seriesList, axis) {
+  const capped = seriesList.slice(0, MAX_AUTO_VARIANTS);
   const index = new Map(axis.map((c, i) => [c.commit_order, i]));
   const xs = axis.map((_, i) => i);
-  const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = s.estimates[k]; }); return col; });
+  const ys = capped.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = s.estimates[k]; }); return col; });
   const vals = ys.flat().filter((v) => v != null);
   if (!vals.length) { el.append(h("div", { class: "spark-empty" }, "no measurement")); return; }
   if (typeof uPlot === "undefined") { el.append(h("div", { class: "spark-empty" }, "offline")); return; }
   const lo = Math.min(...vals), hi = Math.max(...vals), mid = (lo + hi) / 2;
   const half = Math.max((hi - lo) * 0.6, Math.abs(mid) * 0.03, 1e-12);
   const width = Math.max(120, el.clientWidth || 220);
+  const multiVariant = new Set(capped.map(seriesVariantId)).size > 1;
   const chart = new uPlot({
     width, height: 48, legend: { show: false }, cursor: { show: false },
     scales: { x: { time: false, range: [-0.5, xs.length - 0.5] }, y: { range: [mid - half, mid + half] } },
     axes: [{ show: false }, { show: false }],
-    series: [{}, ...seriesList.map((s) => ({ stroke: seriesColor(s.node), width: 1.5, spanGaps: true, points: { show: xs.length <= 12, size: 4, stroke: seriesColor(s.node), fill: cssVar("--page"), width: 1.5 } }))],
+    series: [{}, ...capped.map((s, k) => {
+      const col = multiVariant ? cssVar(SERIES_VARS[k % SERIES_VARS.length]) : seriesColor(s.node);
+      return { stroke: col, width: 1.5, spanGaps: true, points: { show: xs.length <= 12 && capped.length <= 4, size: 3.5, stroke: col, fill: cssVar("--page"), width: 1.5 } };
+    })],
   }, [xs, ...ys], el);
   state.charts.push(chart);
 }
@@ -639,12 +809,17 @@ async function renderSuite(suite, seq) {
   const hist = await loadHistory(suite);
   if (seq != null && seq !== state.routeSeq) return null;
   const latestBy = new Map(rows.map((r) => [`${r.case}|${r.params}|${r.quantity}|${r.node}`, r]));
-  const groups = groupSeries(Object.values(hist.series).map((s) => ({ ...s, suite })), (g) => {
+  const groups = groupFamilySeries(Object.values(hist.series).map((s) => ({ ...s, suite })), (g) => {
     const mine = g.list.map((s) => latestBy.get(`${s.case}|${s.params}|${s.quantity}|${s.node}`)).filter(Boolean);
-    const newest = mine.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
+    const measured = mine.filter((r) => r.estimate != null);
+    const newest = measured.sort((a, b) => {
+      const ca = a.vs_prev == null ? -1 : Math.abs(a.vs_prev);
+      const cb = b.vs_prev == null ? -1 : Math.abs(b.vs_prev);
+      return cb - ca || b.commit_order - a.commit_order;
+    })[0];
     const failing = mine.find((r) => isFailed(r.status) && (!newest || r.node === newest.node));
     return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : "success", reason: failing?.reason };
-  }).sort((a, b) => a.case.localeCompare(b.case) || a.params.localeCompare(b.params));
+  }).sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   const ctl = { mode: "table", text: "", sort: "name", dir: "asc" };
   const host = h("div", {});
@@ -683,7 +858,7 @@ async function renderSuite(suite, seq) {
         }),
         { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "node", "value", "change", null, "noise", "points"] } }));
     } else {
-      const shown = groups.filter((g) => !needle || caseLabel(g).toLowerCase().includes(needle));
+      const shown = groups.filter((g) => !needle || g.displayName.toLowerCase().includes(needle) || g.list.some((s) => caseLabel(s).toLowerCase().includes(needle)));
       status.textContent = `${shown.length} of ${groups.length} benchmarks`;
       const grid = h("div", { class: "grid" });
       const cards = shown.map((g) => { const [card, plot] = benchCard(g); grid.append(card); return [g, plot]; });
@@ -701,7 +876,7 @@ async function renderSuite(suite, seq) {
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", suite),
     h("h2", { class: "mono title" }, suite),
-    h("p", { class: "lead" }, `${groups.length} benchmarks across ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null),
+    h("p", { class: "lead" }, `${groups.length} benchmarks (${rows.length} series) across ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null),
     h("div", { class: "filters" },
       h("div", { class: "seg" }, btnTable, btnGrid),
       h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; draw(); } }),
@@ -716,11 +891,11 @@ async function renderSuite(suite, seq) {
 function exportCsv(seriesList, axis, suite, kase, unit) {
   const index = new Map(axis.map((c) => [c.commit_order, c]));
   const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const lines = [["commit", "date", "machine", "params", "quantity", "unit", "median", "min", "max", "n", "status", "subject"].join(",")];
+  const lines = [["commit", "date", "machine", "benchmark", "params", "quantity", "unit", "median", "min", "max", "n", "status", "subject"].join(",")];
   for (const s of seriesList) {
     for (let i = 0; i < s.orders.length; i++) {
       const c = index.get(s.orders[i]) || {};
-      lines.push([c.sha, c.date, s.node, s.params, s.quantity, unit, s.estimates[i], s.mins?.[i], s.maxs?.[i], s.ns?.[i], s.statuses?.[i], c.subject].map(esc).join(","));
+      lines.push([c.sha, c.date, s.node, s.case, s.params, s.quantity, unit, s.estimates[i], s.mins?.[i], s.maxs?.[i], s.ns?.[i], s.statuses?.[i], c.subject].map(esc).join(","));
     }
   }
   const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
@@ -736,12 +911,48 @@ async function renderBench(suite, kase, query, seq) {
   const nodeFilter = query.get("node") || "all";
   const hist = await loadHistory(suite);
   if (seq != null && seq !== state.routeSeq) return null;
-  const all = Object.values(hist.series).filter((s) => s.case === kase);
-  const variants = [...new Set(all.map((s) => s.params))];
-  const quantities = [...new Set(all.map((s) => s.quantity))];
-  const nodes = [...new Set(all.map((s) => s.node))].sort();
 
-  const selectedVariants = new Set(variants.includes(initParams) ? [initParams] : variants.slice(0, 1));
+  const fam = buildBenchFamily(Object.values(hist.series), kase, initParams);
+  const { familyName, members, varyingAxes, constantParams, focused } = fam;
+  const quantities = [...new Set(members.map((s) => s.quantity))];
+  const activeQty = quantities.includes(quantity) ? quantity : (quantities[0] || quantity);
+  const nodes = [...new Set(members.map((s) => s.node))].sort();
+  const totalVariants = new Set(members.filter((s) => s.quantity === activeQty).map((s) => s._vid)).size;
+
+  // Default parameter selection: show all parameter variants together on the same graph
+  // (up to MAX_AUTO_VARIANTS); for larger Cartesian grids, expand one varying parameter
+  // around the clicked benchmark so the chart stays immediately readable.
+  const selectedAxes = new Map();
+  const valOf = (s, key) => (key in s._spec.map ? s._spec.map[key] : "(none)");
+  const pinTo = (ref) => {
+    for (const ax of varyingAxes) {
+      const v = ref ? valOf(ref, ax.key) : ax.values[0];
+      selectedAxes.set(ax.key, new Set([v]));
+    }
+  };
+  const selectAllAxes = () => {
+    for (const ax of varyingAxes) selectedAxes.set(ax.key, new Set(ax.values));
+  };
+
+  if (totalVariants <= MAX_AUTO_VARIANTS) {
+    selectAllAxes();
+  } else {
+    pinTo(focused);
+    // Prefer the last varying axis with <= MAX_AUTO_VARIANTS values (typically innermost param);
+    // otherwise pick the smallest varying axis and show up to 8 values including the focused one.
+    const goodAxis = [...varyingAxes].reverse().find((ax) => ax.values.length <= MAX_AUTO_VARIANTS);
+    if (goodAxis) {
+      selectedAxes.set(goodAxis.key, new Set(goodAxis.values));
+    } else if (varyingAxes.length) {
+      const smallest = [...varyingAxes].sort((a, b) => a.values.length - b.values.length)[0];
+      const fv = focused ? valOf(focused, smallest.key) : smallest.values[0];
+      const pick = new Set(smallest.values.slice(0, 8));
+      pick.add(fv);
+      selectedAxes.set(smallest.key, pick);
+    }
+  }
+
+  let summaryVid = focused?._vid || null;
   const plotOpts = { logY: false, zeroY: false, dateX: false, showSpread: true, showNoise: true };
 
   const setParam = (k, v) => {
@@ -754,14 +965,21 @@ async function renderBench(suite, kase, query, seq) {
       values.map((v) => h("option", { value: v, selected: v === current }, fmt(v)))));
 
   const summaryHost = h("div", {});
+  const paramsHost = h("div", {});
   const chartWrap = h("div", { class: "chart-wrap" });
   const historyTableHost = h("div", {});
-  const variantBarHost = h("div", {});
 
-  const getShown = () => all.filter((s) =>
-    selectedVariants.has(s.params) &&
-    s.quantity === quantity &&
-    (nodeFilter === "all" || s.node === nodeFilter));
+  const latestIndex = new Map();
+  for (const r of state.series) {
+    if (r.suite === suite && r.quantity === activeQty) {
+      latestIndex.set(`${r.case}\0${r.params || ""}\0${r.node}`, r);
+    }
+  }
+
+  const getShown = () => members.filter((s) =>
+    s.quantity === activeQty &&
+    (nodeFilter === "all" || s.node === nodeFilter) &&
+    varyingAxes.every((ax) => selectedAxes.get(ax.key)?.has(valOf(s, ax.key))));
 
   const redraw = () => {
     destroyCharts();
@@ -769,18 +987,56 @@ async function renderBench(suite, kase, query, seq) {
     state.cleanup = [];
 
     const shown = getShown();
-    const latestRows = state.series.filter((s) =>
-      s.suite === suite && s.case === kase && selectedVariants.has(s.params) && s.quantity === quantity &&
-      (nodeFilter === "all" || s.node === nodeFilter));
+    const shownVids = [...new Set(shown.map((s) => s._vid))];
+    if (!shownVids.includes(summaryVid)) summaryVid = shownVids[0] || null;
+    const summarySeries = shown.filter((s) => s._vid === summaryVid);
+    const latestRows = summarySeries
+      .map((s) => latestIndex.get(`${s.case}\0${s.params || ""}\0${s.node}`))
+      .filter(Boolean);
     const kpi = latestRows.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
-    const unit = shown[0]?.unit || kpi?.unit || "";
-    const direction = shown[0]?.direction || kpi?.direction || "";
+    const unit = shown[0]?.unit || kpi?.unit || members[0]?.unit || "";
+    const direction = shown[0]?.direction || kpi?.direction || members[0]?.direction || "";
     const few = kpi && kpi.points < 3;
-    const lastNs = shown.flatMap((x) => (x.ns || []).filter((n, k) => x.estimates[k] != null));
+    const lastNs = summarySeries.flatMap((x) => (x.ns || []).filter((n, k) => x.estimates[k] != null));
     const reps = lastNs.length ? lastNs[lastNs.length - 1] : null;
+    const multiVariantShown = shownVids.length > 1;
+    const multiSeries = shown.length > 1;
+
+    // Compact legend/table label using only the parameter axes that vary within the current plot.
+    const activeVarying = varyingAxes.filter((ax) => new Set(shown.map((s) => valOf(s, ax.key))).size > 1);
+    const activeAllPos = activeVarying.length > 0 && activeVarying.every((ax) => /^arg\d+$/.test(ax.key));
+    const plotLabel = (s) => {
+      if (!activeVarying.length) return s._vlabel;
+      if (activeVarying.length === 1) return valOf(s, activeVarying[0].key);
+      if (activeAllPos) return activeVarying.map((ax) => valOf(s, ax.key)).join(" / ");
+      return activeVarying.map((ax) => (/^arg\d+$/.test(ax.key) ? valOf(s, ax.key) : `${ax.key}=${valOf(s, ax.key)}`)).join(", ");
+    };
+    const plotted = shown.map((s) => ({ ...s, _plabel: plotLabel(s) }));
+
+    // Map single-axis values to chart colors when exactly one parameter axis varies in the plot.
+    const swatchAxis = activeVarying.length === 1 && new Set(shown.map((s) => s.node)).size <= 1 ? activeVarying[0].key : null;
+    const swatchColors = new Map();
+    if (swatchAxis) {
+      plotted.forEach((s, k) => {
+        const v = valOf(s, swatchAxis);
+        if (!swatchColors.has(v)) swatchColors.set(v, cssVar(SERIES_VARS[k % SERIES_VARS.length]));
+      });
+    }
+
+    const variantSelector = multiVariantShown
+      ? h("select", {
+          class: "summary-variant",
+          "aria-label": "Summarized parameter variant",
+          onchange: (e) => { summaryVid = e.target.value; redraw(); },
+        }, shownVids.map((vid) => {
+          const rep = plotted.find((s) => s._vid === vid);
+          return h("option", { value: vid, selected: vid === summaryVid }, rep?._plabel || rep?._vlabel || vid);
+        }))
+      : null;
 
     summaryHost.replaceChildren(h("aside", { class: "summary-box" },
       h("h3", {}, "Summary"),
+      variantSelector,
       kpi ? h("dl", { class: "kv" },
         h("dt", {}, "Latest"), h("dd", { class: "big num" }, fmtValue(kpi.estimate, unit)),
         h("dt", {}, "vs prev"), h("dd", {}, delta(kpi.vs_prev, direction, { unit, noise: kpi.noise })),
@@ -792,37 +1048,64 @@ async function renderBench(suite, kase, query, seq) {
         h("dt", {}, "Machine"), h("dd", {}, kpi.node),
       ) : h("p", { class: "note" }, "No successful measurement yet."),
       h("div", { class: "summary-actions" },
-        h("button", { class: "ghost", onclick: () => exportCsv(shown, hist.commits, suite, kase, unit) }, "Download CSV"),
+        h("button", { class: "ghost", onclick: () => exportCsv(shown, hist.commits, suite, familyName, unit) }, "Download CSV"),
         kpi ? h("a", { class: "button", href: `#/c/${encodeURIComponent(kpi.sha)}` }, "Open commit") : null)));
 
-    if (variants.length > 1) {
-      variantBarHost.replaceChildren(h("div", { class: "plot-variants" },
-        h("span", { class: "vlabel" }, "Variants (click to overlay):"),
-        variants.map((v) => {
-          const on = selectedVariants.has(v);
-          return h("button", {
-            class: `ghost${on ? " active" : ""}`,
-            onclick: () => {
-              if (on && selectedVariants.size > 1) selectedVariants.delete(v);
-              else selectedVariants.add(v);
-              redraw();
-            },
-          }, v || "(default)");
-        })));
+    if (varyingAxes.length > 0) {
+      const refForPin = shown.find((s) => s._vid === summaryVid) || focused || members[0];
+      paramsHost.replaceChildren(h("aside", { class: "params-box" },
+        h("div", { class: "params-head" },
+          h("h3", {}, "Parameters"),
+          h("span", { class: "params-actions" },
+            h("button", { class: "link-btn", onclick: () => { selectAllAxes(); redraw(); } }, "all"),
+            "·",
+            h("button", { class: "link-btn", onclick: () => { pinTo(refForPin); redraw(); } }, "only 1"))),
+        varyingAxes.map((ax) => {
+          const sel = selectedAxes.get(ax.key);
+          const refVal = refForPin ? valOf(refForPin, ax.key) : ax.values[0];
+          return h("div", { class: "param-group" },
+            h("div", { class: "param-group-head" },
+              h("span", {}, ax.label),
+              h("span", { class: "params-actions" },
+                h("button", { class: "link-btn", onclick: () => { selectedAxes.set(ax.key, new Set(ax.values)); redraw(); } }, "all"),
+                "·",
+                h("button", { class: "link-btn", onclick: () => { selectedAxes.set(ax.key, new Set([sel.has(refVal) ? refVal : ax.values[0]])); redraw(); } }, "1"))),
+            h("div", { class: "param-values" }, ax.values.map((val) => {
+              const checked = sel.has(val);
+              const sw = swatchAxis === ax.key ? swatchColors.get(val) : null;
+              return h("label", { class: "param-opt" },
+                h("input", {
+                  type: "checkbox",
+                  checked,
+                  onchange: (e) => {
+                    if (e.target.checked) sel.add(val);
+                    else if (sel.size > 1) sel.delete(val);
+                    else { e.target.checked = true; return; }
+                    redraw();
+                  },
+                }),
+                sw ? h("span", { class: "swatch", style: `border-color:${sw}` }) : null,
+                h("span", { class: "mono" }, val));
+            })));
+        }),
+        h("div", { class: "params-foot" },
+          `Showing ${shownVids.length} of ${totalVariants} variants`,
+          constantParams.length ? ` · ${constantParams.map(([k, v]) => (/^arg\d+$/.test(k) ? v : `${k}=${v}`)).join(", ")}` : "")));
     } else {
-      variantBarHost.replaceChildren();
+      paramsHost.replaceChildren();
     }
 
     requestAnimationFrame(() => {
       if (seq != null && seq !== state.routeSeq) return;
-      drawHistory(chartWrap, shown, hist.commits, unit, kase, plotOpts, kpi?.noise);
+      drawHistory(chartWrap, plotted, hist.commits, unit, familyName, plotOpts, multiSeries ? null : kpi?.noise);
     });
 
     // Full clickable history table (newest first)
     const byOrder = new Map(hist.commits.map((c) => [c.commit_order, c]));
     const histRows = [];
-    const scale = pickScale(shown.flatMap((s) => s.estimates), unit);
-    for (const s of shown) {
+    const scale = pickScale(plotted.flatMap((s) => s.estimates), unit);
+    for (const s of plotted) {
+      const sLatest = latestIndex.get(`${s.case}\0${s.params || ""}\0${s.node}`);
       let prev = null;
       for (let i = 0; i < s.orders.length; i++) {
         const c = byOrder.get(s.orders[i]) || {};
@@ -837,23 +1120,25 @@ async function renderBench(suite, kase, query, seq) {
             fmtDate(c.date),
             (c.subject || "").length > 64 ? c.subject.slice(0, 62) + "…" : (c.subject || ""),
             s.node,
-            ...(selectedVariants.size > 1 ? [s.params || "(default)"] : []),
+            ...(multiVariantShown ? [h("span", { class: "mono" }, s._plabel)] : []),
             est != null ? fmtValue(est, unit, scale) : failTag(s.reasons?.[i], s.statuses?.[i] || "failed"),
             range,
-            { v: delta(rel, direction, { unit, noise: kpi?.noise }), cls: changeCellClass(rel, direction, kpi?.noise) },
+            { v: delta(rel, direction, { unit, noise: sLatest?.noise }), cls: changeCellClass(rel, direction, sLatest?.noise) },
           ],
         });
         if (est != null) prev = est;
       }
     }
     histRows.sort((a, b) => b.order - a.order);
-    const headers = ["Commit", "Date", "Subject", "Machine", ...(selectedVariants.size > 1 ? ["Variant"] : []), `>Median`, ">Min–Max (n)", ">vs prev"];
+    const headers = ["Commit", "Date", "Subject", "Machine", ...(multiVariantShown ? ["Parameters"] : []), `>Median`, ">Min–Max (n)", ">vs prev"];
     historyTableHost.replaceChildren(
       h("h3", {}, `Measurements (${histRows.length})`),
       table(headers, histRows.map((r) => r.cells), { empty: "no measurements" }));
   };
 
-  const failing = state.series.filter((s) => s.suite === suite && s.case === kase && selectedVariants.has(s.params) && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter) && isFailed(s.status));
+  const failing = members
+    .map((s) => latestIndex.get(`${s.case}\0${s.params || ""}\0${s.node}`))
+    .filter((r) => r && (nodeFilter === "all" || r.node === nodeFilter) && isFailed(r.status));
   const check = (label, key) => h("label", {},
     h("input", { type: "checkbox", checked: plotOpts[key], onchange: (e) => { plotOpts[key] = e.target.checked; redraw(); } }), label);
 
@@ -863,17 +1148,23 @@ async function renderBench(suite, kase, query, seq) {
     check("Date axis", "dateX"),
     check("Min–max", "showSpread"),
     check("±2× noise", "showNoise"),
-    quantities.length > 1 ? select("Quantity", "q", quantities, quantity) : null,
+    quantities.length > 1 ? select("Quantity", "q", quantities, activeQty) : null,
     nodes.length > 1 ? select("Machine", "node", ["all", ...nodes], nodeFilter) : null);
+
+  const leadBits = [
+    activeQty,
+    members[0]?.direction ? members[0].direction.replace(/-/g, " ") : null,
+    totalVariants > 1 ? `${totalVariants} parameter variants` : null,
+  ].filter(Boolean).join(" · ");
 
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", h("a", { href: `#/s/${encodeURIComponent(suite)}` }, suite)),
-    h("h2", { class: "mono title" }, kase, initParams ? ` ${initParams}` : ""),
-    h("p", { class: "lead" }, `${quantity}${all[0]?.direction ? ` · ${all[0].direction.replace(/-/g, " ")}` : ""}`),
-    failing.map((f) => h("div", { class: "banner bad" }, `Latest attempt on ${f.node} (`, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, shortSha(f.attempt_sha)), `) failed: `, h("code", {}, f.reason || f.status))),
+    h("h2", { class: "mono title" }, familyName),
+    h("p", { class: "lead" }, leadBits),
+    failing.slice(0, 5).map((f) => h("div", { class: "banner bad" }, `Latest attempt on ${f.node} (`, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, shortSha(f.attempt_sha)), `) failed: `, h("code", {}, f.reason || f.status))),
     h("div", { class: "detail-grid" },
-      summaryHost,
-      h("div", {}, controlsBar, variantBarHost, chartWrap)),
+      h("div", { class: "detail-side" }, summaryHost, paramsHost),
+      h("div", {}, controlsBar, chartWrap)),
     historyTableHost,
     footer());
 
@@ -889,10 +1180,15 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
   const xs = useDate ? axis.map((c) => Math.floor(parseDate(c.date).getTime() / 1000)) : axis.map((_, i) => i);
   const allValues = seriesList.flatMap((s) => s.estimates).filter((v) => v != null);
   const scale = pickScale(allValues, unit);
+  const multiNodeInPlot = new Set(seriesList.map((s) => s.node)).size > 1;
+  const multiVariantInPlot = new Set(seriesList.map(seriesVariantId)).size > 1;
   const labelFor = (s) => {
-    const parts = [seriesList.some((o) => o.node !== s.node) ? s.node : null, seriesList.some((o) => o.params !== s.params) ? (s.params || "(default)") : null].filter(Boolean);
+    const vlabel = s._plabel ?? s._vlabel ?? (s.params || "(default)");
+    const parts = [multiNodeInPlot ? s.node : null, multiVariantInPlot ? vlabel : null].filter(Boolean);
     return parts.join(" · ") || s.node;
   };
+  const strokeFor = (s, k) => (multiVariantInPlot ? cssVar(SERIES_VARS[k % SERIES_VARS.length]) : seriesColor(s.node));
+  const dashFor = (k) => (multiVariantInPlot ? SERIES_DASHES[Math.floor(k / SERIES_VARS.length) % SERIES_DASHES.length] : null);
   const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = s.estimates[k] / scale[1]; }); return col; });
   const fails = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (isFailed(s.statuses[k]) && index.has(o)) col[index.get(o)] = s.reasons?.[k] || s.statuses[k]; }); return col; });
   const spread = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = { n: s.ns?.[k], min: s.mins?.[k], max: s.maxs?.[k] }; }); return col; });
@@ -909,10 +1205,10 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
   const tip = h("div", { class: "tip" });
   const titleRow = h("div", { class: "chart-title" },
     h("span", {}, `${title}${scale[0] ? ` (${scale[0]})` : ""}`),
-    h("span", { class: "note" }, `${axis.length} commits`, nFailed ? [" · ", h("span", { class: "bad" }, `${nFailed} failed`)] : null, " · drag to zoom, double-click to reset, click point to open commit"));
+    h("span", { class: "note" }, `${axis.length} commits`, seriesList.length > 1 ? ` · ${seriesList.length} series` : null, nFailed ? [" · ", h("span", { class: "bad" }, `${nFailed} failed`)] : null, " · drag to zoom, double-click to reset, click point to open commit"));
   const el = h("div", { class: "chart" });
   wrap.append(titleRow, el, tip);
-  const size = () => ({ width: Math.max(240, wrap.clientWidth - 16), height: window.innerWidth < 600 ? 220 : 310 });
+  const size = () => ({ width: Math.max(240, wrap.clientWidth - 16), height: window.innerWidth < 600 ? 220 : 320 });
 
   // Draw optional ±2× noise band (single series with noise), min–max whiskers, and failure marks.
   const drawOverlays = (u) => {
@@ -930,7 +1226,7 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
     }
     if (plotOpts.showSpread) {
       seriesList.forEach((s, k) => {
-        ctx.strokeStyle = seriesColor(labelFor(s));
+        ctx.strokeStyle = strokeFor(s, k);
         ctx.globalAlpha = 0.45;
         ctx.lineWidth = 1.5 * devicePixelRatio;
         for (let i = 0; i < xs.length; i++) {
@@ -974,21 +1270,24 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
         values: (u, vals) => vals.map((v) => axis[v] ? (axis[v].short.includes("+dirty") ? axis[v].short.slice(0, 13) : axis[v].short.slice(0, 7)) : ""),
       };
 
+  const showPts = axis.length <= 40;
   const opts = {
     ...size(),
     legend: { show: seriesList.length > 1, live: false },
-    cursor: { points: { size: 8 }, drag: { x: true, y: false } },
+    cursor: { points: { size: 7 }, drag: { x: true, y: false } },
     scales: { x: xScale, y: yScale },
     axes: [
       xAxis,
       { stroke: cssVar("--muted"), grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "11.5px system-ui, sans-serif", size: 58, values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
     ],
-    series: [{ label: useDate ? "date" : "commit" }, ...seriesList.map((s) => {
+    series: [{ label: useDate ? "date" : "commit" }, ...seriesList.map((s, k) => {
       const lbl = labelFor(s);
-      const col = seriesColor(lbl);
+      const col = strokeFor(s, k);
+      const dash = dashFor(k);
       return {
         label: lbl, stroke: col, width: 1.75, spanGaps: true,
-        points: { show: allValues.length <= 100, size: 6, stroke: col, fill: cssVar("--page"), width: 1.75 },
+        ...(dash ? { dash } : {}),
+        points: { show: showPts, size: seriesList.length > 6 ? 5 : 6, stroke: col, fill: cssVar("--page"), width: 1.5 },
       };
     })],
     hooks: {
@@ -997,16 +1296,18 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
         const i = u.cursor.idx;
         if (i == null || !axis[i]) { tip.style.display = "none"; return; }
         const c = axis[i];
+        const showRowSpread = seriesList.length <= 4;
         const rows = seriesList.map((s, k) => {
           const v = ys[k][i];
           let prev = null;
           for (let j = i - 1; j >= 0; j--) if (ys[k][j] != null) { prev = ys[k][j]; break; }
           const rel = v != null && prev > 0 ? v / prev - 1 : null;
           const lbl = labelFor(s);
-          return h("div", { class: "row" }, h("span", { class: "key", style: `border-color:${seriesColor(lbl)}` }),
+          const col = strokeFor(s, k);
+          return h("div", { class: "row" }, h("span", { class: "key", style: `border-color:${col}` }),
             h("span", { class: "v num" }, v != null ? `${fmtNum(v)} ${scale[0]}` : fails[k][i] ? h("span", { class: "bad" }, `failed: ${fails[k][i]}`) : "–"),
-            h("span", { class: "s num" }, rel == null ? "" : fmtPct(rel)), seriesList.length > 1 ? h("span", { class: "s" }, lbl) : null,
-            spread[k][i]?.n > 1 ? h("span", { class: "spread" }, `n=${spread[k][i].n}, ${fmtNum(spread[k][i].min / scale[1])}–${fmtNum(spread[k][i].max / scale[1])} ${scale[0]}`) : null);
+            h("span", { class: "s num" }, rel == null ? "" : fmtPct(rel)), seriesList.length > 1 ? h("span", { class: "s mono" }, lbl) : null,
+            showRowSpread && spread[k][i]?.n > 1 ? h("span", { class: "spread" }, `n=${spread[k][i].n}, ${fmtNum(spread[k][i].min / scale[1])}–${fmtNum(spread[k][i].max / scale[1])} ${scale[0]}`) : null);
         });
         tip.replaceChildren(h("div", { class: "when" }, `${c.short} · ${fmtDate(c.date)}`), ...rows, h("div", { class: "subj" }, c.subject));
         tip.style.display = "block";
