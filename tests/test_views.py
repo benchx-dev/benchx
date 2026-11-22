@@ -289,6 +289,7 @@ def test_view_from_json_results_without_pyarrow(repo, tmp, monkeypatch, capsys):
 
 def test_view_pyarrow_errors_are_actionable(tmp, monkeypatch, capsys):
     _block_pyarrow(monkeypatch)
+    (tmp / "store.parquet").write_bytes(b"PAR1")
     assert cli.main(["view", "--out", str(tmp / "site")]) == cli.EXIT_REFUSED
     err = capsys.readouterr().err
     assert "benchx[parquet]" in err and "--results" in err
@@ -651,3 +652,26 @@ def test_runs_dir_collapses_duplicate_attempts_without_self_changes(repo, tmp):
     manifest = _load(site_dir / "data" / "manifest.json")
     assert manifest["counts"]["points"] == 2  # 2 cases collapsed across 2 rounds
     assert manifest["counts"]["changes"] == 0  # no self-comparison on the same commit
+
+
+def test_jsonl_store_builds_views_without_pyarrow(repo, tmp, monkeypatch):
+    """Default `bx bench` + `bx view --out site` works end-to-end via store.jsonl without pyarrow."""
+    from test_minimal_deps import _block_pyarrow
+
+    _block_pyarrow(monkeypatch)
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    assert cli.main([
+        "bench", f"{base}:{repo['wt-base']}",
+        "--adapter", "google-benchmark",
+        "--suite", "demo-bench",
+        "--run-key", "v-jsonl",
+        "--out", str(tmp / "raw"),
+    ]) == cli.EXIT_OK
+    assert (tmp / "store.jsonl").is_file()
+
+    site_dir = tmp / "site"
+    assert cli.main(["view", "--out", str(site_dir)]) == cli.EXIT_OK
+    manifest = _load(site_dir / "data" / "manifest.json")
+    assert manifest["source"] == "store"
+    assert manifest["counts"]["points"] == 2
+    assert not list((site_dir / "data").glob("*.parquet"))

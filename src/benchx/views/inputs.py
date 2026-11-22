@@ -554,13 +554,30 @@ def read_runs_dir(runs_dir: str | Path) -> tuple[list[dict], list[dict], int]:
     return runs, _collapse_duplicate_points(raw_points), ingest_problems
 
 
+def _read_jsonl_points(jsonl_path: Path, *, distinguish_dirty: bool = True) -> list[dict]:
+    points: list[dict] = []
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        stored = json.loads(line)
+        doc = json.loads(stored["document"])
+        order = json.loads(stored["work_order"]) if stored.get("work_order") else None
+        pt = _point_from_row(dict(doc, work_order=order), distinguish_dirty=distinguish_dirty)
+        if pt is not None:
+            points.append(pt)
+    return points
+
+
 def read_store(store_path: str | Path, *, repo: Path | None = None) -> tuple[list[dict], list[dict], int]:
-    """Read a single local benchx Parquet store (`store.parquet`)."""
+    """Read a single local benchx store (`store.parquet` or `store.jsonl`)."""
     path = check_local_path(store_path)
-    _require_pyarrow("reading a Parquet store")
     if not path.is_file():
         raise ViewError(f"store not found: {path}")
-    raw_points = _read_parquet_points(path, distinguish_dirty=True)
+    if path.suffix.lower() in (".jsonl", ".json", ".ndjson"):
+        raw_points = _read_jsonl_points(path, distinguish_dirty=True)
+    else:
+        _require_pyarrow("reading a Parquet store")
+        raw_points = _read_parquet_points(path, distinguish_dirty=True)
     collapsed = _collapse_duplicate_points(raw_points)
     runs = synthesize_runs(raw_points, repo=repo)
     counts_by_pair: dict[tuple[str, str], int] = defaultdict(int)
