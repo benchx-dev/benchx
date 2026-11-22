@@ -75,6 +75,7 @@ nav = [
     { "One-off benchmarking" = "user_stories/one-off.md" },
   ] },
   { "benchx" = "benchx.md" },
+  { "Examples" = "examples.md" },
   { "Releasing" = "releasing.md" },
 ]
 

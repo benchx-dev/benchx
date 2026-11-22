@@ -71,6 +71,8 @@ repositories so that `benchx` itself stays cloud-free and CI-vendor-neutral:
 
 - [`docs/benchx.md`](docs/benchx.md) — installation, CLI reference (`bx`), and
   implementation details.
+- [`docs/examples.md`](docs/examples.md) — live deployments, CI setup, and local
+  worked examples.
 - [`docs/design/benchmark-result-schema.md`](docs/design/benchmark-result-schema.md)
   — the benchmark result schema and migration contract (the core design
   document).
