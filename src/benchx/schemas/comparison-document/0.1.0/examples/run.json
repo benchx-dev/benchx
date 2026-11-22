@@ -83,7 +83,15 @@
         "degrees_of_freedom": 2,
         "threshold": 0.0063
       },
-      "unmatched_differences": []
+      "unmatched_differences": [],
+      "attempts": {
+        "baseline": {
+          "success": 3
+        },
+        "contender": {
+          "success": 3
+        }
+      }
     },
     {
       "workload": {
@@ -121,7 +129,15 @@
         "noise_kind": "standard-error",
         "noise_source": "paired-rounds"
       },
-      "unmatched_differences": []
+      "unmatched_differences": [],
+      "attempts": {
+        "baseline": {
+          "success": 2
+        },
+        "contender": {
+          "success": 2
+        }
+      }
     }
   ],
   "missing": [

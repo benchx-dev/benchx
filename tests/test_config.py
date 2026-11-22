@@ -179,3 +179,50 @@ def test_show_says_where_each_value_comes_from(tree, monkeypatch, capsys):
     assert '"demo"  (file)' in out and '"mod.py"  (file)' in out
     assert "compare.rounds             -  (unset)" in out
     assert "timeouts.case_s            60  (default)" in out
+
+
+# --- one file for the adapters that share a precision ---------------------------------
+
+TIMING = {"quantities": ["wall-time"],
+          "precision": {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 5},
+                                                                    {"unit": "value", "n": 3}]},
+                        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.1},
+                        "warmup": {"mode": "count", "n_warmup": 1}}}
+
+
+def settle(tree, monkeypatch, *argv):
+    """What `bx bench` settles on, from the file in `tree` and `argv`, without running anything."""
+    seen = []
+    monkeypatch.setattr(cli, "cmd_bench", lambda args: seen.append(args) or cli.EXIT_OK)
+    monkeypatch.chdir(tree)
+    assert cli.main(["bench", "TARGET", *argv]) == cli.EXIT_OK
+    return cli._common(config.load(tree), seen[0])
+
+
+def test_asv_is_timed_by_pyperf_so_the_two_share_a_family():
+    assert harnesses.same_family("pyperf", "asv") and harnesses.same_family("asv", "pyperf")
+    assert harnesses.same_family("asv", "asv") and harnesses.same_family("google-benchmark", "google-benchmark")
+    assert not harnesses.same_family("pyperf", "google-benchmark")
+    assert not harnesses.same_family("asv", "google-benchmark")
+    assert not harnesses.same_family("pyperf", "nonesuch") and not harnesses.same_family("nonesuch", "pyperf")
+
+
+@pytest.mark.parametrize("named, given", [("pyperf", "asv"), ("asv", "pyperf"), ("pyperf", "pyperf"), ("asv", "asv")])
+def test_a_file_serves_the_adapters_that_share_its_precision(tree, monkeypatch, named, given):
+    write_config(tree, adapter={"name": named, **TIMING})
+    settings = settle(tree, monkeypatch, "--adapter", given, "--suite", "s")
+    assert settings["adapter"] == given and settings["suite"] == "s"
+    assert levels(harnesses.get(given).precision({}, settings["file_precision"])) == {"process": 5, "value": 3}
+
+
+def test_without_an_adapter_flag_the_files_adapter_is_used(tree, monkeypatch):
+    write_config(tree, adapter={"name": "asv", **TIMING})
+    assert settle(tree, monkeypatch, "--suite", "s")["adapter"] == "asv"
+
+
+@pytest.mark.parametrize("named, given", [("google-benchmark", "pyperf"), ("google-benchmark", "asv"),
+                                          ("pyperf", "google-benchmark"), ("asv", "google-benchmark")])
+def test_an_adapter_of_another_family_is_refused(tree, monkeypatch, named, given):
+    write_config(tree, adapter={"name": named})
+    with pytest.raises(config.ConfigError, match=rf"adapter {given!r}, but .* sets adapter\.name to {named!r}.*precision"):
+        settle(tree, monkeypatch, "--adapter", given, "--suite", "s")

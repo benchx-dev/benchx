@@ -7,6 +7,7 @@ checks a method needs, such as alternation, are the method's to ask for. Units
 are the profile projection's series.
 """
 
+import dataclasses
 import json
 import re
 
@@ -14,7 +15,7 @@ from . import identity
 from .core import canonical
 from .evidence import COLUMNS, CompareError, Evidence, Row, Selection, Selector, result_ref, slot_schedule
 from .key import escape, get
-from .projection import Projection, axis_order, estimate, values
+from .projection import Projection, axis_order, declared_workload, estimate, said, values
 from .snapshot import DIRTY_WARNINGS
 from .store import store_project
 
@@ -43,6 +44,9 @@ PROFILES = {
 # a variant that times out in the slow rounds must not be judged on the fast ones. Under the other
 # profiles a method sees the remaining attempts. A selector's rule, so it holds for every method.
 STRICT_STATUS = {"variants"}
+# The version a harness records for a benchmark (asv's hash, the pyperf function's): when it alone differs, the
+# benchmark's own code changed, and the unit is "not comparable" as in `asv compare`, not a failed invariant.
+_BENCHMARK_VERSION = re.compile(r"/coordinates/protocol/[^/]+/benchmark_version")
 FAILED_STATUSES = ("partial", "censored", "error")  # `skipped` is not a failure
 WORKLOAD = "/coordinates/workload"
 PARAMETERS = WORKLOAD + "/parameters/"
@@ -178,13 +182,12 @@ class RunProfile(Selector):
                                        for role, side in zip(ROLES, (base, contender))}
         selection.slots = slot_schedule((COLUMNS["slot"].read(d), s) for d, s in zip(documents, sides))
         selection.failed.extend(self._profile_invariants(projection, documents, names, sides, base, contender, varying))
-        groups = self._series(projection, documents, projected, sides, base, contender)
-        selection.disagreements.extend(self._disagreements(projection, groups))
+        units, disagreements = self._units(projection, documents, projected, sides, base, contender)
+        selection.disagreements.extend(disagreements)
         strict = profile in STRICT_STATUS
         selection.units.extend(
-            self._unit(projection, group, base, contender, strict)
-            for group in sorted(groups.values(),
-                                key=lambda g: _unit_order(_workload(g["docs"], projection.axis), g["quantity"])))
+            self._unit(projection, unit, base, contender, strict)
+            for unit in sorted(units, key=lambda u: _unit_order(_workload(u["docs"], projection.axis), u["quantity"])))
         return selection
 
     def _profile_invariants(self, projection, documents, names, sides, base, contender, varying) -> list[dict]:
@@ -206,49 +209,70 @@ class RunProfile(Selector):
             failed.extend(_benchmark_file(documents, names, sides))
         return failed
 
-    def _series(self, projection, documents, projected, sides, base, contender) -> dict:
-        """Units are series: the results grouped by fingerprint under the profile's projection."""
-        groups = {}
+    def _units(self, projection, documents, projected, sides, base, contender) -> tuple[list[dict], list[dict]]:
+        """Units are series: the results of one workload variant and quantity, grouped by fingerprint under
+        the profile's projection, in the attempts that succeeded. A failed attempt reports none of the matched
+        facts (runtime, harness version), so it joins its variant's unit, to be excluded and listed, rather
+        than starting a series of its own (a1da0f5).
+
+        Several series for one variant mean the sides disagree on a matched fact: `sides-agree`, which takes
+        that unit out and leaves the others. Only a benchmark's own recorded version differing is the benchmark
+        edited, not comparable (`benchmark-changed`). A variant on one side only is one series, merely missing;
+        this is what tells the cases apart."""
+        variants = {}
         for d, p, s in zip(documents, projected, sides):
             quantity = d["measurement"]["quantity"]["name"]
+            variant = {ptr: v for ptr, v in p.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
+            unit = variants.setdefault((_c(variant), quantity), {"quantity": quantity, "docs": {base: [], contender: []},
+                                                                 "series": {}, "attempted": {}, "identities": []})
+            unit["docs"][s].append(d)
             fingerprint = projection.series_fingerprint(p, quantity, identity.MEDIAN)
-            group = groups.setdefault(fingerprint, {"series": fingerprint, "quantity": quantity, "identity": p.identity,
-                                                    "docs": {base: [], contender: []}})
-            group["docs"][s].append(d)
-        return groups
-
-    def _disagreements(self, projection, groups) -> list[dict]:
-        """Several series for one workload variant and quantity mean the sides
-        disagree on a matched fact (schema §5.5). A variant on one side only
-        is one series, and merely missing; this is what tells the two apart."""
-        variants = {}
-        for group in groups.values():
-            variant = {ptr: v for ptr, v in group["identity"].items()
-                       if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
-            variants.setdefault((_c(variant), group["quantity"]), []).append(group)
-        failed = []
-        for (_, quantity), found in variants.items():
-            if len(found) > 1:
-                differing = _differing([g["identity"] for g in found])
+            unit["attempted"][fingerprint] = None
+            if d["measurement"]["status"] == "success":
+                unit["series"][fingerprint] = None
+                unit["identities"].append(p.identity)
+        units, failed = [], []
+        for (_, quantity), unit in variants.items():
+            # The one series of the results that count (the successful ones, else every attempt), when they share one.
+            counted = unit["series"] or unit["attempted"]
+            unit["series"] = next(iter(counted)) if len(counted) == 1 else None
+            differing = _differing(unit["identities"]) if unit["identities"] else []
+            if differing and all(_BENCHMARK_VERSION.fullmatch(p) for p in differing):
+                unit["changed"] = True
+            elif differing:
                 failed.append(_failed("sides-agree", f"{', '.join(differing)} differ",
-                                      workload=_workload(found[0]["docs"], projection.axis), quantity=quantity))
-        return failed
+                                      workload=_workload(unit["docs"], projection.axis), quantity=quantity))
+                continue
+            units.append(unit)
+        return units, failed
 
-    def _unit(self, projection, group, base, contender, strict=False) -> Evidence:
-        by_side = group["docs"]
+    def _unit(self, projection, unit, base, contender, strict=False) -> Evidence:
+        by_side = unit["docs"]
         workload = _workload(by_side, projection.axis)
         rows = tuple(_row(d, role) for role, side in zip(ROLES, (base, contender)) for d in by_side[side])
         absent = tuple(role for role, side in zip(ROLES, (base, contender)) if not by_side[side])
         if absent:
             quantity = next(d for docs in by_side.values() for d in docs)["measurement"]["quantity"]
-            return Evidence(group["series"], workload, quantity, ROLES, rows, missing=absent)
+            return Evidence(unit["series"], workload, quantity, ROLES, rows, missing=absent)
+        succeeded = {side: [d for d in by_side[side] if d["measurement"]["status"] == "success"] for side in by_side}
+        if unit.get("changed"):
+            # As in `asv compare`: the results measure different code, so none is used, and nothing is said
+            # about how they differ or what went wrong in them; the unit is only listed (comparator.md §3).
+            rows = tuple(row if row.exclusion else dataclasses.replace(row, exclusion="benchmark-changed")
+                         for row in rows)
+            return Evidence(unit["series"], workload, by_side[base][0]["measurement"]["quantity"], ROLES, rows,
+                            no_verdict="benchmark-changed")
+        if strict and any(d["measurement"]["status"] in FAILED_STATUSES for docs in by_side.values() for d in docs):
+            no_verdict = "side-failed"  # UC-02 §10
+        elif not all(succeeded.values()):
+            no_verdict = "not-measured"  # a side with no successful attempt: more rounds would not help
+        else:
+            no_verdict = None
         first = {side: by_side[side][0] for side in (base, contender)}
         return Evidence(
-            group["series"], workload, first[base]["measurement"]["quantity"], ROLES, rows,
-            unmatched_differences=tuple(_differences(projection, by_side[base], by_side[contender])),
-            caveats=tuple(_caveats(by_side, base, contender)),
-            no_verdict="side-failed" if strict and any(d["measurement"]["status"] in FAILED_STATUSES
-                                                       for docs in by_side.values() for d in docs) else None)
+            unit["series"], workload, first[base]["measurement"]["quantity"], ROLES, rows,
+            unmatched_differences=tuple(_differences(projection, succeeded[base], succeeded[contender])),
+            caveats=tuple(_caveats(by_side, base, contender)), no_verdict=no_verdict)
 
 
 RUN_PROFILE = RunProfile()
@@ -259,7 +283,9 @@ def _row(doc: dict, side: str) -> Row:
     columns = {name: key.read(doc) for name, key in COLUMNS.items()}
     if measurement["status"] != "success":
         status, reason = measurement["status"], measurement.get("reason")
-        return Row(result_ref(doc), side, columns, exclusion=f"{status}: {reason}" if reason else status)
+        why = f"{status}: {reason}" if reason else status
+        return Row(result_ref(doc), side, columns, exclusion=f"{why}: {said(doc)}" if said(doc) else why,
+                   status=status)
     batch = values(doc)
     return Row(result_ref(doc), side, columns, estimate(identity.MEDIAN, batch), tuple(batch))
 
@@ -303,17 +329,19 @@ def _benchmark_file(documents, names, sides) -> list[dict]:
 def _workload(by_side, axis=()) -> dict:
     """The unit's workload variant, as the comparison document names it: what both sides share,
     so the parameters on the profile's axis (the ones that tell the sides apart) are left out."""
-    workload = next(d for docs in by_side.values() for d in docs)["coordinates"]["workload"]
+    workload = declared_workload(next(d for docs in by_side.values() for d in docs))
     varied = {path.removeprefix(PARAMETERS) for path in axis if path.startswith(PARAMETERS)}
     parameters = {k: v for k, v in (workload.get("parameters") or {}).items() if k not in varied}
     return {"name": workload["name"], **({"parameters": parameters} if parameters else {})}
 
 
 def _unit_order(workload: dict, quantity: str) -> tuple:
-    """The order units are listed in: by workload name, then by parameter name and value, then by
-    quantity, with numbers inside names and values in natural order (`axis_order`), so that `n=50`
-    comes before `n=100` and `bench_2` before `bench_10`, as people read them."""
-    parameters = sorted((workload.get("parameters") or {}).items())
+    """The order units are listed in: by workload name, then by the values of its parameters, the first
+    declared changing slowest (the order of the workload's parameters, see `declared_workload`: sorted by
+    name for a result that recorded none), then by quantity, with numbers inside names and values in
+    natural order (`axis_order`), so that `n=50` comes before `n=100` and `bench_2` before `bench_10`, as
+    people read them."""
+    parameters = list((workload.get("parameters") or {}).items())
     return (axis_order(workload["name"]), tuple((name, axis_order(value)) for name, value in parameters), quantity)
 
 

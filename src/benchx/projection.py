@@ -178,10 +178,35 @@ class Projection:
             key.sort_key(value) for key, value in zip(self.axis_keys, point_axis))
 
 
+def declared_workload(document: dict) -> dict:
+    """The document's workload with its parameters in the order the benchmark declared them. The store keeps
+    a document in canonical form, with its keys sorted, so the runner records the order as data
+    (`provenance.info.parameter_names`): the names it lists first, then any it does not name, as stored. A
+    result without the list (made before, or by another producer) is as stored."""
+    workload = document["coordinates"]["workload"]
+    parameters = workload.get("parameters")
+    names = ((document.get("provenance") or {}).get("info") or {}).get("parameter_names")
+    if not parameters or not names:
+        return workload
+    ordered = {name: parameters[name] for name in names if name in parameters}
+    return {**workload, "parameters": {**ordered, **{k: v for k, v in parameters.items() if k not in ordered}}}
+
+
 def workload_label(workload: dict) -> str:
     """A workload as people read it: its name, then its parameters, `name [k=v, ...]`."""
     parameters = ", ".join(f"{k}={v}" for k, v in (workload.get("parameters") or {}).items())
     return workload["name"] + (f" [{parameters}]" if parameters else "")
+
+
+def said(document: dict, width: int = 160) -> str | None:
+    """What the producer said about a result that is not a measurement (`provenance.info.message`): for a
+    failed pyperf case the exception line, for a skipped asv benchmark the reason. Its first line, cut at
+    `width` characters; None when it said nothing."""
+    message = str(((document.get("provenance") or {}).get("info") or {}).get("message") or "").strip()
+    line = message.splitlines()[0] if message else ""
+    if not line:
+        return None
+    return line if len(line) <= width else line[:width - 1] + "…"
 
 
 def reported_coordinates(doc: dict) -> dict:

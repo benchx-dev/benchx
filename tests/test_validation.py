@@ -275,3 +275,18 @@ def test_reports_every_structure_error(adhoc):
         (("procedure", "round"), "minimum"),
     }
     assert issues == check(json.loads(json.dumps(adhoc)))
+
+
+def test_workload_name_may_contain_spaces(adhoc):
+    name = "ArrayAdd<Add, Int64Type>/1024"
+    adhoc["coordinates"]["workload"]["name"] = name
+    assert check(adhoc) == []
+
+    adhoc["coordinates"]["workload"]["name"] = ""
+    [issue] = check(adhoc)
+    assert (issue.path, issue.keyword) == (("coordinates", "workload", "name"), "minLength")
+
+    doc = json.loads((COMPARISONS / "run.json").read_text())
+    doc["units"][0]["workload"]["name"] = name
+    validator, errors = validation.find_schema(doc, "comparison-document")
+    assert errors == [] and list(validation.check(doc, validator)) == []

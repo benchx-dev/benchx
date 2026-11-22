@@ -104,14 +104,19 @@ varies, for example the subject tree id for `revisions` or `parameters.role` for
 
 **Units are series.** Results are grouped by their series fingerprint under the
 profile's projection, whose axis is the varying coordinate, so everything else
-the projection matches must agree for two results to share a unit. Each unit is
-evaluated independently. Run mode reads no history outside the run.
+the projection matches must agree for two results to share a unit. Only the
+attempts that succeeded are grouped so: a failed attempt reports none of the
+matched facts, such as the runtime or the harness version, so it joins the unit
+of its workload variant and quantity, where it is excluded and listed. Each unit
+is evaluated independently. Run mode reads no history outside the run.
 
 Sides that disagree on a matched fact therefore fall into separate series. That
 is the same shape as a workload measured on one side only, which is merely
 `missing`, so the selector tells them apart: several series with one workload
-variant and quantity are a failed `sides-agree`, naming the facts that differ. A
-disagreement fails the whole run; a variant on one side only does not.
+variant and quantity are a failed `sides-agree`, naming the facts that differ,
+which takes out that unit and leaves the others. When a benchmark's recorded
+version is the only fact that differs, the benchmark was edited: the unit is not
+comparable (`benchmark-changed`, §3), not a failed invariant.
 
 ### 2.4 Batch requests
 
@@ -173,14 +178,15 @@ excluded with its reason, and a target without one is indeterminate, never
 replaced by an older successful point. Excluded points and their reasons remain
 visible in the output.
 
-**The selector or profile** checks what makes the sides meaningful, and a failure
-stops the whole run:
+**The selector or profile** checks what makes the sides meaningful. A failed
+invariant of the run stops the whole run; `sides-agree`, about one unit, takes out
+that unit only, and the others are compared:
 
 | Invariant | Profile | Meaning |
 |---|---|---|
 | `sides` | all | every result can be named by the varying coordinate |
 | `two-sides` | all | exactly two sides |
-| `sides-agree` | all | one workload variant and quantity is one series (§2.3) |
+| `sides-agree` | all | one workload variant and quantity is one series among its successful attempts (§2.3); takes out that unit only |
 | `one-tree-per-side` | `revisions` | each side has one tree id, and the two differ |
 | `one-benchmark-tree` | `revisions`, `variants` | a separately recorded benchmark is one file on both sides and in every round (schema §5.5) |
 | `sides-differ` | `environments` | the sides differ in more than their label |
@@ -190,16 +196,29 @@ local-only (UC-03 §10). In history mode the selector checks that the target and
 every reference point have the same series fingerprint and that every reference
 point precedes the target under the selected ancestry or native order.
 
-The selector also owns the **status rule**, which is not an invariant: it leaves
-one unit without a verdict and fails nothing else. Under `variants` it is strict
-(UC-02 §10): a unit with an attempt of status `partial`, `censored` or `error`, on
-either side, is indeterminate with reason `side-failed`, whatever the other rounds
-show; otherwise a variant that times out in the slow rounds is judged on the fast
-ones. The selector records this in the evidence (`no_verdict`), every method must
-return `indeterminate` with that reason, and the framework refuses a method that
-does not, so the rule holds whichever method a project configures. The other
-profiles leave the remaining attempts to the method, and a `skipped` attempt is
-only excluded under every profile. The schema's §5.5 table is not touched.
+The selector also owns the **status rules**, which are not invariants: each leaves
+one unit without a verdict and fails nothing else. The selector records the reason
+in the evidence (`no_verdict`), every method must return `indeterminate` with it,
+and the framework refuses a method that does not, so the rules hold whichever
+method a project configures. In order:
+
+- `benchmark-changed`: the unit's results differ in a benchmark's recorded version
+  (`protocol.<harness>.benchmark_version`), between the sides or between a side's
+  rounds, and in nothing else. The benchmark was edited, so the results measure
+  different code: none is used, nothing about how they line up is checked, the unit
+  has no `series` (its results share none), and it is listed as not comparable, as
+  `asv compare` does, while the other units are compared.
+- `side-failed`, under `variants` (UC-02 §10): an attempt of status `partial`,
+  `censored` or `error` on either side, whatever the other rounds show; otherwise a
+  variant that times out in the slow rounds is judged on the fast ones.
+- `not-measured`: a side with no successful attempt at all, every attempt skipped
+  or failed. It leaves no pair, and more rounds would not help, so it is not
+  `insufficient-rounds`.
+
+Every unit carries `attempts`, how each side's attempts ended, by status: the
+evidence behind these reasons. Under the other profiles a failed attempt is
+excluded and the method sees the rest, and a `skipped` attempt is only excluded
+under every profile. The schema's §5.5 table is not touched.
 
 **The method** declares what its statistics assume, and the framework checks
 what it declared:
@@ -226,9 +245,13 @@ cannot be laid out that way, because a dimension is absent or nested in the side
 the method does not apply: the failure is recorded as `layout`, with the reason.
 Within a layout the method may still return `indeterminate` with its own reason.
 
-Changes in facts the projection ignores do not split a series by themselves, but
-differences between the target and its reference are carried as caveats so that a
-kernel, load, or other recorded condition is not hidden from the reader.
+Excluded results and their reasons remain visible in the output: the reason ends
+with what the attempt said, when it said something (a failed pyperf case's exception
+line, an asv benchmark's skip reason), and the rendered listing is one line per
+reason with a count. Changes in facts the projection ignores do not split a series
+by themselves, but differences between the target and its reference are carried as
+caveats so that a kernel, load, or other recorded condition is not hidden from the
+reader.
 
 An intentional comparison across an identity difference outside a single run
 requires the series to be materialized under an explicit projection that
@@ -365,8 +388,9 @@ and self-describing. It records:
 - `sides`, for a selector that has named ones: the varying coordinate, the two
   values, and what each side declared about how it was built;
 - the identity-policy schema, the estimator, and `local_only`;
-- `units`, and for each: the workload, quantity, and series fingerprint; in history
-  mode an `evidence` record; the outcome; and the caveats;
+- `units`, and for each: the workload, quantity, and series fingerprint (absent
+  for a unit whose results share none, §3); `attempts`, how each side's attempts
+  ended; in history mode an `evidence` record; the outcome; and the caveats;
 - exclusions, failed invariants, missing targets, and every input.
 
 A history unit's **evidence** records what the verdict rests on: the target, the

@@ -8,7 +8,7 @@ import pytest
 
 from benchx import compare, core, identity
 from benchx.core import catalog
-from benchx.projection import Projection, ProjectionError, workload_label
+from benchx.projection import Projection, ProjectionError, said, workload_label
 
 POLICIES = catalog.SCHEMAS / "identity-policy" / "0.1.0" / "examples"
 DEFAULT = json.loads((POLICIES / "default.json").read_text())
@@ -171,3 +171,20 @@ def test_the_quantity_is_never_a_coordinate():
     assert history().apply(ARROW).identity == history().apply(other).identity
     assert identity.series_fingerprint(ARROW, "arrow", identity.MEDIAN, history()) != \
         identity.series_fingerprint(other, "arrow", identity.MEDIAN, history())
+
+
+def test_what_a_result_said_is_its_first_line_cut_to_a_width():
+    def document(message):
+        return {"provenance": {"info": {"message": message}}}
+
+    assert said(document("ValueError: boom")) == "ValueError: boom"
+    assert said(document("  RuntimeError: first\nsecond\nthird\n")) == "RuntimeError: first"
+    assert said(document("x" * 300)) == "x" * 159 + "…"
+    assert said(document("x" * 20), width=10) == "x" * 9 + "…"
+    assert said(document("")) is None and said(document("\n\n")) is None
+
+
+def test_a_result_that_said_nothing_has_no_message():
+    assert said({"provenance": {"info": {}}}) is None
+    assert said({"provenance": {}}) is None
+    assert said({}) is None  # a result from another producer

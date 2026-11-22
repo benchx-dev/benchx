@@ -21,7 +21,7 @@ bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
-           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
+           [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
@@ -33,7 +33,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--min-time S]
            [--project P | --no-project] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-           [--k 3] [--min-rounds 3] [--json]
+           [--k 3] [--min-rounds 3] [--json | --tables [--all]]
                                          # measure mode: run both sides, then compare
 bx compare TARGET --profile variants [--vary NAME] [--baseline VALUE]
            --suite NAME --rounds R [--filter REGEX] [...]       # the options above, except --label
@@ -273,7 +273,10 @@ criterion 1 holds by construction.
 
 `--json` emits this; the default output renders it as the reviewer table
 (regressed, improved, no change detected, and indeterminate sections, then
-the missing, failed-invariant, and excluded listings with counts). In any
+the missing, failed-invariant, and excluded listings with counts, in words: a failed invariant names the unit
+it affects, units that failed alike are one line, and results excluded for the same reason are one line with
+their number, the reason carrying what the failed attempt said, such as `error: harness.error: ValueError: …`;
+which results they are is in `--json`). In any
 profile, a comparison in which either side is not `clean` has `local_only:
 true` (schema §5.5), is headed `[local-only]`, and names the sides that are not
 clean on the `caveats:` line; the `revisions` profile fails a side with no
@@ -301,6 +304,14 @@ deferred. `timeouts.order_s` limits each step that runs the user's code before a
 yet bound the order as a whole. A plan with no case in it is a refusal too, naming the filter
 (asv also names the benchmarks it could have selected), so that a typo does not end in `0
 result(s)` and a success status.
+
+A pyperf or asv case runs in a session of its own, so that a timeout can kill the workers with the manager. The
+terminal's Ctrl-C therefore reaches `bx` and not that group, and `bx` gives the group what the terminal would have
+(`adapters.base.stop_group`): `SIGINT`, so that pyperf's manager stops its worker and says so, as it does when run
+alone; then, after one second (`STOP_GRACE_S`), `SIGKILL` to the group, which also reaches what a benchmark started
+itself. A second Ctrl-C skips the wait, and the wait on the pipes is bounded, so a process that left the group
+cannot hold `bx`. Google Benchmark, the collectors and the provider stay in `bx`'s own group, where Ctrl-C reaches
+them directly; nothing about them changes.
 Precision keys the order leaves out are recorded with Google Benchmark's
 defaults.
 
@@ -465,7 +476,8 @@ apart, so adding an estimator never renames the policy:
   point (schema §1). It does record a computed version of each benchmark function in
   `protocol` (asv, pyperf: a hash of the function's source, or its `version` attribute),
   which changes only when the function does and is matched like the rest of protocol: an
-  edited benchmark is not compared with its old self and starts a new series.
+  edited benchmark is not compared with its old self and starts a new series. The comparison lists
+  it as not comparable (`benchmark-changed`), as `asv compare` does, and compares the others.
   Being ignored, its change is flagged on each point where it happens. A thin
   result's identity carries its implicit project.
 - **Estimators** (`ESTIMATORS`): `median`, derived from observations, plus
@@ -522,11 +534,15 @@ exactly two sides, which for `environments` differ in more than their label; and
 the method asks for, for `paired-relative` equal attempt counts per side, sides
 alternating by `procedure.slot`, and no two usable results at one round and side
 (`duplicate-points`). Results the order did not ask for are not compared. A failed invariant is recorded and the affected units get no
-verdict; under `revisions` the same happens to a side with no tree id (the
+verdict (`sides-agree`, `equal-attempts` and `duplicate-points` affect one unit, and the others are still compared; the rest
+affect every unit; `sides-agree` looks at the attempts that succeeded); under `revisions` the same happens to a side with no tree id (the
 `sides` invariant), to a tree edited during the run (a third side: `two-sides`),
 and to a benchmark recorded apart from the subject that is not one file on
 both sides and in every round (`one-benchmark-tree`, schema §5.5), as it does
-under `variants`. A side that
+under `variants`. A unit whose only differing matched fact is a benchmark's recorded
+version (`protocol.<harness>.benchmark_version`, between the sides or between a side's rounds) is not
+a failed invariant: it is indeterminate with reason `benchmark-changed`, no pair is used, and it is
+listed as not comparable, as `asv compare` lists a benchmark whose version changed. A side that
 is not clean does not fail the run: it makes the comparison local-only. A variant present on one side only is listed as missing
 (criterion 4). Results with a status other than `success` are excluded and
 listed. Under `variants` a failed attempt (`partial`, `censored` or `error`) on either side also makes
@@ -554,10 +570,13 @@ Per comparison unit (one workload variant and quantity), the method
   direction when known; otherwise *no change detected*;
 - is indeterminate with a reason when fewer than `min_rounds` pairs exist, and
   never with fewer than two, since the noise is a standard error
-  (`insufficient-rounds`), when a baseline value is zero, or, under `variants`,
-  when an attempt failed (`side-failed`, a rule of the selector that every method
-  follows). A unit whose rounds cannot line the sides up, because it has none or no
-  round is on both sides, fails the `layout` invariant instead.
+  (`insufficient-rounds`), when a baseline value is zero, when a side has no
+  successful attempt at all, its attempts skipped or failed (`not-measured`; the
+  unit carries `attempts`, the count of each side's attempts by status), or, under
+  `variants`, when an attempt failed (`side-failed`). These are rules of the
+  selector that every method follows. A unit whose rounds cannot line the sides up,
+  because it has none or no round is on both sides, fails the `layout` invariant
+  instead.
 
 Deterministic quantities are deferred: none of the implementation's quantities is
 one, so a unit whose quantity is declared deterministic is indeterminate with

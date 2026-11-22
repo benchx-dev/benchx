@@ -7,13 +7,14 @@ Only run mode is reachable from the CLI. History mode and detectors are specifie
 in comparator.md; a selector for them would call `evaluate` as run mode does.
 """
 
+import collections
 import json
 
 from jsonschema import Draft202012Validator
 
 from . import methods
 from .core import catalog
-from .evidence import SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, pivot
+from .evidence import NOT_COMPARABLE, SIDE, CompareError, Evidence, Layout, Method, NotApplicable, Selection, pivot
 from .projection import workload_label
 from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
@@ -52,8 +53,9 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
         return doc
     if "alternating-slots" in method.requires:
         failed.extend(_alternation(selection.slots, selection.advice.get("alternating-slots", "")))
-    failed.extend(selection.disagreements)
-    if failed:
+    run_failed = bool(failed)  # an invariant of the run: no unit is compared
+    failed.extend(selection.disagreements)  # each about one unit, which the selector left out; the others go on
+    if run_failed:
         return doc
 
     for evidence in selection.units:
@@ -65,8 +67,9 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
         if problem:
             failed.append({"invariant": problem[0], **where, "detail": problem[1]})
             continue
-        doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}
-                                 for row in evidence.rows if row.exclusion)
+        if evidence.no_verdict not in NOT_COMPARABLE:  # a unit not compared lists nothing that went wrong in it
+            doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}  # results that did not measure
+                                     for row in evidence.rows if row.exclusion and row.status != "success")
         doc["units"].append(_unit(selection, evidence, layout, method, configuration, where))
     return doc
 
@@ -84,7 +87,10 @@ def _alternation(slots: str | None, advice: str) -> list[dict]:
 
 def _lay_out(evidence: Evidence, method: Method) -> tuple[Layout | None, tuple[str, str] | None]:
     """This unit in the shape the method asked for; or, when it cannot go to this
-    method, the invariant that says so and why."""
+    method, the invariant that says so and why. A unit whose results are not of one
+    benchmark (`NOT_COMPARABLE`) has nothing to line up, so nothing is checked."""
+    if evidence.no_verdict in NOT_COMPARABLE:
+        return pivot(evidence, method.dims, lined_up=False), None
     if "equal-attempts" in method.requires:
         counts = [sum(1 for row in evidence.rows if row.side == side) for side in evidence.sides]
         if len(set(counts)) > 1:
@@ -115,7 +121,11 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
     caveats = list(evidence.caveats)
     if selection.slots == "not-alternating" and "alternating-slots" not in method.requires:
         caveats = sorted({*caveats, "sides-did-not-alternate"})
-    unit = {**where, "series": evidence.series, **({"evidence": summary} if summary else {}),
+    # How each side's attempts ended, by status: the evidence behind a reason such as `not-measured`.
+    attempts = {side: dict(sorted(collections.Counter(row.status for row in evidence.rows if row.side == side).items()))
+                for side in evidence.sides}
+    unit = {**where, **({"series": evidence.series} if evidence.series else {}), "attempts": attempts,
+            **({"evidence": summary} if summary else {}),
             "method": {"name": method.name, "version": method.version}, "verdict": assessment.verdict,
             **_partition(evidence, assessment, method.dims), "details": assessment.details}
     if assessment.reason:
@@ -159,6 +169,61 @@ def _described(unit: dict) -> str:
     return f"effect {effect}  {json.dumps(unit['details'], sort_keys=True)}"
 
 
+def _few(names, shown=3, count=False) -> str:
+    """The first `shown` names; `, …` when there are more, and with `count` how many."""
+    more = len(names) - shown
+    return ", ".join(names[:shown]) + ((f", … (+{more} more)" if count else ", …") if more > 0 else "")
+
+
+def _failed(items) -> list[str]:
+    """Failed invariants in words, `invariant: detail`: the unit it affects first when it affects one, and
+    units that failed alike as one line, `(K units: a, b, c, …)`."""
+    groups = {}
+    for item in items:
+        label = workload_label(item["workload"]) if "workload" in item else None
+        groups.setdefault((item["invariant"], item["detail"]), []).append(label)
+    lines = []
+    for (invariant, detail), labels in groups.items():
+        units = list(dict.fromkeys(label for label in labels if label))
+        text = f"{invariant}: {detail}"
+        lines.append(f"{units[0]}: {text}" if len(units) == 1 else
+                     f"{text}  ({len(units)} units: {_few(units)})" if units else text)
+    return lines
+
+
+def _reason(unit) -> str:
+    """The unit's reason; for `not-measured`, which side measured nothing, and how its attempts ended:
+    `not-measured: contender skipped`, or `baseline error 2, skipped 1` when the statuses differ."""
+    if unit["reason"] == "benchmark-changed":
+        return "benchmark-changed: its version differs between the results"
+    if unit["reason"] != "not-measured":
+        return unit["reason"]
+    sides = []
+    for role, statuses in unit["attempts"].items():
+        if "success" not in statuses:
+            many = len(statuses) > 1
+            sides.append(f"{role} " + ", ".join(f"{status} {n}" if many else status
+                                               for status, n in sorted(statuses.items(), key=lambda x: (-x[1], x[0]))))
+    return f"not-measured: {', '.join(sides)}"
+
+
+def _excluded(items) -> list[str]:
+    """Results left out, one line for each reason (which has what the result said): `reason  (K results)`.
+    Which results is in the document (`--json`), not here."""
+    counts = {}
+    for item in items:
+        counts[item["reason"]] = counts.get(item["reason"], 0) + 1
+    return [f"{reason}  ({n} result{'s' if n != 1 else ''})" for reason, n in counts.items()]
+
+
+def _missing(items) -> list[str]:
+    """Units a side has no result for, one line for each side: `not on contender: a, b, c, … (+N more)`."""
+    sides = {}
+    for item in items:
+        sides.setdefault(item["side"], []).append(workload_label(item["workload"]))
+    return [f"not on {side}: {_few(list(dict.fromkeys(labels)), count=True)}" for side, labels in sorted(sides.items())]
+
+
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
     params, sides = doc["selector"]["params"], doc.get("sides", {})
@@ -182,17 +247,24 @@ def render(doc: dict) -> str:
     caveats = sorted({c for u in doc["units"] for c in u.get("caveats", [])})
     if caveats:
         lines.append(f"  caveats: {', '.join(caveats)}")
-    for section in ("regressed", "improved", "changed", "no-change-detected", "equivalent", "indeterminate"):
-        rows = [u for u in doc["units"] if u["verdict"] == section]
+    for section in ("regressed", "improved", "changed", "no-change-detected", "equivalent", "indeterminate",
+                    "not-comparable"):
+        # As asv sorts them: a unit whose results are not of one benchmark is "not comparable", not indeterminate.
+        rows = [u for u in doc["units"] if (section == "not-comparable") == (u.get("reason") in NOT_COMPARABLE)
+                and (section == "not-comparable" or u["verdict"] == section)]
         if not rows:
             continue
         lines.append(f"\n{section.replace('-', ' ').upper()} ({len(rows)})")
         for u in rows:
-            reason = f"  ({u['reason']})" if "reason" in u else ""
+            if section == "not-comparable":  # no effect, noise or rounds to show: say why, as asv does
+                lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} ({_reason(u)})")
+                continue
+            reason = f"  ({_reason(u)})" if "reason" in u else ""
             lines.append(f"  {workload_label(u['workload']):<32} {u['quantity']:<10} {_described(u)}{reason}")
-    for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
-                       ("exclusions", "excluded")):
-        if doc[key]:
-            lines.append(f"\n{title} ({len(doc[key])})")
-            lines.extend(f"  {item}" for item in doc[key])
+    for title, items, say in (("missing", doc["missing"], _missing),
+                              ("failed invariants", doc["failed_invariants"], _failed),
+                              ("excluded", doc["exclusions"], _excluded)):
+        if items:
+            lines.append(f"\n{title} ({len(items)})")
+            lines.extend(f"  {line}" for line in say(items))
     return "\n".join(lines)

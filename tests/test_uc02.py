@@ -245,3 +245,16 @@ def test_measure_mode_refuses_a_baseline_that_is_not_a_value_before_running(tree
     assert code == cli.EXIT_REFUSED and doc is None
     assert "baseline 'variant' is not a value of role; use one of: 'baseline', 'variant'" in err
     assert not (tree / "results").exists()  # nothing ran
+
+
+def test_tables_name_the_sides_by_the_parameter_value(tree, capsys):
+    loop(["mod.py"], by_case([BASELINE, VARIANT]), PYPERF, rounds=3)
+    capsys.readouterr()
+    # --all: every row, whatever its verdict. What the tables call the sides is the point here, not the sign of
+    # an effect, which rests on three timed rounds and fails to appear when a loaded machine spoils one of them.
+    code = cli.main(["compare", "--run", RUN, "--profile", "variants", "--baseline", BASELINE, "--tables", "--all"])
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_OK
+    assert "role='baseline' (3 rounds):" in out and "role='variant' (3 rounds):" in out
+    assert f"Before [{BASELINE}]" in out and f"After [{VARIANT}]" in out
+    assert "bench_truncate" in out.split("Before", 1)[1]  # the change table has the row

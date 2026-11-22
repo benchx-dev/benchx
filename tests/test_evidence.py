@@ -329,3 +329,22 @@ def test_a_document_whose_selector_names_no_sides_renders():
                            {"k": 3.0, "min_rounds": 3})
     assert core.check(doc, "comparison-document") == [] and "sides" not in doc
     assert compare.render(doc).splitlines()[0].startswith("benchx/run-profile  run_key run  profile revisions")
+
+
+def test_a_unit_whose_benchmark_was_edited_has_no_series():
+    """The edited benchmark's results fall into one series per version, so the unit, which compares
+    nothing, names none; it uses none of its results, which are not listed as failed."""
+    from test_comparator import run_two
+    docs = run_two()
+    for d in docs:
+        if d["coordinates"]["workload"]["name"] == "BM_B":
+            d["coordinates"]["protocol"]["asv"] = {"benchmark_version": "v2" if d["revision"]["key"] == HEAD else "v1"}
+    doc = evaluate(docs)
+    edited = next(u for u in doc["units"] if u["workload"]["name"] == "BM_B")
+    assert "series" not in edited and len(by_name_series(doc)["BM_A"]) == 64
+    assert edited["used"] == [] and {e["reason"] for e in edited["excluded"]} == {"benchmark-changed"}
+    assert doc["exclusions"] == []  # the results measured something; they are not of one benchmark
+
+
+def by_name_series(doc):
+    return {u["workload"]["name"]: u.get("series") for u in doc["units"]}

@@ -277,7 +277,7 @@
       ],
       "properties": {
         "name": {
-          "$ref": "#/$defs/token"
+          "$ref": "#/$defs/nonEmptyString"
         },
         "parameters": {
           "type": "object",
@@ -468,7 +468,6 @@
       "required": [
         "workload",
         "quantity",
-        "series",
         "method",
         "verdict",
         "used",
@@ -483,8 +482,15 @@
           "$ref": "#/$defs/token"
         },
         "series": {
-          "description": "Series fingerprint under the projection the selector grouped by.",
+          "description": "The unit's series under the projection the selector grouped by: the one its results that count share (the successful ones, else every attempt). Absent when they share none, as when the benchmark was edited between them (reason benchmark-changed): no single series is compared.",
           "$ref": "#/$defs/sha256"
+        },
+        "attempts": {
+          "description": "How each side's attempts at this unit ended, by status, the sides as the selector names them: the evidence behind a reason such as not-measured, a side with no success.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/attempts"
+          }
         },
         "evidence": {
           "$ref": "#/$defs/evidence"
@@ -503,7 +509,7 @@
           ]
         },
         "reason": {
-          "description": "Why the verdict is indeterminate, such as insufficient-rounds or insufficient-history.",
+          "description": "Why the verdict is indeterminate, such as insufficient-rounds, not-measured (a side with no successful attempt), side-failed, or benchmark-changed (the benchmark was edited between the results, so they are not comparable).",
           "$ref": "#/$defs/token"
         },
         "effect": {
@@ -569,6 +575,17 @@
         "required": [
           "reason"
         ]
+      }
+    },
+    "attempts": {
+      "description": "Attempt counts by status, for one side of a unit.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/token"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
       }
     }
   }

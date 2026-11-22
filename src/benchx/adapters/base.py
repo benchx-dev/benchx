@@ -67,14 +67,16 @@ Optional hooks (the runner calls them when present)
                               attempt. For a harness that repeats at several levels.
 """
 
+import difflib
 import json
 import os
 import re
 import signal
 import subprocess
+import textwrap
 
 from ..core import Refusal, Rejected
-from .benchx_params import combination
+from .benchx_params import combination, search_name
 
 
 class Unsupported(Rejected):
@@ -99,25 +101,55 @@ def parametrized_workload(case, runnable) -> tuple[str, dict]:
     return name, dict(zip(info["param_names"], combination(info["params"], index)))
 
 
-def name_only_note(names) -> str:
-    """For a refusal: the filter matched parametrized benchmarks by name, but not their
-    arguments (see `benchx_params.matches_name_only`)."""
-    return (f"the filter matches the name of a parametrized benchmark ({', '.join(names[:3])}) but "
-            "not its arguments, and those are matched as name(p0, p1)")
+def name_only_note(found) -> str:
+    """For a refusal: the filter is about parametrized benchmarks (`found`, their listing entries)
+    but matches none of their arguments (see `benchx_params.matches_name_only`). Says how a case
+    is searched, with the first benchmark's parameters, in order, and one case as it is searched."""
+    first = found[0]
+    names = ", ".join(info["name"] for info in found[:3])
+    return "\n".join([
+        f"the filter matches the name of a parametrized benchmark ({names}) but not its arguments.",
+        "They are searched as name(p0, p1), each as its repr, in the order of param_names:",
+        f"  {first['name']}({', '.join(first['param_names'])})",
+        "for example:",
+        f"  {search_name(first['name'], first['params'], 0)}"])
 
 
-def no_cases(where, case_filter, available=(), notes=(), limit=10) -> Unsupported:
+def similar(case_filter, names, limit=5, cutoff=0.75) -> list[str]:
+    """The names a filter may have meant: those that have, as a dotted part (module, class, method), the
+    most of its words, or words close to them, then the closest first. A word is a run of letters, digits
+    and `_` of three characters or more, so an escape such as `\\d` says nothing, and the case of a letter
+    is not a difference. A filter that names a module and misspells its class thus finds that class's
+    benchmarks, and not the whole module."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", case_filter or "") if len(w) >= 3]
+    scored = []
+    for name in names:
+        parts = name.lower().split(".")
+        best = (max(difflib.SequenceMatcher(None, word, part).ratio() for part in parts) for word in words)
+        hits = [score for score in best if score >= cutoff]
+        if hits:
+            scored.append((-len(hits), -sum(hits), name))
+    scored.sort()
+    return [name for count, _, name in scored[:limit] if count == scored[0][0]]
+
+
+def no_cases(where, case_filter, available=(), notes=(), limit=5) -> Unsupported:
     """The refusal for a plan with no case in it. Nothing would run, and a filter with a
     typo must not end in `0 result(s)` and a success status. `available` are the names
     that could have been selected (the first `limit` are shown) and `notes` say what else
-    the adapter knows about why the plan is empty."""
-    head = f"filter {case_filter!r} selects no case in {where}" if case_filter else f"no case to run in {where}"
-    parts = [head]
+    the adapter knows about why the plan is empty, each on its own lines (a note may have several).
+    The last line is the names that are similar to the filter (`similar`), else the first available.
+    The filter is shown as given, not as a Python string, so its backslashes are the ones typed."""
+    head = f"filter '{case_filter}' selects no case in {where}" if case_filter else f"no case to run in {where}"
+    lines = [head] + [textwrap.indent(note, "  ") for note in notes]
     names = sorted(available)
-    if names:
+    close = similar(case_filter, names, limit)
+    if close:
+        lines.append(f"  similar: {', '.join(close)}")
+    elif names:
         more = f", … ({len(names) - limit} more)" if len(names) > limit else ""
-        parts.append(f"available: {', '.join(names[:limit])}{more}")
-    return Unsupported("; ".join(parts + list(notes)))
+        lines.append(f"  available: {', '.join(names[:limit])}{more}")
+    return Unsupported("\n".join(lines))
 
 
 def check_filter(case_filter) -> None:
@@ -143,6 +175,51 @@ def last_json(out: subprocess.CompletedProcess, what: str):
                           "the listing ends with") from None
 
 
+# How long a benchmark's manager gets to tidy up after Ctrl-C before its group is killed. pyperf, given Ctrl-C on its
+# own, had stopped its worker and exited within a second.
+STOP_GRACE_S = 1.0
+
+
+# After a group is killed, how long to wait for its pipes to reach their end. They do at once, unless something that
+# left the group (a daemon, `setsid`) still holds them: then what has arrived is taken, and the rest is not waited for.
+KILL_DRAIN_S = 0.5
+
+
+def kill_group(proc) -> tuple[str, str]:
+    """`SIGKILL` to the group `proc` leads (what a benchmark started itself included), reap `proc`, and return what
+    its pipes held, stdout and stderr, as text. The wait on the pipes is bounded (`KILL_DRAIN_S`): a plain
+    `communicate()` would wait for a process that left the group and holds them, for as long as it lives."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:  # already gone
+        pass
+    proc.wait()
+    try:
+        return proc.communicate(timeout=KILL_DRAIN_S)
+    except subprocess.TimeoutExpired as holding:
+        for pipe in (proc.stdout, proc.stderr):  # what arrived is in the exception, as bytes
+            if pipe is not None:
+                pipe.close()
+        return tuple(data.decode(errors="backslashreplace") if isinstance(data, bytes) else data or ""
+                     for data in (holding.stdout, holding.stderr))
+
+
+def stop_group(proc, grace=STOP_GRACE_S) -> None:
+    """`bx` was interrupted while `proc`, which leads a process group of its own, ran. The terminal's SIGINT reached
+    `bx` and not that group, so give the group what the terminal would have: SIGINT, so that pyperf's manager prints
+    its "interrupted" message and kills its worker, as it does when it is run alone. Then wait up to `grace` seconds
+    (a second Ctrl-C ends the wait), then `kill_group`."""
+    try:
+        os.killpg(proc.pid, signal.SIGINT)
+    except ProcessLookupError:  # already gone
+        pass
+    try:
+        proc.communicate(timeout=grace)  # keeps draining the pipes, so a chatty manager can finish
+    except BaseException:  # the grace ran out, or another Ctrl-C: no more waiting
+        pass
+    kill_group(proc)
+
+
 def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True, **kwargs)` with a time limit.
 
@@ -157,11 +234,7 @@ def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as error:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.communicate()
+        kill_group(proc)
         if isinstance(error, subprocess.TimeoutExpired):
             raise Unsupported(f"{what} did not finish within {timeout:g} s (timeouts.order_s)") from None
         raise

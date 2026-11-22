@@ -46,12 +46,13 @@ class Row:
     estimate: float | None = None
     observations: tuple = ()
     exclusion: str | None = None
+    status: str = "success"      # how the attempt ended (schema §5.1)
 
 
 @dataclass(frozen=True)
 class Evidence:
     """One unit: the rows of one series, and what the selector knows about them."""
-    series: str
+    series: str | None           # its series fingerprint; None when its results do not share one
     workload: dict
     quantity: dict               # the measurement's quantity: name, unit, direction, ...
     sides: tuple                 # in order: the reference side first
@@ -70,6 +71,11 @@ class Evidence:
     # (UC-02 §10). A selector's rule, not a statistic: every method returns
     # indeterminate with this reason, and the framework checks that it did.
     no_verdict: str | None = None
+
+
+# The `no_verdict` reasons that say a unit's results are not of one benchmark, such as a benchmark edited
+# between them: nothing about how they line up is checked, and the unit is listed as not comparable.
+NOT_COMPARABLE = frozenset({"benchmark-changed"})
 
 
 @dataclass
@@ -199,9 +205,11 @@ def _value(row: Row, dim: str):
     return row.side if dim == SIDE else row.columns.get(dim)
 
 
-def pivot(evidence: Evidence, dims: tuple) -> Layout:
+def pivot(evidence: Evidence, dims: tuple, *, lined_up: bool = True) -> Layout:
     """`evidence` over `dims`, with missing cells masked. Every dimension except
-    the side must be crossed with it, or there is nothing to line the sides up by."""
+    the side must be crossed with it, or there is nothing to line the sides up by;
+    without `lined_up`, such a dimension is left empty instead, for a unit whose
+    results are not compared at all (`NOT_COMPARABLE`)."""
     rows = evidence.rows
     coords = {}
     for dim in dims:
@@ -209,6 +217,9 @@ def pivot(evidence: Evidence, dims: tuple) -> Layout:
             coords[dim] = tuple(evidence.sides)
             continue
         found = relation(rows, dim)
+        if found != "crossed" and not lined_up:
+            coords[dim] = ()
+            continue
         if found == "absent":
             raise NotApplicable(f"it needs {dim}, and no result has one")
         if found == "nested":
