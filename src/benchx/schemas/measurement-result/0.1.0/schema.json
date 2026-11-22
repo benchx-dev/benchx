@@ -78,7 +78,7 @@
           "additionalProperties": false,
           "required": ["name"],
           "properties": {
-            "name": { "$ref": "#/$defs/token" },
+            "name": { "$ref": "#/$defs/nonEmptyString" },
             "parameters": {
               "description": "One concrete parameter assignment. Values are primitives or arrays of primitives. A baseline-versus-variant study uses a `role` parameter.",
               "type": "object",
