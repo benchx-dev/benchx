@@ -1,18 +1,15 @@
-// The benchx dashboard: a static page over the JSON views written by `bx view`.
+// The benchx dashboard: a static, light-first SPA over the JSON views written by `bx view`.
 // No query engine runs here; every number shown was computed ahead of time.
-// Routes: #/ overview, #/suites, #/s/<suite>, #/b/<suite>/<case>?params=&q=&node=,
-// #/c/<sha>, #/about. Names, links and the upstream come from data/project.json.
-// Data is fetched with cache-busting because static CDNs may cache for hours.
+// Routes: #/ overview (no plots: top movers + runs history), #/benchmarks (sortable flat list),
+// #/suites, #/s/<suite>, #/b/<suite>/<case>?params=&q=&node=, #/c/<sha>, #/about.
 
 const DATA = "data/";
 const SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
-const PAGE = 48;
-// The benchx mark (logo.svg), inline so the legs follow the page's ink in
-// both themes; the small variant (favicon.svg) is drawn heavier for 16-32 px.
+const PAGE = 50;
 const MARK = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="10" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 24 L46 52 M46 24 L18 52" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>';
 const MARK_SMALL = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="8" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 26 L46 52 M46 26 L18 52" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg>';
 function wordmark(small) { return h("span", { class: "benchx" }, h("span", { html: small ? MARK_SMALL : MARK }), h("span", { class: "wm" }, "bench", h("b", {}, "x"))); }
-const state = { v: "", project: null, manifest: null, landing: null, series: null, sparks: null, histories: new Map(), commits: new Map(), charts: [], cleanup: [], nodeSlots: new Map(), routeSeq: 0 };
+const state = { v: "", project: null, manifest: null, landing: null, series: null, histories: new Map(), commits: new Map(), charts: [], cleanup: [], colorSlots: new Map(), routeSeq: 0 };
 
 // ---- utilities ------------------------------------------------------------------
 
@@ -56,7 +53,7 @@ const UNITS = {
 function pickScale(values, unit) {
   const table = UNITS[unit];
   const m = Math.max(...values.filter((v) => v != null && isFinite(v)).map(Math.abs), 0);
-  if (!table || !m) return [unit, 1];
+  if (!table || !m) return [unit || "", 1];
   let best = table[0];
   for (const t of table) if (m >= t[1]) best = t;
   return best;
@@ -72,7 +69,7 @@ function fmtNum(v, digits = 3) {
 function fmtValue(v, unit, scale) {
   if (v == null) return "–";
   const [label, factor] = scale || pickScale([v], unit);
-  return `${fmtNum(v / factor)} ${label}`;
+  return `${fmtNum(v / factor)}${label ? " " + label : ""}`;
 }
 function fmtPct(x, digits = 1) {
   if (x == null || !isFinite(x)) return "–";
@@ -94,9 +91,10 @@ function ago(s) {
   const d = parseDate(s);
   if (!d) return "";
   const m = Math.round((Date.now() - d) / 60000);
-  if (m < 60) return `${m} min ago`;
-  if (m < 48 * 60) return `${Math.round(m / 60)} h ago`;
-  return `${Math.round(m / 1440)} d ago`;
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (m < 48 * 60) return `${Math.round(m / 60)}h ago`;
+  return `${Math.round(m / 1440)}d ago`;
 }
 function shortSuite(s) {
   let out = s.replace(/-benchmark$/g, "");
@@ -108,7 +106,7 @@ function safeFile(s) {
   const cleaned = String(s).replace(/[/\\\x00:*?"<>|]+/g, "_").replace(/\.\.+/g, "_");
   return cleaned && cleaned !== "." ? cleaned : "_";
 }
-function shortSha(sha, len = 12) {
+function shortSha(sha, len = 10) {
   if (!sha) return "";
   if (sha.includes("-dirty-")) {
     const [base, tree] = sha.split("-dirty-", 2);
@@ -132,10 +130,6 @@ function runLog(sha, node, hasLog = true) {
 }
 function multiNode() { return (state.landing?.stats.nodes || []).length > 1; }
 
-// A change is judged three ways: its direction (the quantity says whether up is
-// worse), its size (under 0.5 % is flat), and its size against the series' noise
-// (under twice the noise it is shown muted: observed, but not distinguishable
-// from run-to-run variation). None of it is a verdict; see the about page.
 const FLAT = 0.005;
 function verdict(rel, direction) {
   if (rel == null || !isFinite(rel)) return "none";
@@ -148,19 +142,23 @@ function changeWords(direction, unit) {
   return { worse: "worse", better: "better" };
 }
 function withinNoise(rel, noise) { return noise != null && rel != null && Math.abs(rel) < 2 * noise; }
-// delta(rel, direction, {noise, unit}): noise undefined means "not known here",
-// null means "the series has too few points for one".
+function changeCellClass(rel, direction, noise) {
+  const v = verdict(rel, direction);
+  if (v !== "regressed" && v !== "improved") return "";
+  if (noise == null || withinNoise(rel, noise)) return "";
+  return v === "regressed" ? "cell-bad" : "cell-good";
+}
 function delta(rel, direction, opts = {}) {
   const v = verdict(rel, direction);
   const real = v === "regressed" || v === "improved";
   const within = real && withinNoise(rel, opts.noise);
   const w = changeWords(direction, opts.unit);
-  const glyph = v === "none" ? "" : v === "flat" ? "■" : rel > 0 ? "▲" : "▼";
+  const glyph = v === "none" ? "" : v === "flat" ? "·" : rel > 0 ? "▲" : "▼";
   const word = { regressed: w.worse, improved: w.better, flat: "no change", none: "no comparison" }[v];
   let title = v === "none" ? word : `${fmtPct(rel, 2)}: ${word}`;
   const unknown = real && opts.noise === null;
-  if (real && opts.noise != null) title += within ? ` · smaller than twice the series' usual commit-to-commit movement (${fmtAbsPct(opts.noise)}), which changes of this size are common within` : ` · ${(Math.abs(rel) / opts.noise).toFixed(1)}× the series' usual commit-to-commit movement (${fmtAbsPct(opts.noise)})`;
-  else if (unknown) title += " · no noise estimate yet (fewer than 3 measurements): unconfirmed";
+  if (real && opts.noise != null) title += within ? ` · within 2× series noise (${fmtAbsPct(opts.noise)})` : ` · ${(Math.abs(rel) / opts.noise).toFixed(1)}× series noise (${fmtAbsPct(opts.noise)})`;
+  else if (unknown) title += " · no noise estimate yet (<3 measurements)";
   return h("span", { class: `delta num ${v}${within ? " within" : ""}${unknown ? " unknown" : ""}`, title, "aria-label": title },
     glyph && h("span", { class: "glyph", "aria-hidden": "true" }, glyph), fmtPct(rel, opts.digits ?? 1));
 }
@@ -174,39 +172,420 @@ function benchHref(s, { node } = {}) {
 }
 function caseLabel(s) { return s.params ? `${s.case} ${s.params}` : s.case; }
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-function nodeColor(node) {
-  if (!state.nodeSlots.has(node)) state.nodeSlots.set(node, state.nodeSlots.size % SERIES_VARS.length);
-  return cssVar(SERIES_VARS[state.nodeSlots.get(node)]);
-}
-function table(headers, rows, opts = {}) {
-  return h("div", { class: "wrap" }, h("table", {},
-    h("thead", {}, h("tr", {}, headers.map((x) => h("th", { class: x.startsWith(">") ? "r" : "" }, x.replace(/^>/, ""))))),
-    h("tbody", {}, rows.length ? rows.map((cells) => h("tr", {}, cells.map((c, i) => h("td", { class: headers[i].startsWith(">") ? "r num" : "" }, c))))
-      : h("tr", {}, h("td", { colspan: headers.length, class: "empty" }, opts.empty || "nothing yet")))));
-}
-function tile(label, value, hint, small) {
-  return h("div", { class: "tile" }, h("div", { class: "label" }, label), h("div", { class: `value ${small ? "small" : ""}` }, value), hint && h("div", { class: "hint" }, hint));
-}
-function chip(label, value, tone) {
-  return h("span", { class: `chip ${tone || ""}` }, h("b", { class: "num" }, value), " ", label);
+function seriesColor(key) {
+  if (!state.colorSlots.has(key)) state.colorSlots.set(key, state.colorSlots.size % SERIES_VARS.length);
+  return cssVar(SERIES_VARS[state.colorSlots.get(key)]);
 }
 function failTag(reason, text = "failed") { return h("span", { class: "tag failed", title: reason || "" }, text); }
 function gapTag(ch) {
   if (ch.prev_is_parent) return null;
-  const title = `The baseline ${shortSha(ch.prev_sha)} is not this commit's parent: the commits in between were not measured for this series, so this change may belong to any of them.`;
+  const title = `Baseline ${shortSha(ch.prev_sha)} is not the parent commit; unmeasured commits lie in between.`;
   return h("span", { class: "tag gap", title }, "not parent");
 }
 function stateTag(c) {
   if (c.state === "finished") return null;
-  return h("span", { class: `tag ${c.state === "failed" ? "failed" : ""}` }, c.state === "failed" ? "run failed" : c.state);
+  return h("span", { class: `tag ${c.state === "failed" ? "failed" : ""}` }, c.state === "failed" ? "failed" : c.state);
 }
-function sharedLegend(nodes) {
-  return nodes.length > 1 ? h("span", { class: "legend" }, nodes.map((n) => h("span", { class: "legend-key" }, h("span", { class: "key", style: `border-color:${nodeColor(n)}` }), n))) : null;
+function sharedLegend(keys) {
+  return keys.length > 1 ? h("span", { class: "legend" }, keys.map((n) => h("span", { class: "legend-key" }, h("span", { class: "key", style: `border-color:${seriesColor(n)}` }), n))) : null;
 }
 
-// ---- benchmark cards (overview and suite pages) ------------------------------------
+// Generic table builder supporting right alignment (">Label"), cell objects ({ node, cls }),
+// optional sort state ({ key, dir, onSort, keys }), and optional 2-tier grouped headers.
+function table(headers, rows, opts = {}) {
+  const sort = opts.sort || null;
+  const theadRows = [];
+  if (opts.groups) {
+    theadRows.push(h("tr", { class: "group-row" }, opts.groups.map((g) => h("th", { colspan: g.span }, g.label))));
+  }
+  theadRows.push(h("tr", {}, headers.map((raw, i) => {
+    const right = raw.startsWith(">");
+    const label = raw.replace(/^>/, "");
+    const sep = opts.sepAt && opts.sepAt.includes(i) ? " col-sep" : "";
+    const key = sort?.keys?.[i];
+    if (key) {
+      const active = sort.key === key;
+      const ind = active ? (sort.dir === "asc" ? "▲" : "▼") : "";
+      return h("th", { class: `${right ? "r " : ""}sortable${sep}`, onclick: () => sort.onSort(key) },
+        label, ind ? h("span", { class: "sort-ind" }, ind) : null);
+    }
+    return h("th", { class: `${right ? "r" : ""}${sep}`.trim() }, label);
+  })));
+  const bodyRows = rows.length ? rows.map((cells) => h("tr", {}, cells.map((cell, i) => {
+    const right = headers[i].startsWith(">");
+    const sep = opts.sepAt && opts.sepAt.includes(i) ? " col-sep" : "";
+    const isObj = cell && typeof cell === "object" && !cell.nodeType && "v" in cell;
+    const content = isObj ? cell.v : cell;
+    const extra = isObj && cell.cls ? ` ${cell.cls}` : "";
+    return h("td", { class: `${right ? "r num" : ""}${sep}${extra}`.trim() }, content);
+  }))) : [h("tr", {}, h("td", { colspan: headers.length, class: "empty" }, opts.empty || "nothing yet"))];
+  return h("div", { class: "wrap" }, h("table", {}, h("thead", {}, ...theadRows), h("tbody", {}, ...bodyRows)));
+}
 
-// groups: one card per (suite, case, params, quantity); its nodes are lines on one chart.
+function cmpVal(a, b, dir = "asc") {
+  const mult = dir === "asc" ? 1 : -1;
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === "string" && typeof b === "string") return mult * a.localeCompare(b);
+  return mult * (a < b ? -1 : a > b ? 1 : 0);
+}
+
+function problemsBanner() {
+  const n = state.manifest.counts.ingest_problems || 0;
+  return n ? h("div", { class: "banner bad" }, `${n} result${n > 1 ? "s or run directories were" : " or run directory was"} rejected by ingest and omitted.`) : null;
+}
+
+// ---- overview (#/): plot-free, top movers + runs history ----------------------------
+
+function renderLanding() {
+  const L = state.landing;
+  if (!L.stats.results) return renderEmpty();
+  const nodes = L.stats.nodes || [];
+  const q = new URLSearchParams((location.hash.split("?")[1]) || "");
+  const hasNoise = [...L.movers.regressed, ...L.movers.improved].some((m) => m.noise != null);
+  const ctl = {
+    node: q.get("node") || "all",
+    hideNoise: q.has("noisy") ? q.get("noisy") !== "1" : hasNoise,
+    runFilter: "",
+  };
+
+  const moversHost = h("div", {});
+  const failuresHost = h("div", {});
+  const runsHost = h("div", {});
+
+  const drawMovers = () => {
+    const matchNode = (m) => ctl.node === "all" || m.node === ctl.node;
+    const filterList = (list) => list
+      .filter((m) => matchNode(m) && (!ctl.hideNoise || !withinNoise(m.rel_change, m.noise)))
+      .slice(0, 10);
+    const reg = filterList(L.movers.regressed);
+    const imp = filterList(L.movers.improved);
+
+    const moverPanel = (title, list, emptyMsg) => {
+      const rows = list.map((m) => {
+        const cls = changeCellClass(m.rel_change, m.direction, m.noise);
+        const nameCell = h("span", {},
+          h("a", { href: benchHref(m, { node: m.node }), class: "mono", title: `${caseLabel(m)} (${m.suite})` }, caseLabel(m)),
+          " ", h("span", { class: "note" }, shortSuite(m.suite)),
+          ctl.node === "all" && multiNode() ? [" ", h("span", { class: "note" }, `· ${m.node}`)] : null);
+        const beforeAfter = h("span", { class: "num note" }, `${fmtValue(m.prev_estimate, m.unit)} → ${fmtValue(m.estimate, m.unit)}`);
+        const dCell = h("span", { class: "delta-cell" }, m.prev_is_parent ? null : gapTag(m), delta(m.rel_change, m.direction, { noise: m.noise, unit: m.unit }));
+        return [nameCell, beforeAfter, { v: dCell, cls }];
+      });
+      return h("section", { class: "panel" },
+        h("div", { class: "panel-head" }, h("h3", {}, title), h("span", { class: "note" }, `${list.length} shown`)),
+        table(["Benchmark", ">Before → After", ">Change"], rows, { empty: emptyMsg }));
+    };
+
+    const anyCompared = L.latest_runs.some((r) => (ctl.node === "all" || r.node === ctl.node) && r.compared > 0);
+    const noReg = !anyCompared ? "needs at least 2 measured commits" : "no regressions above threshold";
+    const noImp = !anyCompared ? "needs at least 2 measured commits" : "no improvements above threshold";
+    moversHost.replaceChildren(h("div", { class: "cols" },
+      moverPanel("Top regressions", reg, noReg),
+      moverPanel("Top improvements", imp, noImp)));
+
+    const fails = L.failures.filter(matchNode);
+    const badRuns = L.latest_runs.filter((r) => matchNode(r) && r.state !== "finished");
+    if (fails.length || badRuns.length) {
+      failuresHost.replaceChildren(h("details", { class: "failures", open: fails.length > 0 && fails.length <= 6 },
+        h("summary", {},
+          fails.length ? h("span", { class: "bad" }, `${fails.length} failed benchmark${fails.length === 1 ? "" : "s"}`) : null,
+          fails.length && badRuns.length ? " · " : null,
+          badRuns.length ? h("span", { class: "bad" }, `${badRuns.length} incomplete run${badRuns.length === 1 ? "" : "s"}`) : null,
+          " on latest commits"),
+        badRuns.length ? h("p", { class: "note" }, ...joinParts(badRuns.map((r) => h("span", {}, h("a", { href: `#/c/${encodeURIComponent(r.sha)}`, class: "mono" }, r.short), ` (${r.node}: ${r.state})`)))) : null,
+        fails.length ? h("ul", {}, fails.slice(0, 30).map((f) => h("li", {},
+          h("a", { href: benchHref(f, { node: f.node }), class: "mono" }, caseLabel(f)), " ",
+          h("span", { class: "note" }, shortSuite(f.suite)), " ",
+          h("code", { class: "reason" }, f.reason || f.status)))) : null));
+    } else {
+      failuresHost.replaceChildren();
+    }
+  };
+
+  const drawRuns = () => {
+    const needle = ctl.runFilter.trim().toLowerCase();
+    const list = L.recent_commits.filter((c) =>
+      (ctl.node === "all" || c.node === ctl.node) &&
+      (!needle || `${c.sha} ${c.subject} ${c.node} ${c.state}`.toLowerCase().includes(needle)));
+    const pct = `${Math.round(L.notable * 100)}%`;
+    const rows = list.map((c) => {
+      const logUrl = runLog(c.sha, c.node, c.has_log);
+      const regCell = c.compared ? (c.regressed ? { v: h("span", { class: "delta regressed" }, c.regressed), cls: "cell-bad" } : "0") : "–";
+      const impCell = c.compared ? (c.improved ? { v: h("span", { class: "delta improved" }, c.improved), cls: "cell-good" } : "0") : "–";
+      const failCell = c.failed_results ? { v: h("span", { class: "bad" }, c.failed_results), cls: "cell-bad" } : "0";
+      return [
+        h("span", { title: fmtDate(c.finished_at || c.started_at || c.committer_date) }, ago(c.finished_at || c.started_at || c.committer_date) || fmtDate(c.committer_date)),
+        c.node,
+        c.state === "finished" ? "ok" : stateTag(c),
+        c.results.toLocaleString(),
+        failCell,
+        regCell,
+        impCell,
+        logUrl ? h("a", { href: logUrl, target: "_blank", rel: "noopener" }, "log") : "",
+        h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short),
+        h("span", {}, c.subject.length > 84 ? c.subject.slice(0, 82) + "…" : c.subject),
+      ];
+    });
+    runsHost.replaceChildren(table(
+      ["Time", "Machine", "State", ">Results", ">Failed", `>Regressed >${pct}`, `>Improved >${pct}`, "", "Hash", "Message"],
+      rows,
+      {
+        groups: [{ label: "Run", span: 8 }, { label: "Commit", span: 2 }],
+        sepAt: [8],
+        empty: "no matching runs",
+      }));
+  };
+
+  const nodeSelect = nodes.length > 1 ? h("label", {}, "Machine",
+    h("select", { onchange: (e) => { ctl.node = e.target.value; drawMovers(); drawRuns(); } },
+      ["all", ...nodes].map((n) => h("option", { value: n, selected: n === ctl.node }, n === "all" ? "all machines" : n)))) : null;
+  const noiseToggle = h("label", {},
+    h("input", { type: "checkbox", checked: ctl.hideNoise, onchange: (e) => { ctl.hideNoise = e.target.checked; drawMovers(); } }),
+    "hide within-noise");
+  const runSearch = h("input", { type: "search", placeholder: "filter runs or commits…", "aria-label": "filter runs", oninput: (e) => { ctl.runFilter = e.target.value; drawRuns(); } });
+
+  const st = L.stats;
+  const main = h("main", {},
+    problemsBanner(),
+    h("div", { class: "status-bar" },
+      h("span", {},
+        `${st.commits} commit${st.commits === 1 ? "" : "s"} · ${st.series.toLocaleString()} series · ${st.results.toLocaleString()} results`,
+        nodes.length === 1 ? ` · ${nodes[0]}` : ` · ${nodes.length} machines`,
+        " · ", h("a", { href: "#/benchmarks" }, "browse all benchmarks →")),
+      h("div", { class: "controls filters", style: "margin:0" }, nodeSelect, noiseToggle)),
+    failuresHost,
+    moversHost,
+    h("div", { class: "section-head" },
+      h("h2", {}, "Runs history"),
+      h("div", { class: "filters", style: "margin:0" }, runSearch)),
+    runsHost,
+    (L.noisiest.length || L.suite_time.length) ? h("details", { class: "fold" },
+      h("summary", {}, "Noisiest series & suite wall time"),
+      h("div", { class: "cols" },
+        h("section", { class: "panel" },
+          h("div", { class: "panel-head" }, h("h3", {}, "Noisiest series"), h("span", { class: "note" }, "median commit-to-commit |Δ|")),
+          table(["Benchmark", "Machine", ">Noise", ">Pts"],
+            L.noisiest.map((s) => [h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)), s.node, fmtAbsPct(s.noise), s.points]),
+            { empty: "needs at least 3 measurements per series" })),
+        h("section", { class: "panel" },
+          h("div", { class: "panel-head" }, h("h3", {}, "Suite wall time"), h("span", { class: "note" }, "latest commit")),
+          table(["Suite", "Machine", ">Cases", ">Failed", ">Time"],
+            L.suite_time.map((s) => [h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)), s.node, s.cases,
+              s.failed ? h("span", { class: "bad" }, s.failed) : "0",
+              s.seconds < 120 ? `${s.seconds}s` : `${Math.round(s.seconds / 60)}m`]))))) : null,
+    footer());
+
+  drawMovers();
+  drawRuns();
+  return main;
+}
+
+function renderEmpty() {
+  const L = state.landing, repo = state.project.repository, isRuns = state.manifest?.source === "runs";
+  return h("main", {},
+    problemsBanner(),
+    h("section", { class: "empty-box" },
+      h("h2", {}, L.recent_commits.length ? "Runs are filed, but none produced a result" : "Waiting for the first run"),
+      h("p", { class: "lead" }, L.recent_commits.length
+        ? "Open a run below to inspect its status and log."
+        : isRuns
+          ? "This page fills in once benchmark runs are recorded under runs/."
+          : "Measure a target with bx bench, then run bx view:"),
+      L.recent_commits.length ? null : h("pre", {}, isRuns ? "bx view --runs runs --out site" : "bx bench path/to/benchmarks.py\nbx view"),
+      repo ? h("p", {}, h("a", { href: repo }, "Project repository")) : null),
+    L.recent_commits.length ? [h("h2", {}, "Runs"), table(["Commit", "Subject", "Machine", "State", ">Results"],
+      L.recent_commits.map((c) => [h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short), c.subject, c.node, stateTag(c) || c.state, c.results]))] : null,
+    footer());
+}
+
+// ---- benchmarks (#/benchmarks): ASV summarylist-style flat sortable table -----------
+
+function renderBenchmarks(query) {
+  const all = state.series || [];
+  const suites = [...new Set(all.map((s) => s.suite))].sort();
+  const nodes = [...new Set(all.map((s) => s.node))].sort();
+  const ctl = {
+    suite: query.get("suite") || "all",
+    node: query.get("node") || "all",
+    status: query.get("status") || "all",
+    text: query.get("f") || "",
+    hideNoise: query.get("hide_noise") === "1",
+    sort: query.get("sort") || "change",
+    dir: query.get("dir") || "desc",
+    page: Math.max(0, Number(query.get("p") || 0) || 0),
+  };
+
+  const syncHash = () => {
+    const p = new URLSearchParams();
+    if (ctl.suite !== "all") p.set("suite", ctl.suite);
+    if (ctl.node !== "all") p.set("node", ctl.node);
+    if (ctl.status !== "all") p.set("status", ctl.status);
+    if (ctl.text) p.set("f", ctl.text);
+    if (ctl.hideNoise) p.set("hide_noise", "1");
+    if (ctl.sort !== "change") p.set("sort", ctl.sort);
+    if (ctl.dir !== "desc") p.set("dir", ctl.dir);
+    if (ctl.page > 0) p.set("p", String(ctl.page));
+    history.replaceState(null, "", "#/benchmarks" + (p.toString() ? "?" + p : ""));
+  };
+
+  const host = h("div", {});
+  const pagerHost = h("div", {});
+  const countEl = h("span", { class: "note" });
+
+  const onSort = (key) => {
+    if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
+    else { ctl.sort = key; ctl.dir = key === "name" || key === "suite" || key === "node" ? "asc" : "desc"; }
+    ctl.page = 0;
+    draw();
+  };
+
+  const sortVal = (s, key) => {
+    if (key === "name") return caseLabel(s);
+    if (key === "suite") return s.suite;
+    if (key === "node") return s.node;
+    if (key === "value") return s.estimate;
+    if (key === "change") return s.vs_prev == null ? null : Math.abs(s.vs_prev);
+    if (key === "noise") return s.noise;
+    if (key === "points") return s.points;
+    return null;
+  };
+
+  const draw = () => {
+    const needle = ctl.text.trim().toLowerCase();
+    const filtered = all.filter((s) => {
+      if (ctl.suite !== "all" && s.suite !== ctl.suite) return false;
+      if (ctl.node !== "all" && s.node !== ctl.node) return false;
+      if (ctl.status === "failing" && !isFailed(s.status)) return false;
+      if (ctl.status === "regressed" && verdict(s.vs_prev, s.direction) !== "regressed") return false;
+      if (ctl.status === "improved" && verdict(s.vs_prev, s.direction) !== "improved") return false;
+      if (ctl.hideNoise && s.vs_prev != null && withinNoise(s.vs_prev, s.noise)) return false;
+      if (needle && !`${s.case} ${s.params} ${s.suite} ${s.node}`.toLowerCase().includes(needle)) return false;
+      return true;
+    }).sort((a, b) => cmpVal(sortVal(a, ctl.sort), sortVal(b, ctl.sort), ctl.dir) || caseLabel(a).localeCompare(caseLabel(b)));
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
+    ctl.page = Math.min(ctl.page, totalPages - 1);
+    const start = ctl.page * PAGE;
+    const slice = filtered.slice(start, start + PAGE);
+    countEl.textContent = filtered.length ? `Showing ${start + 1}–${start + slice.length} of ${filtered.length.toLocaleString()}` : "0 matches";
+
+    const rows = slice.map((s) => {
+      const cls = isFailed(s.status) ? "cell-bad" : changeCellClass(s.vs_prev, s.direction, s.noise);
+      const changeEl = isFailed(s.status)
+        ? failTag(s.reason, s.status)
+        : delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit });
+      return [
+        h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)),
+        h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)),
+        s.node,
+        fmtValue(s.estimate, s.unit),
+        { v: changeEl, cls },
+        fmtAbsPct(s.noise),
+        s.points,
+      ];
+    });
+
+    host.replaceChildren(table(
+      ["Benchmark", "Suite", "Machine", ">Value", ">Change", ">Noise", ">Points"],
+      rows,
+      {
+        sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "suite", "node", "value", "change", "noise", "points"] },
+        empty: "no benchmarks match the current filters",
+      }));
+
+    pagerHost.replaceChildren(filtered.length > PAGE ? h("div", { class: "pager" },
+      h("span", { class: "note" }, `Page ${ctl.page + 1} of ${totalPages}`),
+      h("div", { class: "btns" },
+        h("button", { class: "ghost", disabled: ctl.page === 0, onclick: () => { ctl.page--; draw(); window.scrollTo(0, 0); } }, "← Prev"),
+        h("button", { class: "ghost", disabled: ctl.page >= totalPages - 1, onclick: () => { ctl.page++; draw(); window.scrollTo(0, 0); } }, "Next →"))) : "");
+    syncHash();
+  };
+
+  const select = (label, key, values, fmt = (x) => x) => h("label", {}, label,
+    h("select", { onchange: (e) => { ctl[key] = e.target.value; ctl.page = 0; draw(); } },
+      values.map((v) => h("option", { value: v, selected: v === ctl[key] }, fmt(v)))));
+
+  const main = h("main", {},
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / benchmarks"),
+    h("h2", {}, "Benchmarks"),
+    h("div", { class: "filters" },
+      nodes.length > 1 ? select("Machine", "node", ["all", ...nodes], (v) => (v === "all" ? "all" : v)) : null,
+      select("Suite", "suite", ["all", ...suites], (v) => (v === "all" ? "all suites" : shortSuite(v))),
+      select("Status", "status", ["all", "regressed", "improved", "failing"]),
+      h("input", { type: "search", placeholder: "filter by name…", value: ctl.text, "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; ctl.page = 0; draw(); } }),
+      h("label", {}, h("input", { type: "checkbox", checked: ctl.hideNoise, onchange: (e) => { ctl.hideNoise = e.target.checked; ctl.page = 0; draw(); } }), "hide within-noise"),
+      countEl),
+    host, pagerHost, footer());
+  draw();
+  return main;
+}
+
+// ---- suites (#/suites & #/s/<suite>) ------------------------------------------------
+
+function renderSuites() {
+  const by = new Map();
+  const timeBySuite = new Map();
+  for (const st of state.landing.suite_time || []) {
+    timeBySuite.set(st.suite, (timeBySuite.get(st.suite) || 0) + st.seconds);
+  }
+  for (const s of state.series) {
+    const e = by.get(s.suite) || { suite: s.suite, series: 0, cases: new Set(), nodes: new Set(), regressed: 0, improved: 0, failing: 0, seconds: timeBySuite.get(s.suite) || 0 };
+    e.series++; e.cases.add(`${s.case}|${s.params}`); e.nodes.add(s.node);
+    if (isFailed(s.status)) e.failing++;
+    else if (s.vs_prev != null && Math.abs(s.vs_prev) > state.landing.notable) {
+      const v = verdict(s.vs_prev, s.direction);
+      if (v === "regressed") e.regressed++; else if (v === "improved") e.improved++;
+    }
+    by.set(s.suite, e);
+  }
+  const all = [...by.values()];
+  const ctl = { text: "", sort: "suite", dir: "asc" };
+  const host = h("div", {});
+  const pct = `${Math.round(state.landing.notable * 100)}%`;
+
+  const onSort = (key) => {
+    if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
+    else { ctl.sort = key; ctl.dir = key === "suite" ? "asc" : "desc"; }
+    draw();
+  };
+  const valOf = (e, k) => k === "cases" ? e.cases.size : k === "nodes" ? e.nodes.size : e[k];
+
+  const draw = () => {
+    const needle = ctl.text.trim().toLowerCase();
+    const rows = all
+      .filter((e) => !needle || e.suite.toLowerCase().includes(needle))
+      .sort((a, b) => cmpVal(valOf(a, ctl.sort), valOf(b, ctl.sort), ctl.dir) || a.suite.localeCompare(b.suite));
+    host.replaceChildren(table(
+      ["Suite", ">Benchmarks", ">Series", "Machines", ">Failing", `>Regressed >${pct}`, `>Improved >${pct}`, ">Time"],
+      rows.map((e) => [
+        h("a", { href: `#/s/${encodeURIComponent(e.suite)}`, class: "mono" }, e.suite),
+        e.cases.size, e.series, [...e.nodes].sort().join(", "),
+        e.failing ? { v: h("span", { class: "bad" }, e.failing), cls: "cell-bad" } : "0",
+        e.regressed ? { v: h("span", { class: "delta regressed" }, e.regressed), cls: "cell-bad" } : "0",
+        e.improved ? { v: h("span", { class: "delta improved" }, e.improved), cls: "cell-good" } : "0",
+        e.seconds ? (e.seconds < 120 ? `${e.seconds}s` : `${Math.round(e.seconds / 60)}m`) : "–",
+      ]),
+      { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["suite", "cases", "series", "nodes", "failing", "regressed", "improved", "seconds"] } }));
+  };
+
+  const main = h("main", {},
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / suites"),
+    h("h2", {}, `Suites (${all.length})`),
+    h("div", { class: "filters" },
+      h("input", { type: "search", placeholder: "filter suites…", "aria-label": "filter suites", oninput: (e) => { ctl.text = e.target.value; draw(); } })),
+    host, footer());
+  draw();
+  return main;
+}
+
+async function loadHistory(suite) {
+  let hist = state.histories.get(suite);
+  if (!hist) { hist = await getJSON(`views/history/${encodeURIComponent(safeFile(suite))}.json`); state.histories.set(suite, hist); }
+  return hist;
+}
+
 function groupSeries(list, extra = () => ({})) {
   const groups = new Map();
   for (const s of list) {
@@ -217,11 +596,11 @@ function groupSeries(list, extra = () => ({})) {
   return [...groups.values()].map((g) => ({ ...g, ...extra(g) }));
 }
 
-function benchCard(g, { showSuite = true } = {}) {
+function benchCard(g) {
   const n = g.newest;
   const failed = isFailed(g.status);
   const plot = h("div", { class: "spark" });
-  const sub = [g.quantity !== "wall-time" ? g.quantity : null, showSuite ? shortSuite(g.suite) : null, n && multiNode() ? n.node : null].filter(Boolean).join(" · ");
+  const sub = [g.quantity !== "wall-time" ? g.quantity : null, n && multiNode() ? n.node : null].filter(Boolean).join(" · ");
   const points = n?.points ?? 0;
   const card = h("a", { class: `mini${failed ? " failed" : ""}`, href: benchHref(g, { node: n?.node }) },
     h("div", { class: "mini-head" },
@@ -230,10 +609,8 @@ function benchCard(g, { showSuite = true } = {}) {
     h("div", { class: "mini-value" }, h("span", { class: "num" }, n ? fmtValue(n.estimate ?? n.latest, g.unit) : "–"), sub && h("span", { class: "note" }, sub)),
     plot,
     h("div", { class: "mini-foot" },
-      failed ? failTag(g.reason, "failed last run")
-        : g.status === "skipped" ? h("span", { class: "tag", title: g.reason || "" }, "skipped")
-        : h("span", {}, points === 1 ? "1 measurement" : `${points} measurements`),
-      h("span", {}, n?.noise != null ? `noise ${fmtAbsPct(n.noise)}` : points ? "noise: needs 3+" : "")));
+      failed ? failTag(g.reason, "failed") : h("span", {}, `${points} pt${points === 1 ? "" : "s"}`),
+      h("span", {}, n?.noise != null ? `noise ${fmtAbsPct(n.noise)}` : "")));
   return [card, plot];
 }
 
@@ -242,230 +619,18 @@ function drawSpark(el, seriesList, axis) {
   const xs = axis.map((_, i) => i);
   const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = s.estimates[k]; }); return col; });
   const vals = ys.flat().filter((v) => v != null);
-  if (!vals.length) { el.append(h("div", { class: "spark-empty" }, "no successful measurement")); return; }
-  if (typeof uPlot === "undefined") { el.append(h("div", { class: "spark-empty" }, "chart unavailable offline")); return; }
-  // At least ±3 % of the middle stays visible, so a 0.5 % wiggle looks flat
-  // instead of filling the card the way a 50 % jump does.
+  if (!vals.length) { el.append(h("div", { class: "spark-empty" }, "no measurement")); return; }
+  if (typeof uPlot === "undefined") { el.append(h("div", { class: "spark-empty" }, "offline")); return; }
   const lo = Math.min(...vals), hi = Math.max(...vals), mid = (lo + hi) / 2;
   const half = Math.max((hi - lo) * 0.6, Math.abs(mid) * 0.03, 1e-12);
-  const width = Math.max(120, el.clientWidth || 240);
+  const width = Math.max(120, el.clientWidth || 220);
   const chart = new uPlot({
-    width, height: 52, legend: { show: false }, cursor: { show: false },
+    width, height: 48, legend: { show: false }, cursor: { show: false },
     scales: { x: { time: false, range: [-0.5, xs.length - 0.5] }, y: { range: [mid - half, mid + half] } },
     axes: [{ show: false }, { show: false }],
-    series: [{}, ...seriesList.map((s) => ({ stroke: nodeColor(s.node), width: 1.5, spanGaps: true, points: { show: xs.length <= 12, size: 5, stroke: nodeColor(s.node), fill: cssVar("--surface"), width: 1.5 } }))],
+    series: [{}, ...seriesList.map((s) => ({ stroke: seriesColor(s.node), width: 1.5, spanGaps: true, points: { show: xs.length <= 12, size: 4, stroke: seriesColor(s.node), fill: cssVar("--page"), width: 1.5 } }))],
   }, [xs, ...ys], el);
   state.charts.push(chart);
-}
-
-function drawCards(grid, cards, axisFor, seq) {
-  requestAnimationFrame(() => {
-    if (seq != null && seq !== state.routeSeq) return;
-    for (const [g, plot] of cards) drawSpark(plot, g.list, axisFor(g));
-  });
-}
-
-// ---- overview -----------------------------------------------------------------------
-
-async function renderLanding(seq) {
-  const L = state.landing;
-  if (!L.stats.results) return renderEmpty();
-  if (!state.sparks) state.sparks = await getJSON("views/sparks.json");
-  if (seq != null && seq !== state.routeSeq) return null;
-  const S = state.sparks;
-  // sparks.json holds successful points only; a series that never succeeded
-  // still gets a card (an empty chart and its failure) from series.json.
-  const sparked = new Set(S.series.map((s) => `${s.suite}|${s.case}|${s.params}|${s.quantity}|${s.node}`));
-  const never = state.series.filter((s) => !s.points && !sparked.has(`${s.suite}|${s.case}|${s.params}|${s.quantity}|${s.node}`))
-    .map((s) => ({ ...s, orders: [], estimates: [], latest: null }));
-  const all = groupSeries([...S.series, ...never], (g) => {
-    const newest = g.list.filter((s) => s.latest != null).sort((a, b) => b.orders[b.orders.length - 1] - a.orders[a.orders.length - 1])[0];
-    // Status, value and link all describe one node: the newest one's, or the failing one when none succeeded.
-    const failing = g.list.find((s) => isFailed(s.status) && (!newest || s.node === newest.node));
-    const skipped = !failing && g.list.find((s) => s.status === "skipped" && (!newest || s.node === newest.node));
-    return { newest, change: newest?.vs_prev ?? null, noise: newest?.noise ?? null, v: newest ? verdict(newest.vs_prev, g.direction) : "none",
-      status: failing ? failing.status : skipped ? "skipped" : "success", reason: (failing || skipped)?.reason };
-  });
-  const suites = [...new Set(all.map((g) => g.suite))].sort();
-  const nodes = [...new Set(S.series.map((s) => s.node))].sort();
-  const q = new URLSearchParams((location.hash.split("?")[1]) || "");
-  const ctl = { suite: q.get("suite") || "all", sort: q.get("sort") || "change", text: q.get("f") || "", n: PAGE };
-  const setHash = () => { if (seq != null && seq !== state.routeSeq) return; const p = new URLSearchParams(); if (ctl.suite !== "all") p.set("suite", ctl.suite); if (ctl.sort !== "change") p.set("sort", ctl.sort); if (ctl.text) p.set("f", ctl.text); history.replaceState(null, "", "#/" + (p.toString() ? "?" + p : "")); };
-  // Missing comparisons sort last; changes within noise rank below real ones of the same size.
-  const size = (g) => (g.change == null ? -1 : Math.abs(g.change) * (withinNoise(g.change, g.noise) ? 0.5 : 1));
-  const sorters = {
-    change: (a, b) => size(b) - size(a),
-    regressed: (a, b) => (b.v === "regressed") - (a.v === "regressed") || size(b) - size(a),
-    improved: (a, b) => (b.v === "improved") - (a.v === "improved") || size(b) - size(a),
-    failing: (a, b) => isFailed(b.status) - isFailed(a.status) || size(b) - size(a),
-    noise: (a, b) => (b.noise ?? -1) - (a.noise ?? -1),
-    name: (a, b) => a.suite.localeCompare(b.suite) || a.case.localeCompare(b.case) || a.params.localeCompare(b.params),
-  };
-  const grid = h("div", { class: "grid" });
-  const status = h("span", { class: "note" });
-  const more = h("button", { class: "ghost", onclick: () => { ctl.n += PAGE; draw(); } }, `show ${PAGE} more`);
-  const draw = () => {
-    const needle = ctl.text.trim().toLowerCase();
-    const rows = all.filter((g) => (ctl.suite === "all" || g.suite === ctl.suite) && (!needle || `${g.suite} ${g.case} ${g.params}`.toLowerCase().includes(needle))).sort(sorters[ctl.sort] || sorters.change);
-    destroyCharts();
-    grid.replaceChildren();
-    const shown = rows.slice(0, ctl.n), cards = [];
-    for (const g of shown) { const [card, plot] = benchCard(g); grid.append(card); cards.push([g, plot]); }
-    if (!shown.length) grid.append(h("p", { class: "empty" }, "no benchmark matches"));
-    status.textContent = `${shown.length} of ${rows.length} benchmarks`;
-    more.hidden = shown.length >= rows.length;
-    drawCards(grid, cards, () => S.axis, seq);
-    setHash();
-  };
-  const select = (label, key, values, fmt = (x) => x) => h("label", {}, label, h("select", { onchange: (e) => { ctl[key] = e.target.value; ctl.n = PAGE; draw(); } }, values.map((v) => h("option", { value: v, selected: v === ctl[key] }, fmt(v)))));
-  const filter = h("input", { type: "search", placeholder: "filter by name", value: ctl.text, "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; ctl.n = PAGE; draw(); } });
-  const st = L.stats;
-  const main = h("main", {},
-    problemsBanner(),
-    ...L.latest_runs.map((run) => latestRun(run, L)),
-    h("p", { class: "inventory note" },
-      `${st.commits} commits measured · ${st.series} series · ${st.results.toLocaleString()} results · `,
-      st.nodes.length === 1 ? `node ${st.nodes[0]}` : `nodes ${st.nodes.join(", ")}`, " · ", h("a", { href: "#/about" }, "how to read this page")),
-    h("h2", { id: "all" }, "All benchmarks"),
-    h("div", { class: "filters" },
-      select("suite", "suite", ["all", ...suites], (v) => (v === "all" ? "all suites" : v)),
-      select("sort", "sort", Object.keys(sorters), (v) => ({ change: "largest change", regressed: "regressed first", improved: "improved first", failing: "failing first", noise: "noisiest", name: "name" })[v]),
-      filter, status, sharedLegend(nodes)),
-    h("p", { class: "note" }, `Each chart shows the last ${S.axis.length} measured commits. The change compares the newest measurement with the one before it; muted changes are within twice the series' noise.`),
-    grid,
-    h("div", { class: "more" }, more),
-    h("h2", {}, "Recent commits"),
-    commitsTable(L.recent_commits, L.notable),
-    h("div", { class: "cols" },
-      h("section", { class: "card" }, h("h3", {}, "Noisiest series"),
-        h("p", { class: "note" }, "Median change between consecutive measurements, over the last 21. A change on these needs more evidence."),
-        table(["benchmark", "node", ">noise", ">points"], L.noisiest.map((s) => [h("a", { href: benchHref(s, { node: s.node }) }, caseLabel(s)), s.node, fmtAbsPct(s.noise), s.points]), { empty: "needs at least three measurements per series" })),
-      h("section", { class: "card" }, h("h3", {}, "Suite wall time on the latest commit"),
-        table(["suite", "node", ">cases", ">failed", ">time"], L.suite_time.map((s) => [h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, s.suite), s.node, s.cases, s.failed ? h("span", { class: "bad" }, s.failed) : "0", s.seconds < 120 ? `${s.seconds} s` : `${Math.round(s.seconds / 60)} min`])))),
-    footer());
-  draw();
-  return main;
-}
-
-// The first thing on the page: what the newest run on a node found.
-function latestRun(run, L) {
-  const pct = `${Math.round(L.notable * 100)}%`;
-  const recent = L.last_executed?.[run.node];
-  const other = recent && recent.sha !== run.sha ? recent : null;
-  const mine = (list) => list.filter((m) => m.node === run.node && m.sha === run.sha).slice(0, 5);
-  const regressed = mine(L.movers.regressed), improved = mine(L.movers.improved);
-  const failures = L.failures.filter((f) => f.node === run.node);
-  const moverList = (title, list, tone) => h("div", { class: "movers" },
-    h("h3", {}, title),
-    list.length ? h("ol", {}, list.map((m) => h("li", {},
-      h("a", { href: benchHref(m, { node: m.node }), class: "mono name", title: `${caseLabel(m)} (${m.suite})` }, caseLabel(m)),
-      h("span", { class: "num from-to note" }, `${fmtValue(m.prev_estimate, m.unit)} → ${fmtValue(m.estimate, m.unit)}`),
-      h("span", { class: "delta-cell" }, m.prev_is_parent ? null : gapTag(m), delta(m.rel_change, m.direction, { noise: m.noise, unit: m.unit })))))
-      : h("p", { class: "note" }, !run.compared ? "no earlier measurement of these benchmarks to compare with"
-        : tone === "bad" ? `nothing got worse by more than 0.5% (${run.compared} compared)` : `nothing got better by more than 0.5% (${run.compared} compared)`));
-  const health = run.state !== "finished" ? "bad" : run.failed_results || run.suites_failed ? "warn" : "good";
-  const upUrl = upstreamCommit(run.sha);
-  const logUrl = runLog(run.sha, run.node, run.has_log);
-  const metaParts = joinParts([
-    run.committer_date ? `committed ${fmtDate(run.committer_date)}` : null,
-    upUrl ? h("a", { href: upUrl, target: "_blank", rel: "noopener" }, "upstream commit") : null,
-    logUrl ? h("a", { href: logUrl, target: "_blank", rel: "noopener" }, "run log") : null,
-  ]);
-  return h("section", { class: `hero ${health}` },
-    h("div", { class: "hero-head" },
-      h("div", {},
-        h("div", { class: "eyebrow" }, `Newest commit measured on ${run.node} · run ${ago(run.finished_at || run.started_at) || fmtDate(run.committer_date)}`),
-        h("h2", {}, h("a", { href: `#/c/${encodeURIComponent(run.sha)}`, class: "mono" }, run.short), run.subject ? ` ${run.subject}` : ""),
-        metaParts.length ? h("div", { class: "note" }, ...metaParts) : null),
-      h("a", { class: "button", href: `#/c/${encodeURIComponent(run.sha)}` }, "All changes in this commit →")),
-    other ? h("div", { class: `banner ${other.state === "finished" && !other.failed_results ? "" : "bad"}` }, `Most recent run on ${run.node}: `,
-      h("a", { href: `#/c/${encodeURIComponent(other.sha)}`, class: "mono" }, other.short), ` (an older commit, ${other.reason || "requested"}) finished ${ago(other.finished_at || other.started_at)}: `,
-      other.state === "finished" ? `${other.results} results, ${other.failed_results} failed.` : h("b", {}, other.state)) : null,
-    h("div", { class: "chips" },
-      chip("results", run.results.toLocaleString()),
-      chip("failed", run.failed_results, run.failed_results ? "bad" : "good"),
-      chip(`regressed > ${pct}`, run.regressed, run.regressed ? "bad" : ""),
-      chip(`improved > ${pct}`, run.improved, run.improved ? "good" : ""),
-      chip("compared with an earlier run", run.compared),
-      run.state !== "finished" ? chip("", run.state, "bad") : null),
-    h("div", { class: "cols tight" }, moverList("Largest regressions", regressed, "bad"), moverList("Largest improvements", improved, "good")),
-    failures.length ? h("details", { class: "failures", open: failures.length <= 6 },
-      h("summary", {}, h("span", { class: "bad" }, `${failures.length} benchmark${failures.length > 1 ? "s" : ""} failed`), " on this run"),
-      h("ul", {}, failures.map((f) => h("li", {}, h("a", { href: benchHref(f, { node: f.node }), class: "mono" }, caseLabel(f)), " ", h("span", { class: "note" }, shortSuite(f.suite)), " ",
-        h("code", { class: "reason" }, f.reason || f.status), f.last_success_sha ? null : h("span", { class: "note" }, " · never succeeded")))))
-      : null);
-}
-
-function commitsTable(list, notable) {
-  const pct = `${Math.round(notable * 100)}%`;
-  return table(["commit", "subject", "date", "node", ">results", ">failed", `>regressed > ${pct}`, `>improved > ${pct}`],
-    list.map((c) => [
-      h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short),
-      h("span", {}, c.subject.length > 90 ? c.subject.slice(0, 88) + "…" : c.subject, " ", stateTag(c)),
-      fmtDate(c.committer_date), c.node, c.results,
-      c.failed_results ? h("span", { class: "bad" }, c.failed_results) : "0",
-      c.compared ? (c.regressed ? h("span", { class: "delta regressed" }, c.regressed) : "0") : "–",
-      c.compared ? (c.improved ? h("span", { class: "delta improved" }, c.improved) : "0") : "–"]),
-    { empty: "no runs filed yet" });
-}
-
-function problemsBanner() {
-  const n = state.manifest.counts.ingest_problems || 0;
-  return n ? h("div", { class: "banner bad" }, `${n} result${n > 1 ? "s or run directories were" : " or run directory was"} rejected by the ingest and ${n > 1 ? "are" : "is"} missing from this page.`) : null;
-}
-
-// No results yet: say what state the project is in and what to do next.
-function renderEmpty() {
-  const L = state.landing, repo = state.project.repository, isRuns = state.manifest?.source === "runs";
-  return h("main", {},
-    problemsBanner(),
-    h("section", { class: "hero" },
-      h("div", { class: "eyebrow" }, "No results yet"),
-      h("h2", {}, L.recent_commits.length ? "Runs are filed, but none produced a result" : "Waiting for the first run"),
-      h("p", {}, L.recent_commits.length
-        ? "The runs below have no successful measurements. Open a run to inspect its status and log."
-        : isRuns
-          ? "This page fills in when benchmark runs are filed under runs/. Run a benchmark and rebuild the site with bx view."
-          : "This store has no benchmark measurements yet. Measure a target with bx bench, then run bx view:"),
-      L.recent_commits.length ? null : h("pre", {}, isRuns
-        ? "bx view --runs runs --out site"
-        : "bx bench path/to/benchmarks.py\nbx view"),
-      repo ? h("p", {}, h("a", { href: repo }, "Project repository")) : null),
-    L.recent_commits.length ? [h("h2", {}, "Runs"), commitsTable(L.recent_commits, L.notable)] : null,
-    footer());
-}
-
-// ---- suites -------------------------------------------------------------------------
-
-function renderSuites() {
-  const by = new Map();
-  for (const s of state.series) {
-    const e = by.get(s.suite) || { suite: s.suite, series: 0, cases: new Set(), nodes: new Set(), regressed: 0, improved: 0, failing: 0 };
-    e.series++; e.cases.add(`${s.case}|${s.params}`); e.nodes.add(s.node);
-    if (isFailed(s.status)) e.failing++;
-    else if (s.vs_prev != null && Math.abs(s.vs_prev) > state.landing.notable) {
-      const v = verdict(s.vs_prev, s.direction);
-      if (v === "regressed") e.regressed++; else if (v === "improved") e.improved++;
-    }
-    by.set(s.suite, e);
-  }
-  const rows = [...by.values()].sort((a, b) => b.failing - a.failing || b.regressed - a.regressed || a.suite.localeCompare(b.suite));
-  const pct = `${Math.round(state.landing.notable * 100)}%`;
-  return h("main", {},
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / suites"),
-    h("h2", {}, "Suites"),
-    h("p", { class: "lead" }, `${rows.length} benchmark suite${rows.length === 1 ? "" : "s"}. Regressed and improved count series whose latest change exceeds ${pct}; failing counts series whose latest attempt did not succeed.`),
-    table(["suite", ">benchmarks", ">series", "nodes", ">failing", ">regressed", ">improved"], rows.map((e) => [
-      h("a", { href: `#/s/${encodeURIComponent(e.suite)}` }, e.suite), e.cases.size, e.series, [...e.nodes].sort().join(", "),
-      e.failing ? h("span", { class: "bad" }, e.failing) : "0",
-      e.regressed ? h("span", { class: "delta regressed" }, e.regressed) : "0", e.improved ? h("span", { class: "delta improved" }, e.improved) : "0"])),
-    footer());
-}
-
-async function loadHistory(suite) {
-  let hist = state.histories.get(suite);
-  if (!hist) { hist = await getJSON(`views/history/${encodeURIComponent(safeFile(suite))}.json`); state.histories.set(suite, hist); }
-  return hist;
 }
 
 async function renderSuite(suite, seq) {
@@ -478,41 +643,95 @@ async function renderSuite(suite, seq) {
     const mine = g.list.map((s) => latestBy.get(`${s.case}|${s.params}|${s.quantity}|${s.node}`)).filter(Boolean);
     const newest = mine.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
     const failing = mine.find((r) => isFailed(r.status) && (!newest || r.node === newest.node));
-    const skipped = !failing && mine.find((r) => r.status === "skipped" && (!newest || r.node === newest.node));
-    return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : skipped ? "skipped" : "success", reason: (failing || skipped)?.reason };
+    return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : "success", reason: failing?.reason };
   }).sort((a, b) => a.case.localeCompare(b.case) || a.params.localeCompare(b.params));
-  const grid = h("div", { class: "grid" });
+
+  const ctl = { mode: "table", text: "", sort: "name", dir: "asc" };
+  const host = h("div", {});
   const status = h("span", { class: "note" });
-  const drawSuite = (needle = "") => {
-    destroyCharts();
-    grid.replaceChildren();
-    const shown = groups.filter((g) => !needle || caseLabel(g).toLowerCase().includes(needle));
-    const cards = shown.map((g) => { const [card, plot] = benchCard(g, { showSuite: false }); grid.append(card); return [g, plot]; });
-    status.textContent = `${shown.length} of ${groups.length} benchmarks`;
-    drawCards(grid, cards, () => hist.commits, seq);
+
+  const onSort = (key) => {
+    if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
+    else { ctl.sort = key; ctl.dir = key === "name" || key === "node" ? "asc" : "desc"; }
+    draw();
   };
-  const filter = h("input", { type: "search", placeholder: "filter by name", "aria-label": "filter benchmarks", oninput: (e) => drawSuite(e.target.value.trim().toLowerCase()) });
+
+  const draw = () => {
+    destroyCharts();
+    const needle = ctl.text.trim().toLowerCase();
+    if (ctl.mode === "table") {
+      const shown = rows
+        .filter((s) => !needle || `${s.case} ${s.params} ${s.node}`.toLowerCase().includes(needle))
+        .sort((a, b) => {
+          const v = (x) => ctl.sort === "name" ? caseLabel(x) : ctl.sort === "value" ? x.estimate : ctl.sort === "change" ? (x.vs_prev == null ? null : Math.abs(x.vs_prev)) : ctl.sort === "noise" ? x.noise : ctl.sort === "points" ? x.points : x.node;
+          return cmpVal(v(a), v(b), ctl.dir) || caseLabel(a).localeCompare(caseLabel(b));
+        });
+      status.textContent = `${shown.length} of ${rows.length} series`;
+      host.replaceChildren(table(
+        ["Benchmark", "Machine", ">Latest", ">vs previous", ">vs 10 back", ">Noise", ">Points"],
+        shown.map((s) => {
+          const cls = isFailed(s.status) ? "cell-bad" : changeCellClass(s.vs_prev, s.direction, s.noise);
+          return [
+            h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)),
+            s.node,
+            fmtValue(s.estimate, s.unit),
+            { v: isFailed(s.status) ? failTag(s.reason, s.status) : delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit }), cls },
+            delta(s.vs_10, s.direction, { unit: s.unit }),
+            fmtAbsPct(s.noise),
+            s.points,
+          ];
+        }),
+        { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "node", "value", "change", null, "noise", "points"] } }));
+    } else {
+      const shown = groups.filter((g) => !needle || caseLabel(g).toLowerCase().includes(needle));
+      status.textContent = `${shown.length} of ${groups.length} benchmarks`;
+      const grid = h("div", { class: "grid" });
+      const cards = shown.map((g) => { const [card, plot] = benchCard(g); grid.append(card); return [g, plot]; });
+      host.replaceChildren(grid);
+      requestAnimationFrame(() => {
+        if (seq != null && seq !== state.routeSeq) return;
+        for (const [g, plot] of cards) drawSpark(plot, g.list, hist.commits);
+      });
+    }
+  };
+
+  const btnTable = h("button", { class: "active", onclick: () => { ctl.mode = "table"; btnTable.className = "active"; btnGrid.className = ""; draw(); } }, "Table");
+  const btnGrid = h("button", { onclick: () => { ctl.mode = "grid"; btnGrid.className = "active"; btnTable.className = ""; draw(); } }, "Sparklines");
   const failing = groups.filter((g) => isFailed(g.status)).length;
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", suite),
-    h("h2", {}, suite),
-    h("p", { class: "lead" }, `${groups.length} benchmarks over ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null, `. The change compares each benchmark's newest measurement with the one before it.`),
-    h("div", { class: "filters" }, filter, status, sharedLegend(nodes)),
-    grid,
-    h("details", { class: "table-view" }, h("summary", {}, "Table view"),
-      table(["benchmark", "quantity", "node", "status", ">latest", ">vs previous", ">vs 10 back", ">noise", ">points"],
-        rows.map((s) => [h("a", { href: benchHref(s, { node: s.node }) }, caseLabel(s)), s.quantity, s.node,
-          isFailed(s.status) ? failTag(s.reason, s.status) : s.status === "skipped" || s.status === "partial" ? h("span", { class: "tag", title: s.reason || "" }, s.status) : "ok",
-          fmtValue(s.estimate, s.unit), delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit }), delta(s.vs_10, s.direction, { unit: s.unit }), fmtAbsPct(s.noise), s.points]))),
-    footer());
-  drawSuite();
+    h("h2", { class: "mono title" }, suite),
+    h("p", { class: "lead" }, `${groups.length} benchmarks across ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null),
+    h("div", { class: "filters" },
+      h("div", { class: "seg" }, btnTable, btnGrid),
+      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; draw(); } }),
+      status, sharedLegend(nodes)),
+    host, footer());
+  draw();
   return main;
 }
 
-// ---- one benchmark ----------------------------------------------------------------
+// ---- benchmark detail (#/b/<suite>/<case>): Conbench summary + ASV plot controls ----
+
+function exportCsv(seriesList, axis, suite, kase, unit) {
+  const index = new Map(axis.map((c) => [c.commit_order, c]));
+  const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [["commit", "date", "machine", "params", "quantity", "unit", "median", "min", "max", "n", "status", "subject"].join(",")];
+  for (const s of seriesList) {
+    for (let i = 0; i < s.orders.length; i++) {
+      const c = index.get(s.orders[i]) || {};
+      lines.push([c.sha, c.date, s.node, s.params, s.quantity, unit, s.estimates[i], s.mins?.[i], s.maxs?.[i], s.ns?.[i], s.statuses?.[i], c.subject].map(esc).join(","));
+    }
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: `${safeFile(suite)}-${safeFile(kase)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 async function renderBench(suite, kase, query, seq) {
-  const params = query.get("params") || "";
+  const initParams = query.get("params") || "";
   const quantity = query.get("q") || "wall-time";
   const nodeFilter = query.get("node") || "all";
   const hist = await loadHistory(suite);
@@ -521,130 +740,259 @@ async function renderBench(suite, kase, query, seq) {
   const variants = [...new Set(all.map((s) => s.params))];
   const quantities = [...new Set(all.map((s) => s.quantity))];
   const nodes = [...new Set(all.map((s) => s.node))].sort();
-  const shown = all.filter((s) => s.params === params && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter));
-  const latestRows = state.series.filter((s) => s.suite === suite && s.case === kase && s.params === params && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter));
-  const kpi = latestRows.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
-  const failing = latestRows.filter((r) => isFailed(r.status));
-  const unit = shown[0]?.unit || kpi?.unit || "";
-  const direction = shown[0]?.direction || kpi?.direction || "";
-  const opts = { unit };
 
-  const setParam = (k, v) => { const q = new URLSearchParams(query); if (v == null || v === "" || v === "all" || (k === "q" && v === "wall-time")) q.delete(k); else q.set(k, v); location.hash = `#/b/${encodeURIComponent(suite)}/${encodeURIComponent(kase)}${q.toString() ? "?" + q : ""}`; };
-  const select = (label, key, values, current, fmt = (x) => x) => h("label", {}, label, h("select", { onchange: (e) => setParam(key, e.target.value) }, values.map((v) => h("option", { value: v, selected: v === current }, fmt(v)))));
-  const few = kpi && kpi.points < 3;
-  const lastNs = shown.flatMap((x) => x.ns.filter((n, k) => x.estimates[k] != null));
-  const reps = lastNs.length ? lastNs[lastNs.length - 1] : null;
+  const selectedVariants = new Set(variants.includes(initParams) ? [initParams] : variants.slice(0, 1));
+  const plotOpts = { logY: false, zeroY: false, dateX: false, showSpread: true, showNoise: true };
+
+  const setParam = (k, v) => {
+    const q = new URLSearchParams(query);
+    if (v == null || v === "" || v === "all" || (k === "q" && v === "wall-time")) q.delete(k); else q.set(k, v);
+    location.hash = `#/b/${encodeURIComponent(suite)}/${encodeURIComponent(kase)}${q.toString() ? "?" + q : ""}`;
+  };
+  const select = (label, key, values, current, fmt = (x) => x) => h("label", {}, label,
+    h("select", { onchange: (e) => setParam(key, e.target.value) },
+      values.map((v) => h("option", { value: v, selected: v === current }, fmt(v)))));
+
+  const summaryHost = h("div", {});
+  const chartWrap = h("div", { class: "chart-wrap" });
+  const historyTableHost = h("div", {});
+  const variantBarHost = h("div", {});
+
+  const getShown = () => all.filter((s) =>
+    selectedVariants.has(s.params) &&
+    s.quantity === quantity &&
+    (nodeFilter === "all" || s.node === nodeFilter));
+
+  const redraw = () => {
+    destroyCharts();
+    for (const f of state.cleanup) f();
+    state.cleanup = [];
+
+    const shown = getShown();
+    const latestRows = state.series.filter((s) =>
+      s.suite === suite && s.case === kase && selectedVariants.has(s.params) && s.quantity === quantity &&
+      (nodeFilter === "all" || s.node === nodeFilter));
+    const kpi = latestRows.filter((r) => r.estimate != null).sort((a, b) => b.commit_order - a.commit_order)[0];
+    const unit = shown[0]?.unit || kpi?.unit || "";
+    const direction = shown[0]?.direction || kpi?.direction || "";
+    const few = kpi && kpi.points < 3;
+    const lastNs = shown.flatMap((x) => (x.ns || []).filter((n, k) => x.estimates[k] != null));
+    const reps = lastNs.length ? lastNs[lastNs.length - 1] : null;
+
+    summaryHost.replaceChildren(h("aside", { class: "summary-box" },
+      h("h3", {}, "Summary"),
+      kpi ? h("dl", { class: "kv" },
+        h("dt", {}, "Latest"), h("dd", { class: "big num" }, fmtValue(kpi.estimate, unit)),
+        h("dt", {}, "vs prev"), h("dd", {}, delta(kpi.vs_prev, direction, { unit, noise: kpi.noise })),
+        h("dt", {}, "vs 10 back"), h("dd", {}, delta(kpi.vs_10, direction, { unit })),
+        h("dt", {}, "vs 100 back"), h("dd", {}, delta(kpi.vs_100, direction, { unit })),
+        h("dt", {}, "Noise"), h("dd", { class: "num" }, few ? "needs 3+" : fmtAbsPct(kpi.noise)),
+        h("dt", {}, "Points"), h("dd", { class: "num" }, `${kpi.points}${reps > 1 ? ` (${reps} reps)` : ""}`),
+        h("dt", {}, "Commit"), h("dd", {}, h("a", { href: `#/c/${encodeURIComponent(kpi.sha)}`, class: "mono" }, shortSha(kpi.sha, 8))),
+        h("dt", {}, "Machine"), h("dd", {}, kpi.node),
+      ) : h("p", { class: "note" }, "No successful measurement yet."),
+      h("div", { class: "summary-actions" },
+        h("button", { class: "ghost", onclick: () => exportCsv(shown, hist.commits, suite, kase, unit) }, "Download CSV"),
+        kpi ? h("a", { class: "button", href: `#/c/${encodeURIComponent(kpi.sha)}` }, "Open commit") : null)));
+
+    if (variants.length > 1) {
+      variantBarHost.replaceChildren(h("div", { class: "plot-variants" },
+        h("span", { class: "vlabel" }, "Variants (click to overlay):"),
+        variants.map((v) => {
+          const on = selectedVariants.has(v);
+          return h("button", {
+            class: `ghost${on ? " active" : ""}`,
+            onclick: () => {
+              if (on && selectedVariants.size > 1) selectedVariants.delete(v);
+              else selectedVariants.add(v);
+              redraw();
+            },
+          }, v || "(default)");
+        })));
+    } else {
+      variantBarHost.replaceChildren();
+    }
+
+    requestAnimationFrame(() => {
+      if (seq != null && seq !== state.routeSeq) return;
+      drawHistory(chartWrap, shown, hist.commits, unit, kase, plotOpts, kpi?.noise);
+    });
+
+    // Full clickable history table (newest first)
+    const byOrder = new Map(hist.commits.map((c) => [c.commit_order, c]));
+    const histRows = [];
+    const scale = pickScale(shown.flatMap((s) => s.estimates), unit);
+    for (const s of shown) {
+      let prev = null;
+      for (let i = 0; i < s.orders.length; i++) {
+        const c = byOrder.get(s.orders[i]) || {};
+        const est = s.estimates[i];
+        const rel = est != null && prev != null && prev > 0 ? est / prev - 1 : null;
+        const mn = s.mins?.[i], mx = s.maxs?.[i], n = s.ns?.[i];
+        const range = est != null && n > 1 && mn != null && mx != null ? `${fmtNum(mn / scale[1])}–${fmtNum(mx / scale[1])} (${n})` : n ? `n=${n}` : "–";
+        histRows.push({
+          order: s.orders[i],
+          cells: [
+            h("a", { href: `#/c/${encodeURIComponent(c.sha || "")}`, class: "mono" }, c.short || ""),
+            fmtDate(c.date),
+            (c.subject || "").length > 64 ? c.subject.slice(0, 62) + "…" : (c.subject || ""),
+            s.node,
+            ...(selectedVariants.size > 1 ? [s.params || "(default)"] : []),
+            est != null ? fmtValue(est, unit, scale) : failTag(s.reasons?.[i], s.statuses?.[i] || "failed"),
+            range,
+            { v: delta(rel, direction, { unit, noise: kpi?.noise }), cls: changeCellClass(rel, direction, kpi?.noise) },
+          ],
+        });
+        if (est != null) prev = est;
+      }
+    }
+    histRows.sort((a, b) => b.order - a.order);
+    const headers = ["Commit", "Date", "Subject", "Machine", ...(selectedVariants.size > 1 ? ["Variant"] : []), `>Median`, ">Min–Max (n)", ">vs prev"];
+    historyTableHost.replaceChildren(
+      h("h3", {}, `Measurements (${histRows.length})`),
+      table(headers, histRows.map((r) => r.cells), { empty: "no measurements" }));
+  };
+
+  const failing = state.series.filter((s) => s.suite === suite && s.case === kase && selectedVariants.has(s.params) && s.quantity === quantity && (nodeFilter === "all" || s.node === nodeFilter) && isFailed(s.status));
+  const check = (label, key) => h("label", {},
+    h("input", { type: "checkbox", checked: plotOpts[key], onchange: (e) => { plotOpts[key] = e.target.checked; redraw(); } }), label);
+
+  const controlsBar = h("div", { class: "plot-controls" },
+    check("Log Y", "logY"),
+    check("Zero Y", "zeroY"),
+    check("Date axis", "dateX"),
+    check("Min–max", "showSpread"),
+    check("±2× noise", "showNoise"),
+    quantities.length > 1 ? select("Quantity", "q", quantities, quantity) : null,
+    nodes.length > 1 ? select("Machine", "node", ["all", ...nodes], nodeFilter) : null);
 
   const main = h("main", {},
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: `#/s/${encodeURIComponent(suite)}` }, suite)),
-    h("h2", { class: "mono title" }, kase, params ? ` ${params}` : ""),
-    h("p", { class: "lead" }, `${quantity}, ${direction ? direction.replace(/-/g, " ") : "direction unknown"}`, kpi ? ` · ${kpi.node}` : ""),
-    h("div", { class: "filters" },
-      variants.length > 1 ? select("variant", "params", variants, params, (v) => v || "(default)") : null,
-      quantities.length > 1 ? select("quantity", "q", quantities, quantity) : null,
-      nodes.length > 1 ? select("node", "node", ["all", ...nodes], nodeFilter) : null),
-    failing.map((f) => h("div", { class: "banner bad" }, `The latest attempt on ${f.node} (commit `, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, shortSha(f.attempt_sha)), ") failed: ",
-      h("code", {}, f.reason || f.status), f.points ? ". The values below are from the last successful measurement." : ". It has never succeeded.")),
-    kpi ? h("div", { class: "tiles" },
-      tile(`latest · ${kpi.node}`, fmtValue(kpi.estimate, unit), h("span", {}, "commit ", h("a", { href: `#/c/${encodeURIComponent(kpi.sha)}`, class: "mono" }, shortSha(kpi.sha)))),
-      tile("vs previous measurement", delta(kpi.vs_prev, direction, { ...opts, noise: kpi.noise })),
-      tile("vs 10 measurements back", delta(kpi.vs_10, direction, opts), kpi.points <= 10 ? `needs 11+, has ${kpi.points}` : null),
-      tile("vs 100 measurements back", delta(kpi.vs_100, direction, opts), kpi.points <= 100 ? `needs 101+, has ${kpi.points}` : null),
-      tile("noise", few ? "–" : fmtAbsPct(kpi.noise), few ? "needs 3+ measurements" : kpi.noise_rank != null ? `quieter than ${Math.round((1 - kpi.noise_rank) * 100)}% of the suite` : null),
-      tile("measured commits", kpi.points, reps == null ? null : reps === 0 ? "producer summary" : `${reps} repetition${reps === 1 ? "" : "s"} each, median shown`)) : failing.length ? null : h("p", { class: "empty" }, "no successful measurement yet"),
-    few ? h("p", { class: "note" }, `With ${kpi.points} measurement${kpi.points > 1 ? "s" : ""} there is no noise estimate yet, so a change here cannot be told apart from run-to-run variation.`) : null,
-    h("h3", {}, "History"),
-    h("p", { class: "note" }, "One point per measured commit, in commit order. Hover for details, click a point to open its commit, drag to zoom, double-click to reset. Failed attempts are marked under the axis."));
-  const chartWrap = h("div", { class: "chart-wrap" });
-  main.append(chartWrap);
-  const moves = biggestMoves(shown, hist.commits);
-  main.append(h("h3", {}, "Biggest moves in this series"),
-    table(["commit", "subject", "node", "baseline", ">from", ">to", ">change"], moves.slice(0, 12).map((m) => [
-      h("a", { href: `#/c/${encodeURIComponent(m.sha)}`, class: "mono" }, m.short), m.subject.length > 70 ? m.subject.slice(0, 68) + "…" : m.subject, m.node,
-      h("span", {}, h("a", { href: `#/c/${encodeURIComponent(m.baseSha)}`, class: "mono" }, shortSha(m.baseSha, 7)),
-        m.skipped > 0 ? h("span", { class: "tag gap", title: `${m.skipped} measured commit${m.skipped > 1 ? "s" : ""} in between had no successful result for this series, so this change spans ${m.skipped > 1 ? "them" : "it"}` }, `spans ${m.skipped + 1}`) : null),
-      fmtValue(m.from, unit), fmtValue(m.to, unit), delta(m.rel, direction, { ...opts, noise: kpi?.noise })]), { empty: "needs two successful measurements" }),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", h("a", { href: `#/s/${encodeURIComponent(suite)}` }, suite)),
+    h("h2", { class: "mono title" }, kase, initParams ? ` ${initParams}` : ""),
+    h("p", { class: "lead" }, `${quantity}${all[0]?.direction ? ` · ${all[0].direction.replace(/-/g, " ")}` : ""}`),
+    failing.map((f) => h("div", { class: "banner bad" }, `Latest attempt on ${f.node} (`, h("a", { href: `#/c/${encodeURIComponent(f.attempt_sha)}`, class: "mono" }, shortSha(f.attempt_sha)), `) failed: `, h("code", {}, f.reason || f.status))),
+    h("div", { class: "detail-grid" },
+      summaryHost,
+      h("div", {}, controlsBar, variantBarHost, chartWrap)),
+    historyTableHost,
     footer());
-  requestAnimationFrame(() => { if (seq == null || seq === state.routeSeq) drawHistory(chartWrap, shown, hist.commits, unit, kase); });
+
+  redraw();
   return main;
 }
 
-function biggestMoves(seriesList, axis) {
-  const bySha = new Map(axis.map((c) => [c.commit_order, c]));
-  const position = new Map(axis.map((c, i) => [c.commit_order, i]));
-  const out = [];
-  for (const s of seriesList) {
-    let prev = null, prevOrder = null;
-    for (let i = 0; i < s.orders.length; i++) {
-      const b = s.estimates[i];
-      if (b == null) continue;
-      if (prev != null && prev > 0) {
-        const c = bySha.get(s.orders[i]);
-        const base = bySha.get(prevOrder);
-        // skipped: the suite's measured commits between the baseline and this one
-        out.push({ sha: c?.sha || "", short: c?.short || "", subject: c?.subject || "", node: s.node, from: prev, to: b, rel: b / prev - 1,
-          baseSha: base?.sha || "", skipped: position.get(s.orders[i]) - position.get(prevOrder) - 1 });
-      }
-      prev = b; prevOrder = s.orders[i];
-    }
-  }
-  return out.sort((x, y) => Math.abs(y.rel) - Math.abs(x.rel));
-}
-
-function drawHistory(wrap, seriesList, axis, unit, title) {
+function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
   wrap.replaceChildren();
   if (!seriesList.length || !axis.length) { wrap.append(h("div", { class: "empty" }, "no points to draw")); return; }
   const index = new Map(axis.map((c, i) => [c.commit_order, i]));
-  const xs = axis.map((_, i) => i);
-  const allValues = seriesList.flatMap((s) => s.estimates);
+  const useDate = Boolean(plotOpts.dateX && axis.every((c) => parseDate(c.date)));
+  const xs = useDate ? axis.map((c) => Math.floor(parseDate(c.date).getTime() / 1000)) : axis.map((_, i) => i);
+  const allValues = seriesList.flatMap((s) => s.estimates).filter((v) => v != null);
   const scale = pickScale(allValues, unit);
-  const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null) col[index.get(o)] = s.estimates[k] / scale[1]; }); return col; });
-  const fails = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (isFailed(s.statuses[k])) col[index.get(o)] = s.reasons?.[k] || s.statuses[k]; }); return col; });
-  const spread = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null) col[index.get(o)] = { n: s.ns?.[k], min: s.mins?.[k], max: s.maxs?.[k] }; }); return col; });
+  const labelFor = (s) => {
+    const parts = [seriesList.some((o) => o.node !== s.node) ? s.node : null, seriesList.some((o) => o.params !== s.params) ? (s.params || "(default)") : null].filter(Boolean);
+    return parts.join(" · ") || s.node;
+  };
+  const ys = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = s.estimates[k] / scale[1]; }); return col; });
+  const fails = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (isFailed(s.statuses[k]) && index.has(o)) col[index.get(o)] = s.reasons?.[k] || s.statuses[k]; }); return col; });
+  const spread = seriesList.map((s) => { const col = new Array(xs.length).fill(null); s.orders.forEach((o, k) => { if (s.estimates[k] != null && index.has(o)) col[index.get(o)] = { n: s.ns?.[k], min: s.mins?.[k], max: s.maxs?.[k] }; }); return col; });
   const nFailed = fails.flat().filter(Boolean).length;
-  const totalPoints = allValues.filter((v) => v != null).length;
-  const tableView = (open = false) => h("details", { class: "table-view", open }, h("summary", {}, "Table view"),
-    table(["commit", "date", ...seriesList.map((s) => `>${s.node} (${scale[0]})`)], axis.map((c, i) => [h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short), fmtDate(c.date),
-      ...ys.map((col, k) => (col[i] != null ? fmtNum(col[i]) : fails[k][i] ? failTag(fails[k][i]) : "–"))])));
-  if (!totalPoints) {
-    wrap.append(h("div", { class: "empty" }, `No successful measurement to draw: ${nFailed} failed attempt${nFailed === 1 ? "" : "s"} over ${axis.length} commits. The table below has the reason for each.`),
-      h("details", { class: "table-view", open: true }, h("summary", {}, "Table view"),
-        table(["commit", "date", ...seriesList.map((s) => `${s.node}`)], axis.map((c, i) => [h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short), fmtDate(c.date), ...fails.map((col) => (col[i] ? failTag(col[i], col[i]) : "–"))]))));
+  if (!allValues.length) {
+    wrap.append(h("div", { class: "empty" }, `No successful measurements (${nFailed} failed attempts over ${axis.length} commits).`));
     return;
   }
   if (typeof uPlot === "undefined") {
-    wrap.append(h("div", { class: "empty" }, "Chart library (uPlot) could not be loaded offline. Use the table below."), tableView(true));
+    wrap.append(h("div", { class: "empty" }, "Chart library (uPlot) unavailable offline; see the table below."));
     return;
   }
+  const canLog = plotOpts.logY && allValues.every((v) => v > 0);
   const tip = h("div", { class: "tip" });
-  const titleRow = h("div", { class: "chart-title" }, h("span", {}, `${title} · ${scale[0]}`), h("span", { class: "note" }, `${axis.length} commits`, nFailed ? [" · ", h("span", { class: "bad" }, `${nFailed} failed`)] : null));
+  const titleRow = h("div", { class: "chart-title" },
+    h("span", {}, `${title}${scale[0] ? ` (${scale[0]})` : ""}`),
+    h("span", { class: "note" }, `${axis.length} commits`, nFailed ? [" · ", h("span", { class: "bad" }, `${nFailed} failed`)] : null, " · drag to zoom, double-click to reset, click point to open commit"));
   const el = h("div", { class: "chart" });
   wrap.append(titleRow, el, tip);
-  const size = () => ({ width: Math.max(240, wrap.clientWidth - 16), height: window.innerWidth < 600 ? 220 : 300 });
-  const failMarks = (u) => {  // a small mark under the plot at every failed attempt
-    const ctx = u.ctx, y = u.bbox.top + u.bbox.height + 3 * devicePixelRatio;
-    ctx.save(); ctx.fillStyle = cssVar("--critical");
-    fails.forEach((col) => col.forEach((f, i) => { if (!f) return; const x = u.valToPos(i, "x", true); ctx.fillRect(x - 3 * devicePixelRatio, y, 6 * devicePixelRatio, 3 * devicePixelRatio); }));
+  const size = () => ({ width: Math.max(240, wrap.clientWidth - 16), height: window.innerWidth < 600 ? 220 : 310 });
+
+  // Draw optional ±2× noise band (single series with noise), min–max whiskers, and failure marks.
+  const drawOverlays = (u) => {
+    const ctx = u.ctx;
+    ctx.save();
+    if (plotOpts.showNoise && noise != null && seriesList.length === 1) {
+      const vals = ys[0].filter((v) => v != null).sort((a, b) => a - b);
+      if (vals.length) {
+        const med = vals[Math.floor(vals.length / 2)];
+        const hi = u.valToPos(med * (1 + 2 * noise), "y", true);
+        const lo = u.valToPos(Math.max(canLog ? 1e-12 : 0, med * (1 - 2 * noise)), "y", true);
+        ctx.fillStyle = "rgba(31, 119, 180, 0.08)";
+        ctx.fillRect(u.bbox.left, Math.min(hi, lo), u.bbox.width, Math.abs(lo - hi));
+      }
+    }
+    if (plotOpts.showSpread) {
+      seriesList.forEach((s, k) => {
+        ctx.strokeStyle = seriesColor(labelFor(s));
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 1.5 * devicePixelRatio;
+        for (let i = 0; i < xs.length; i++) {
+          const sp = spread[k][i];
+          if (!sp || sp.n <= 1 || sp.min == null || sp.max == null) continue;
+          const x = u.valToPos(xs[i], "x", true);
+          const y1 = u.valToPos(sp.min / scale[1], "y", true);
+          const y2 = u.valToPos(sp.max / scale[1], "y", true);
+          ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x, y2); ctx.stroke();
+        }
+      });
+      ctx.globalAlpha = 1;
+    }
+    const yFail = u.bbox.top + u.bbox.height + 3 * devicePixelRatio;
+    ctx.fillStyle = cssVar("--critical");
+    fails.forEach((col) => col.forEach((f, i) => {
+      if (!f) return;
+      const x = u.valToPos(xs[i], "x", true);
+      ctx.fillRect(x - 3 * devicePixelRatio, yFail, 6 * devicePixelRatio, 3 * devicePixelRatio);
+    }));
     ctx.restore();
   };
+
+  const xScale = useDate
+    ? { time: true }
+    : { time: false, range: [-0.5, Math.max(0.5, xs.length - 0.5)] };
+  const yScale = canLog
+    ? { distr: 3 }
+    : {
+        range: (u, min, max) => {
+          const pad = (max - min) * 0.2 || max * 0.1 || 1;
+          return [plotOpts.zeroY ? 0 : Math.max(0, min - pad), max + pad];
+        },
+      };
+
+  const xAxis = useDate
+    ? { stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "11.5px system-ui, sans-serif" }
+    : {
+        stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "11.5px system-ui, sans-serif", space: 70, gap: 6,
+        splits: (u, axisIdx, min, max, incr) => { const step = Math.max(1, Math.ceil(incr)); const out = []; for (let i = Math.max(0, Math.ceil(min)); i <= Math.min(xs.length - 1, Math.floor(max)); i += step) out.push(i); return out; },
+        values: (u, vals) => vals.map((v) => axis[v] ? (axis[v].short.includes("+dirty") ? axis[v].short.slice(0, 13) : axis[v].short.slice(0, 7)) : ""),
+      };
+
   const opts = {
     ...size(),
     legend: { show: seriesList.length > 1, live: false },
-    cursor: { points: { size: 10 }, drag: { x: true, y: false } },
-    scales: { x: { time: false, range: [-0.5, xs.length - 0.5] }, y: { range: (u, min, max) => { const pad = (max - min) * 0.25 || max * 0.1 || 1; return [Math.max(0, min - pad), max + pad]; } } },
+    cursor: { points: { size: 8 }, drag: { x: true, y: false } },
+    scales: { x: xScale, y: yScale },
     axes: [
-      { stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "12px system-ui, sans-serif", space: 70, gap: 8,
-        splits: (u, axisIdx, min, max, incr) => { const step = Math.max(1, Math.ceil(incr)); const out = []; for (let i = Math.max(0, Math.ceil(min)); i <= Math.min(xs.length - 1, Math.floor(max)); i += step) out.push(i); return out; },
-        values: (u, vals) => vals.map((v) => axis[v] ? (axis[v].short.includes("+dirty") ? axis[v].short.slice(0, 13) : axis[v].short.slice(0, 7)) : "") },
-      { stroke: cssVar("--muted"), grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "12px system-ui, sans-serif", size: 60,
-        values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
+      xAxis,
+      { stroke: cssVar("--muted"), grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "11.5px system-ui, sans-serif", size: 58, values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
     ],
-    series: [{ label: "commit" }, ...seriesList.map((s) => ({
-      label: s.node, stroke: nodeColor(s.node), width: 2, spanGaps: true,
-      points: { show: totalPoints <= 80, size: 8, stroke: nodeColor(s.node), fill: cssVar("--surface"), width: 2 },
-    }))],
+    series: [{ label: useDate ? "date" : "commit" }, ...seriesList.map((s) => {
+      const lbl = labelFor(s);
+      const col = seriesColor(lbl);
+      return {
+        label: lbl, stroke: col, width: 1.75, spanGaps: true,
+        points: { show: allValues.length <= 100, size: 6, stroke: col, fill: cssVar("--page"), width: 1.75 },
+      };
+    })],
     hooks: {
-      draw: [failMarks],
+      draw: [drawOverlays],
       setCursor: [(u) => {
         const i = u.cursor.idx;
         if (i == null || !axis[i]) { tip.style.display = "none"; return; }
@@ -654,12 +1002,11 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
           let prev = null;
           for (let j = i - 1; j >= 0; j--) if (ys[k][j] != null) { prev = ys[k][j]; break; }
           const rel = v != null && prev > 0 ? v / prev - 1 : null;
-          return h("div", { class: "row" }, h("span", { class: "key", style: `border-color:${nodeColor(s.node)}` }),
-            h("span", { class: "v num" }, v != null ? `${fmtNum(v)} ${scale[0]}` : fails[k][i] ? h("span", { class: "bad" }, `failed: ${fails[k][i]}`) : "not measured"),
-            h("span", { class: "s num" }, rel == null ? "" : fmtPct(rel)), seriesList.length > 1 ? h("span", { class: "s" }, s.node) : null,
-            spread[k][i] ? h("span", { class: "s spread" }, spread[k][i].n > 1
-              ? `median of ${spread[k][i].n}, range ${fmtNum(spread[k][i].min / scale[1])}–${fmtNum(spread[k][i].max / scale[1])}`
-              : spread[k][i].n === 1 ? "1 repetition: no spread" : "summary only: no spread") : null);
+          const lbl = labelFor(s);
+          return h("div", { class: "row" }, h("span", { class: "key", style: `border-color:${seriesColor(lbl)}` }),
+            h("span", { class: "v num" }, v != null ? `${fmtNum(v)} ${scale[0]}` : fails[k][i] ? h("span", { class: "bad" }, `failed: ${fails[k][i]}`) : "–"),
+            h("span", { class: "s num" }, rel == null ? "" : fmtPct(rel)), seriesList.length > 1 ? h("span", { class: "s" }, lbl) : null,
+            spread[k][i]?.n > 1 ? h("span", { class: "spread" }, `n=${spread[k][i].n}, ${fmtNum(spread[k][i].min / scale[1])}–${fmtNum(spread[k][i].max / scale[1])} ${scale[0]}`) : null);
         });
         tip.replaceChildren(h("div", { class: "when" }, `${c.short} · ${fmtDate(c.date)}`), ...rows, h("div", { class: "subj" }, c.subject));
         tip.style.display = "block";
@@ -674,35 +1021,51 @@ function drawHistory(wrap, seriesList, axis, unit, title) {
   state.charts.push(chart);
   el.addEventListener("mouseleave", () => { tip.style.display = "none"; });
   el.addEventListener("click", () => { const i = chart.cursor.idx; if (i != null && axis[i] && chart.select.width === 0) location.hash = `#/c/${encodeURIComponent(axis[i].sha)}`; });
-  wrap.append(tableView(false));
   const onResize = () => chart.setSize(size());
   window.addEventListener("resize", onResize);
   state.cleanup.push(() => window.removeEventListener("resize", onResize));
 }
 
-// ---- one commit ---------------------------------------------------------------------
+// ---- commit detail (#/c/<sha>) ------------------------------------------------------
 
 async function renderCommit(sha, seq) {
   let c = state.commits.get(sha);
   if (!c) { c = await getJSON(`views/commits/${encodeURIComponent(safeFile(sha))}.json`); state.commits.set(sha, c); }
   if (seq != null && seq !== state.routeSeq) return null;
-  const filter = h("input", { type: "search", placeholder: "filter benchmarks", "aria-label": "filter benchmarks" });
-  const minPct = h("select", {}, [0, 1, 2, 5, 10].map((p) => h("option", { value: p, selected: p === 0 }, p ? `≥ ${p}%` : "all changes")));
-  const hideNoise = h("input", { type: "checkbox" });
+  const ctl = { needle: "", min: 0, hideNoise: false, sort: "change", dir: "desc" };
   const body = h("div", {});
+
+  const onSort = (key) => {
+    if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
+    else { ctl.sort = key; ctl.dir = key === "name" || key === "suite" ? "asc" : "desc"; }
+    draw();
+  };
+
   const draw = () => {
-    const needle = filter.value.trim().toLowerCase(), min = Number(minPct.value) / 100;
-    const rows = c.changes.filter((ch) => Math.abs(ch.rel_change) >= min && !(hideNoise.checked && withinNoise(ch.rel_change, ch.noise))
-      && (!needle || `${ch.suite} ${ch.case} ${ch.params} ${ch.node}`.toLowerCase().includes(needle)));
-    body.replaceChildren(table(["benchmark", "suite", "node", ">baseline", ">before", ">after", ">change", ">noise"], rows.map((ch) => [
-      h("a", { href: benchHref(ch, { node: ch.node }) }, caseLabel(ch)), shortSuite(ch.suite), ch.node,
-      h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, shortSha(ch.prev_sha, 7))),
-      fmtValue(ch.prev_estimate, ch.unit), fmtValue(ch.estimate, ch.unit),
-      delta(ch.rel_change, ch.direction, { noise: ch.noise, unit: ch.unit }), fmtAbsPct(ch.noise)]), { empty: "no changes match" }),
+    const needle = ctl.needle.trim().toLowerCase();
+    const rows = c.changes
+      .filter((ch) => Math.abs(ch.rel_change) >= ctl.min && !(ctl.hideNoise && withinNoise(ch.rel_change, ch.noise))
+        && (!needle || `${ch.suite} ${ch.case} ${ch.params} ${ch.node}`.toLowerCase().includes(needle)))
+      .sort((a, b) => {
+        const v = (x) => ctl.sort === "name" ? caseLabel(x) : ctl.sort === "suite" ? x.suite : ctl.sort === "before" ? x.prev_estimate : ctl.sort === "after" ? x.estimate : ctl.sort === "noise" ? x.noise : Math.abs(x.rel_change);
+        return cmpVal(v(a), v(b), ctl.dir);
+      });
+    body.replaceChildren(table(
+      ["Benchmark", "Suite", "Machine", "Baseline", ">Before", ">After", ">Change", ">Noise"],
+      rows.map((ch) => [
+        h("a", { href: benchHref(ch, { node: ch.node }), class: "mono" }, caseLabel(ch)),
+        shortSuite(ch.suite),
+        ch.node,
+        h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, shortSha(ch.prev_sha, 7))),
+        fmtValue(ch.prev_estimate, ch.unit),
+        fmtValue(ch.estimate, ch.unit),
+        { v: delta(ch.rel_change, ch.direction, { noise: ch.noise, unit: ch.unit }), cls: changeCellClass(ch.rel_change, ch.direction, ch.noise) },
+        fmtAbsPct(ch.noise),
+      ]),
+      { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "suite", null, null, "before", "after", "change", "noise"] }, empty: "no changes match" }),
       h("p", { class: "note" }, `${rows.length} of ${c.changes.length} compared series`));
   };
-  filter.addEventListener("input", draw); minPct.addEventListener("change", draw); hideNoise.addEventListener("change", draw);
-  const parentMeasured = c.changes.some((ch) => ch.prev_is_parent);
+
   const upUrl = upstreamCommit(c.sha);
   const leadParts = joinParts([
     c.committer_date ? fmtDate(c.committer_date) : null,
@@ -714,7 +1077,7 @@ async function renderCommit(sha, seq) {
     h("h2", {}, h("span", { class: "mono" }, c.short), c.subject ? ` ${c.subject}` : ""),
     leadParts.length ? h("p", { class: "lead" }, ...leadParts) : null,
     h("h3", {}, "Runs"),
-    table(["node", "state", "reason", "started", "finished", ">suites ok", ">failed suites", ">results", ">failed results", ""], c.nodes.map((n) => {
+    table(["Machine", "State", "Reason", "Started", "Finished", ">Suites ok", ">Failed suites", ">Results", ">Failed", ""], c.nodes.map((n) => {
       const filesUrl = runFiles(c.sha, n.node);
       const logUrl = runLog(c.sha, n.node, n.has_log);
       const links = joinParts([
@@ -722,24 +1085,27 @@ async function renderCommit(sha, seq) {
         logUrl ? h("a", { href: logUrl, target: "_blank", rel: "noopener" }, "log") : null,
       ]);
       return [
-        n.node, n.state === "finished" ? n.state : h("span", { class: "bad" }, n.state), n.reason || "", fmtDate(n.started_at), fmtDate(n.finished_at),
+        n.node, n.state === "finished" ? "ok" : h("span", { class: "bad" }, n.state), n.reason || "", fmtDate(n.started_at), fmtDate(n.finished_at),
         n.suites_ok, n.suites_failed ? h("span", { class: "bad" }, n.suites_failed) : "0", n.results,
         n.failed_results ? h("span", { class: "bad" }, n.failed_results) : "0",
-        links.length ? h("span", {}, ...links) : ""];
+        links.length ? h("span", {}, ...links) : "",
+      ];
     })),
     c.failures?.length ? [h("h3", {}, h("span", { class: "bad" }, `Failed results (${c.failures.length})`)),
-      table(["benchmark", "suite", "node", "quantity", "reason"], c.failures.map((f) => [h("a", { href: benchHref(f, { node: f.node }) }, caseLabel(f)), shortSuite(f.suite), f.node, f.quantity, h("code", {}, f.reason || f.status)]))] : null,
-    h("h3", {}, "Changes against the previous measured point"),
-    h("p", { class: "note" }, parentMeasured || !c.changes.length
-      ? "Each series is compared with its own previous successful measurement, named in the baseline column. \"not parent\" marks a baseline further back than the parent commit."
-      : "This commit's parent was not measured, so every change here also covers the unmeasured commits in between."),
-    h("div", { class: "filters" }, h("label", {}, "show", minPct), h("label", {}, hideNoise, "hide changes within noise"), filter),
+      table(["Benchmark", "Suite", "Machine", "Quantity", "Reason"], c.failures.map((f) => [
+        h("a", { href: benchHref(f, { node: f.node }), class: "mono" }, caseLabel(f)), shortSuite(f.suite), f.node, f.quantity, h("code", {}, f.reason || f.status)]))] : null,
+    h("h3", {}, "Changes against previous measured point"),
+    h("div", { class: "filters" },
+      h("label", {}, "Min |Δ|", h("select", { onchange: (e) => { ctl.min = Number(e.target.value) / 100; draw(); } },
+        [0, 1, 2, 5, 10].map((p) => h("option", { value: p }, p ? `≥ ${p}%` : "all")))),
+      h("label", {}, h("input", { type: "checkbox", onchange: (e) => { ctl.hideNoise = e.target.checked; draw(); } }), "hide within-noise"),
+      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.needle = e.target.value; draw(); } })),
     body, footer());
   draw();
   return main;
 }
 
-// ---- about: how to read the page -----------------------------------------------------
+// ---- about & footer -----------------------------------------------------------------
 
 function renderAbout() {
   const P = state.project, repo = P.repository, pct = `${Math.round(state.landing.notable * 100)}%`;
@@ -747,32 +1113,28 @@ function renderAbout() {
   const isRuns = state.manifest?.source === "runs";
   return h("main", { class: "prose" },
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / about"),
-    h("h2", {}, "About this page"),
+    h("h2", {}, "About this dashboard"),
     h("p", { class: "lead" }, P.description || "Benchmark results and history, built with benchx."),
     h("div", { class: "cols" },
-      h("section", { class: "card" }, h("h3", {}, isRuns ? "How a commit gets measured" : "How this report is built"),
+      h("section", { class: "panel" }, h("h3", {}, isRuns ? "How commits are measured" : "How this report is built"),
         isRuns
           ? h("ol", {},
-              h("li", {}, "Commits from ", upstream ? h("a", { href: upstream }, `${upstream.replace(/^https:\/\/github.com\//, "")} ${P.upstream?.branch || ""}`.trim()) : "the upstream repository", " are built and benchmarked through benchx."),
-              h("li", {}, "Each run is filed as Parquet under ", h("code", {}, "runs/<sha>/<node>/"), "."),
-              h("li", {}, h("code", {}, "bx view"), " derives the flat tables and static JSON views this page reads. Nothing is stored in a database or server."))
+              h("li", {}, "Commits from ", upstream ? h("a", { href: upstream }, `${upstream.replace(/^https:\/\/github.com\//, "")} ${P.upstream?.branch || ""}`.trim()) : "the upstream repository", " are built and measured with benchx."),
+              h("li", {}, "Runs are stored as Parquet under ", h("code", {}, "runs/<sha>/<node>/"), "."),
+              h("li", {}, h("code", {}, "bx view"), " builds the derived tables and static JSON files this page reads — no database or server."))
           : h("ol", {},
-              h("li", {}, "Benchmarks are executed with ", h("code", {}, "bx bench"), " or ", h("code", {}, "bx compare"), ", recording results in the benchx schema."),
-              h("li", {}, h("code", {}, "bx view"), " reads the local store (", h("code", {}, "store.parquet"), ") or JSON result files and builds these static views."),
-              h("li", {}, "The same static site can be viewed locally or published to static hosting without a backend."))),
-      h("section", { class: "card" }, h("div", { class: "about-brand" }, wordmark()), h("h3", {}, "Built with benchx"),
-        h("p", {}, "Every number shown on this page is derived directly from stored benchx measurement results."),
+              h("li", {}, "Benchmarks are measured with ", h("code", {}, "bx bench"), " or ", h("code", {}, "bx compare"), "."),
+              h("li", {}, h("code", {}, "bx view"), " reads the local store (", h("code", {}, "store.parquet"), " or ", h("code", {}, "store.jsonl"), ") or JSON results and emits this static site."))),
+      h("section", { class: "panel" }, h("div", { class: "about-brand" }, wordmark()), h("h3", {}, "Built with benchx"),
+        h("p", {}, "Every number on this site is computed directly from stored benchx measurement results."),
         h("p", {}, h("a", { class: "button", href: "https://github.com/benchx-dev/benchx" }, "benchx on GitHub →"),
-          repo ? [" ", h("a", { href: repo }, "project repository")] : null))),
+          repo ? [" ", h("a", { class: "button", href: repo }, "Project repository")] : null))),
     h("h3", {}, "Reading the numbers"),
     h("dl", {},
-      h("dt", {}, "Change"), h("dd", {}, "A benchmark's newest successful measurement divided by its previous successful one, minus one. ", delta(0.12, "lower-is-better", { unit: "s", noise: 0.01 }), " is worse, ", delta(-0.12, "lower-is-better", { unit: "s", noise: 0.01 }), " is better; for higher-is-better quantities such as throughput the colors flip. The arrow is the direction of the number; the color is good or bad. Under 0.5% is shown as flat (", delta(0.001, "lower-is-better"), ")."),
-      h("dt", {}, "Noise"), h("dd", {}, "The series' usual commit-to-commit movement: the median change between consecutive measurements over its last 21. It is historical variability across commits, not repeatability at one commit, and it is the series' current value, also on older commit pages. It needs three measurements. A change smaller than twice the noise is drawn muted (", delta(0.03, "lower-is-better", { unit: "s", noise: 0.02 }), "), because changes that size are common for this series. A change with no noise estimate yet is underlined (", delta(0.12, "lower-is-better", { unit: "s", noise: null }), "): unconfirmed."),
-      h("dt", {}, "Measured commits and repetitions"), h("dd", {}, "Each point is the median of the repetitions benchx ran on that commit. The history chart's tooltip shows how many there were and their range. With one repetition there is no spread to judge a point by."),
-      h("dt", {}, "Not a verdict"), h("dd", {}, "None of this is a statistical test yet. benchx's comparator history mode will compare each commit with its ancestors using the measured repetitions; until then, treat a change as a lead to check, and re-measure it before acting on it."),
-      h("dt", {}, "Baseline and \"not parent\""), h("dd", {}, "A change is against the previous measurement of the same series, which is the parent commit only if the parent was measured. Otherwise the change spans every unmeasured commit in between, and the commit page marks it ", h("span", { class: "tag gap" }, "not parent"), "."),
-      h("dt", {}, "Counts"), h("dd", {}, `"Regressed" and "improved" in the summaries count changes larger than ${pct} in either direction, whatever the noise.`),
-      h("dt", {}, "Failures"), h("dd", {}, "A benchmark whose latest attempt failed is marked on its card and listed under the latest run, with the reason benchx recorded. Its chart keeps the last successful values, and failed attempts are marked under the history chart's axis.")),
+      h("dt", {}, "Change & highlighting"), h("dd", {}, "Newest successful median divided by the previous successful one, minus one. Soft red/green cell shading appears only when a change exceeds twice the series noise; within-noise changes stay muted. Under 0.5% is shown as flat."),
+      h("dt", {}, "Noise"), h("dd", {}, "Median absolute commit-to-commit change over the last 21 measurements (requires at least 3 points). Changes without a noise estimate yet are underlined as unconfirmed."),
+      h("dt", {}, "Notable counts"), h("dd", {}, `"Regressed" and "improved" counts in the runs table tally series whose change exceeds ${pct}.`),
+      h("dt", {}, "Not a statistical verdict"), h("dd", {}, "Treat highlighted regressions as leads to verify or re-measure.")),
     footer());
 }
 
@@ -782,14 +1144,15 @@ function footer() {
   const t = (name) => h("a", { href: `${DATA}${m.tables[name]}`, download: true }, name);
   return h("footer", {},
     h("span", {}, `built ${fmtDate(m.built_at)} · ${m.counts.points.toLocaleString()} results`,
-      hasTables ? [" · data: ", ...joinParts(["points", "latest", "changes", "commits"].filter((k) => m.tables[k]).map(t), ", "), " (Parquet)"] : null),
-    h("span", { class: "made" }, "measured with ", h("a", { href: "https://github.com/benchx-dev/benchx", title: "benchx" }, wordmark(true)), repo ? [" · ", h("a", { href: repo }, "source")] : null));
+      hasTables ? [" · Parquet: ", ...joinParts(["points", "latest", "changes", "commits"].filter((k) => m.tables[k]).map(t), ", ")] : null),
+    h("span", { class: "made" }, "made with", h("a", { href: "https://github.com/benchx-dev/benchx" }, wordmark(true)),
+      repo ? ["·", h("a", { href: repo }, "repository")] : null));
 }
 
-// ---- shell: header, search, theme, router -------------------------------------------
+// ---- shell: header, search, theme (light default), router ---------------------------
 
 function header() {
-  const input = h("input", { type: "search", placeholder: "search a benchmark…  ( / )", "aria-label": "search a benchmark", autocomplete: "off" });
+  const input = h("input", { type: "search", placeholder: "Search benchmarks…  ( / )", "aria-label": "search a benchmark", autocomplete: "off" });
   const list = h("ul", { role: "listbox", hidden: true });
   let items = [], active = -1;
   const show = () => {
@@ -805,7 +1168,7 @@ function header() {
       if (items.length >= 14) break;
     }
     list.hidden = items.length === 0;
-    items.forEach((s) => list.append(h("li", { role: "option", onclick: () => go(s) }, h("span", { class: "mono" }, caseLabel(s)), h("span", { class: "where" }, s.suite))));
+    items.forEach((s) => list.append(h("li", { role: "option", onclick: () => go(s) }, h("span", { class: "mono" }, caseLabel(s)), h("span", { class: "where" }, shortSuite(s.suite)))));
   };
   const go = (s) => { input.value = ""; list.hidden = true; location.hash = benchHref(s); };
   input.addEventListener("input", show);
@@ -819,18 +1182,31 @@ function header() {
   });
   document.addEventListener("click", (e) => { if (!list.contains(e.target) && e.target !== input) list.hidden = true; });
   document.addEventListener("keydown", (e) => { if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); } });
-  const label = () => `theme: ${document.documentElement.dataset.theme || "auto"}`;
-  const theme = h("button", { class: "ghost", title: "cycle theme: auto / dark / light", onclick: (e) => { const cur = document.documentElement.dataset.theme || "auto"; applyTheme(cur === "auto" ? "dark" : cur === "dark" ? "light" : "auto"); e.currentTarget.textContent = label(); route(); } }, label());
+
+  const themeLabel = () => (document.documentElement.dataset.theme === "dark" ? "Light" : "Dark");
+  const theme = h("button", {
+    class: "ghost",
+    title: "Toggle light / dark theme",
+    onclick: (e) => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      applyTheme(next);
+      e.currentTarget.textContent = themeLabel();
+      route();
+    },
+  }, themeLabel());
+
   const nav = (href, text) => h("a", { href, "data-nav": href }, text);
   return h("header", { class: "top" },
     h("h1", {}, h("a", { href: "#/", class: "brand" }, h("span", { html: MARK }), state.project.title || "Benchmarks")),
-    h("nav", {}, nav("#/", "overview"), nav("#/suites", "suites"), nav("#/about", "about")),
-    h("div", { class: "search" }, input, list), theme);
+    h("nav", {}, nav("#/", "Overview"), nav("#/benchmarks", "Benchmarks"), nav("#/suites", "Suites"), nav("#/about", "About")),
+    h("div", { class: "search" }, input, list),
+    theme);
 }
 
 function applyTheme(mode) {
-  if (mode === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = mode;
-  try { if (mode === "auto") localStorage.removeItem("theme"); else localStorage.setItem("theme", mode); } catch (e) { /* storage unavailable */ }
+  if (mode === "dark") document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("theme", mode === "dark" ? "dark" : "light"); } catch (e) { /* storage unavailable */ }
 }
 
 function destroyCharts() {
@@ -848,18 +1224,22 @@ async function route() {
   destroyCharts();
   for (const f of state.cleanup) f();
   state.cleanup = [];
-  const section = parts[0] === "suites" || parts[0] === "s" ? "#/suites" : parts[0] === "about" ? "#/about" : parts[0] ? null : "#/";
+  const section = parts[0] === "benchmarks" ? "#/benchmarks"
+    : parts[0] === "suites" || parts[0] === "s" ? "#/suites"
+    : parts[0] === "about" ? "#/about"
+    : parts[0] ? null : "#/";
   document.querySelectorAll("[data-nav]").forEach((a) => a.toggleAttribute("aria-current", a.dataset.nav === section));
   let view;
   try {
-    if (parts[0] === "suites") view = renderSuites();
+    if (parts[0] === "benchmarks") view = renderBenchmarks(query);
+    else if (parts[0] === "suites") view = renderSuites();
     else if (parts[0] === "about") view = renderAbout();
     else if (parts[0] === "s" && parts[1]) view = await renderSuite(parts[1], seq);
-    else if (parts[0] === "b" && parts[2]) view = await renderBench(parts[1], parts.slice(2).join("/"), query, seq);  // a case name may itself contain '/'
+    else if (parts[0] === "b" && parts[2]) view = await renderBench(parts[1], parts.slice(2).join("/"), query, seq);
     else if (parts[0] === "c" && parts[1]) view = await renderCommit(parts[1], seq);
-    else view = await renderLanding(seq);
+    else view = renderLanding();
   } catch (e) {
-    view = h("main", {}, h("h2", {}, "Could not load this view"), h("p", { class: "note" }, String(e.message || e)), h("p", {}, h("a", { href: "#/" }, "back to the overview")));
+    view = h("main", {}, h("h2", {}, "Could not load this view"), h("p", { class: "note" }, String(e.message || e)), h("p", {}, h("a", { href: "#/" }, "back to overview")));
   }
   if (seq !== state.routeSeq || !view) return;
   root.replaceChildren(view);
@@ -867,7 +1247,8 @@ async function route() {
 }
 
 async function init() {
-  try { const t = localStorage.getItem("theme"); if (t) applyTheme(t); } catch (e) { /* ignore */ }
+  // Light mode by default; only enable dark if explicitly chosen previously.
+  try { if (localStorage.getItem("theme") === "dark") applyTheme("dark"); } catch (e) { /* ignore */ }
   const root = document.getElementById("app");
   try {
     state.manifest = await getJSON("manifest.json", { fresh: true });
@@ -875,7 +1256,7 @@ async function init() {
     [state.project, state.landing, state.series] = await Promise.all([
       getJSON("project.json").catch(() => ({})), getJSON("views/landing.json"), getJSON("views/series.json")]);
   } catch (e) {
-    root.replaceChildren(h("main", {}, h("section", { class: "hero" }, h("div", { class: "eyebrow" }, "No data"),
+    root.replaceChildren(h("main", {}, h("section", { class: "empty-box" },
       h("h2", {}, "This page has not been built yet"),
       h("p", {}, "Run ", h("code", {}, "bx view --out site"), " to build the static dashboard, or ", h("code", {}, "bx view"), " to serve it locally."),
       h("p", { class: "note" }, String(e.message || e)))));
