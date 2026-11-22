@@ -4,6 +4,7 @@ A build directory is what a user would hand benchx: a CMakeCache.txt, a
 compiler record, and a benchmark binary, here the fake from fake_gbench.py.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -16,6 +17,9 @@ import pytest
 
 from benchx import runner, snapshot
 from benchx.core.catalog import SCHEMAS
+
+HAS_PYARROW = importlib.util.find_spec("pyarrow") is not None
+requires_pyarrow = pytest.mark.skipif(not HAS_PYARROW, reason="requires pyarrow (benchx[parquet])")
 
 EXAMPLES = SCHEMAS / "measurement-result" / "0.1.0" / "examples"
 

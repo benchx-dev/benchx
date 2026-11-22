@@ -214,10 +214,12 @@ def test_config_show_has_the_three_rows_with_their_sources(monkeypatch, capsys):
 # --- the wrapper: crashes, exits and interrupts reach the footer
 
 def test_a_crash_is_a_console_error_with_its_traceback_and_a_footer(tmp, monkeypatch, capsys):
+    from benchx import store as store_mod
+
     def boom(*args):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli, "Store", boom)  # inside the command, after it has started the log
+    monkeypatch.setattr(store_mod, "Store", boom)  # inside the command, after it has started the log
     path = tmp / "crash.log"
     assert cli.main(["series", "--log-file", str(path)]) == 1  # the status an uncaught exception gives
     err = capsys.readouterr().err
@@ -228,10 +230,12 @@ def test_a_crash_is_a_console_error_with_its_traceback_and_a_footer(tmp, monkeyp
 
 
 def test_system_exit_passes_through_with_a_footer(tmp, monkeypatch):
+    from benchx import store as store_mod
+
     def leave(*args):
         raise SystemExit(2)
 
-    monkeypatch.setattr(cli, "Store", leave)
+    monkeypatch.setattr(store_mod, "Store", leave)
     path = tmp / "exit.log"
     with pytest.raises(SystemExit) as exited:
         cli.main(["series", "--log-file", str(path)])
@@ -240,10 +244,12 @@ def test_system_exit_passes_through_with_a_footer(tmp, monkeypatch):
 
 
 def test_an_interrupt_is_logged_and_re_raised(tmp, monkeypatch):
+    from benchx import store as store_mod
+
     def stop(*args):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(cli, "Store", stop)
+    monkeypatch.setattr(store_mod, "Store", stop)
     path = tmp / "int.log"
     with pytest.raises(KeyboardInterrupt):
         cli.main(["series", "--log-file", str(path)])
@@ -418,4 +424,4 @@ def test_a_refused_comparison_does_not_print_the_store_path(tmp, capsys):
     assert cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3"]) \
         == cli.EXIT_REFUSED  # no adapter
     err = capsys.readouterr().err
-    assert "--adapter is required" in err and "store.parquet" not in err
+    assert "--adapter is required" in err and "store.parquet" not in err and "store.jsonl" not in err

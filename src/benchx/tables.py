@@ -14,8 +14,8 @@ import math
 import statistics
 
 from .compare import WORKLOAD, _c, _estimate, _run_documents, _unit_order, _workload, profile_projection
+from .results import store_project
 from .snapshot import DIRTY_WARNINGS
-from .store import store_project
 
 logger = logging.getLogger(__name__)
 

@@ -12,8 +12,7 @@ import textwrap
 import pytest
 
 from benchx import bench, cli, core
-from benchx.store import Store
-from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build
+from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build, requires_pyarrow
 from test_config import write_config
 from test_target import PROVIDER, describe
 
@@ -30,7 +29,9 @@ def order_of(tmp, run_key):
     return json.loads((tmp / "results" / run_key / "orders" / "order.json").read_text())
 
 
+@requires_pyarrow
 def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys):
+    from benchx.store import Store
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "g1"]) == cli.EXIT_OK
     out = capsys.readouterr()
     assert QUIET in out.out and NOISY in out.out and "success" in out.out
@@ -43,8 +44,10 @@ def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys
     assert {d["coordinates"]["workload"]["name"] for d in Store(tmp / "store.parquet").documents("g1")} == {QUIET, NOISY}
 
 
+@requires_pyarrow
 def test_google_benchmark_case_name_with_spaces_runs_and_compares(repo, tmp, monkeypatch, capsys):
     """C++ multi-argument BENCHMARK_TEMPLATE names contain spaces (e.g. `Add<Op, Int64Type>/1024`)."""
+    from benchx.store import Store
     monkeypatch.chdir(tmp)
     spaced = "ArrayAdd<Add, Int64Type>/1024"
     base = make_build(tmp / "base", repo["wt-base"], {spaced: {"mean": 1e-3, "rel_sd": 0.002}}, seed=1)
@@ -66,6 +69,7 @@ def test_google_benchmark_case_name_with_spaces_runs_and_compares(repo, tmp, mon
     assert [u["workload"]["name"] for u in comparison["units"]] == [spaced]
 
 
+@requires_pyarrow
 def test_head_table_prints_the_bench_columns_of_the_stored_results(build, capsys):
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "h1"]) == cli.EXIT_OK
     capsys.readouterr()
@@ -86,6 +90,7 @@ def test_a_table_row_needs_nothing_the_schema_leaves_optional(example):
     assert (row["loops"] is None) == ("inner_iterations" not in example.get("procedure", {}))
 
 
+@requires_pyarrow
 def test_head_table_shows_results_from_other_producers(tmp, capsys):
     """The schema's own examples, one of which has no `procedure`, are ingested and tabulated."""
     assert cli.main(["ingest", str(EXAMPLES)]) == cli.EXIT_OK
@@ -95,6 +100,7 @@ def test_head_table_shows_results_from_other_producers(tmp, capsys):
     assert "truncate" in out and "parquet-read" in out  # narwhals-overhead-ratio.json has no procedure
 
 
+@requires_pyarrow
 def test_head_filters_by_project_and_workload_before_taking_n(build, capsys):
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "f1", "--project", "alpha"]) == cli.EXIT_OK
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "f2", "--project", "beta"]) == cli.EXIT_OK
@@ -153,13 +159,15 @@ def test_what_does_not_fit_is_refused_before_anything_runs(argv, message, build,
 
 
 def test_a_suite_the_adapter_cannot_find_is_refused(build, tmp, capsys):
-    assert cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone"]) == cli.EXIT_REFUSED
+    assert cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone", "--no-ingest"]) == cli.EXIT_REFUSED
     assert "suite binary not found" in capsys.readouterr().err
     # refused inside the session, after the log was started: the run folder holds only the log, which says why
     assert [p.name for p in (tmp / "results").glob("*/*")] == ["bx.log"]
 
 
+@requires_pyarrow
 def test_a_provider_target_is_resolved_like_compare_does(repo, build, tmp, monkeypatch, capsys):
+    from benchx.store import Store
     descriptions = tmp / "descriptions.json"
     descriptions.write_text(json.dumps({"plain": describe(build, repo["wt-head"], how_built="cmake plain")}))
     script = tmp / "proj" / "provider.py"
@@ -213,7 +221,9 @@ CONFIG = {"project": "demo",
           "environment_variables": {"DEMO_THREADS": "1"}}
 
 
+@requires_pyarrow
 def test_a_bare_command_takes_everything_from_the_file(build, tmp, capsys):
+    from benchx.store import Store
     write_config(tmp, **CONFIG)
     assert cli.main(["bench", str(build), QUIET, "--run-key", "f1"]) == cli.EXIT_OK
     assert QUIET in capsys.readouterr().out
@@ -237,7 +247,9 @@ def test_a_flag_wins_over_the_file(build, tmp):
     assert order["environment_variables"] == {"DEMO_THREADS": "2", "OTHER": "x"}
 
 
+@requires_pyarrow
 def test_no_project_makes_the_run_ad_hoc(build, tmp):
+    from benchx.store import Store
     write_config(tmp, **CONFIG)
     assert cli.main(["bench", str(build), "--no-project", "--run-key", "f3"]) == cli.EXIT_OK
     assert "project" not in order_of(tmp, "f3")
@@ -262,10 +274,11 @@ def test_the_files_adapter_is_the_only_one_its_settings_fit(build, tmp, capsys):
 
 
 def test_a_quantity_the_harness_does_not_report_is_refused(build, tmp, capsys):
-    assert cli.main(["bench", str(build), *GBENCH, "--quantity", "peak-rss"]) == cli.EXIT_REFUSED
+    assert cli.main(["bench", str(build), *GBENCH, "--quantity", "peak-rss", "--no-ingest"]) == cli.EXIT_REFUSED
     assert "does not report peak-rss" in capsys.readouterr().err
 
 
+@requires_pyarrow
 def test_paths_come_from_the_file(build, tmp):
     write_config(tmp, adapter=CONFIG["adapter"], paths={"store": "data/s.parquet", "results": "out"})
     (tmp / "data").mkdir()
@@ -288,7 +301,9 @@ def test_a_provider_target_without_a_provider_is_refused(build, tmp, capsys):
     assert '@plain needs "provider"' in capsys.readouterr().err
 
 
+@requires_pyarrow
 def test_compare_takes_its_policy_from_the_file(repo, tmp, capsys):
+    from benchx.store import Store
     base = make_build(tmp / "b0", repo["wt-base"], cases())
     head = make_build(tmp / "b1", repo["wt-head"], cases(quiet=1.02e-3))
     write_config(tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 3, "k": 4.0})

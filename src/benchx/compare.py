@@ -19,8 +19,8 @@ import statistics
 from . import identity
 from .core import canonical, catalog
 from .projection import Projection, axis_order, declared_workload, get, said, workload_label
+from .results import store_project
 from .snapshot import DIRTY_WARNINGS
-from .store import store_project
 
 logger = logging.getLogger(__name__)
 

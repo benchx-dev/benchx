@@ -5,6 +5,9 @@ import json
 import pytest
 
 from benchx import cli, config, harnesses
+from conftest import HAS_PYARROW
+
+DEFAULT_STORE = "store.parquet" if HAS_PYARROW else "store.jsonl"
 
 
 def levels(precision):
@@ -29,7 +32,7 @@ def tree(tmp):
 def test_without_a_file_the_working_directory_is_the_root(tree):
     cfg = config.load(tree)
     assert (cfg.path, cfg.root, cfg.data) == (None, tree.resolve(), {})
-    assert cfg.store_path == tree.resolve() / "store.parquet"
+    assert cfg.store_path == tree.resolve() / DEFAULT_STORE
     assert cfg.results_dir == tree.resolve() / "results"
     assert cfg.provider is None
 
@@ -40,7 +43,7 @@ def test_the_file_is_found_walking_up_and_its_directory_is_the_root(tree):
     deep.mkdir(parents=True)
     cfg = config.load(deep)
     assert (cfg.path, cfg.root) == (path, tree.resolve())
-    assert cfg.store_path == tree.resolve() / "store.parquet"  # the root's, not the working directory's
+    assert cfg.store_path == tree.resolve() / DEFAULT_STORE  # the root's, not the working directory's
 
 
 def test_paths_are_relative_to_the_root_unless_absolute(tree, tmp):
@@ -54,7 +57,7 @@ def test_paths_are_relative_to_the_root_unless_absolute(tree, tmp):
 def test_benchx_home_relocates_the_store_over_the_file(tree, tmp, monkeypatch):
     write_config(tree, paths={"store": "data/s.parquet"})
     monkeypatch.setenv("BENCHX_HOME", str(tmp / "home"))
-    assert config.load(tree).store_path == tmp / "home" / "store.parquet"
+    assert config.load(tree).store_path == tmp / "home" / DEFAULT_STORE
     monkeypatch.setenv("BENCHX_HOME", "")
     assert config.load(tree).store_path == tree.resolve() / "data" / "s.parquet"
 

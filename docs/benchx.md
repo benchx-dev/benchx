@@ -24,7 +24,8 @@ implement a missing feature.
 Install from [PyPI](https://pypi.org/project/benchx/):
 
 ```console
-$ pip install benchx
+$ pip install benchx                # minimal: run with --no-ingest, validate, and compare --results
+$ pip install 'benchx[parquet]'     # adds PyArrow for the local Parquet store and history queries
 ```
 
 
@@ -55,7 +56,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json | --tables [--all]]
+           [--run-key KEY] [--out DIR] [--no-build] [--no-ingest] [--k 3] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
@@ -285,17 +286,20 @@ outside the checkout is identified by one file): put it inside the checkout.
   `.benchx/setup.json`. It changes nothing on the machine and builds nothing,
   and it refuses an order that names a deferred field (`environment_policy`,
   a declared `build`, `components`, `schedule`) instead of ignoring it.
-- **The store** is one Parquet file, by default `store.parquet` in the project root
-  (`paths.store` in `benchx.conf.json` moves it). It reads documents strictly, validates them, and applies the
-  schema §5.4 contract: idempotency and the rejection codes `malformed`,
-  `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
-  `attempt-conflict`. Each result is one row: the columns
-  [`measurement-result-parquet.md`](design/measurement-result-parquet.md) derives from the
-  schema, the store's derived columns, the canonical document, and the work
-  order it references. Entities and series are computed from the rows on
-  query, under the identity policy in `benchx/identity.py`: the default of
-  `schemas/identity-policy/0.1.0` with the benchmark's revision ignored.
-  Every accepting ingest rewrites the file atomically.
+- **The store** is one Parquet file (`store.parquet`, when `pyarrow` / `benchx[parquet]` is
+  installed) or one JSONL file (`store.jsonl`, using only the standard library) in the project root
+  (`paths.store` in `benchx.conf.json` moves or selects the format). Both backends read documents
+  strictly, validate them, and apply the same schema §5.4 contract: idempotency and the rejection
+  codes `malformed`, `idempotency-conflict`, `unit-conflict`, `identity-violation`, and
+  `attempt-conflict`. Each result is one row: the canonical document, the work order it references,
+  and the store's derived columns (plus the typed message columns of
+  [`measurement-result-parquet.md`](design/measurement-result-parquet.md) in Parquet). Entities
+  and series are computed from the rows on query, under the identity policy in `benchx/identity.py`:
+  the default of `schemas/identity-policy/0.1.0` with the benchmark's revision ignored. Every
+  accepting ingest rewrites the file atomically.
+- **Schema validation** checks the shipped schemas' `date-time` and `uri` formats directly; custom
+  `$BENCHX_SCHEMAS` using other JSON Schema formats require the corresponding `jsonschema` format
+  validator.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
   trees have a working-tree id, before running anything; it says which sides
@@ -317,8 +321,8 @@ outside the checkout is identified by one file): put it inside the checkout.
   |effect| > *k* × noise). `environments` names its sides by the label
   `--label` gives, and `variants` by the two values of one workload parameter
   (`--vary`); under `variants` a failed attempt on either side fails its unit
-  (`side-failed`). `--results` compares result files through a throwaway
-  store: the ad hoc path. Condition measurements (`measurement.kind:
+  (`side-failed`). `--results` reads and validates standalone JSON result files on disk without
+  ingesting them into the local store: the ad hoc path. Condition measurements (`measurement.kind:
   condition`) are not compared, and deterministic quantities are deferred.
 - **The tables** (`--tables`, `benchx/tables.py`) print, after the usual summary, what
   `asv continuous` prints, laid out and rounded as asv does: a table of each side (a value
@@ -339,8 +343,8 @@ current process ends.
 ## Run it
 
 ```console
-$ uv venv && uv pip install -e '.[test]'   # editable; a plain `uv pip install .` works too, the schemas ship in the package
-$ .venv/bin/python -m pytest tests     # 470 tests, fake Google Benchmark binary, no compiler
+$ uv venv && uv pip install -e '.[parquet,test]'   # editable; omit `parquet` for a minimal Arrow-free install
+$ .venv/bin/python -m pytest tests                 # fake Google Benchmark binary, no compiler
 ```
 
 `tests/test_e2e_numpy_revisions.py` is an end-to-end test that builds NumPy with
@@ -353,7 +357,8 @@ keeps the builds between runs, `BENCHX_E2E_REVISIONS` picks the two tags,
 scenario, and the test's docstring has the rest.
 
 A regular (non-editable) install ships the test suite too, so an installed copy can test itself:
-`pip install 'benchx[test]'` followed by `python -m pytest --pyargs benchx`.
+`pip install 'benchx[parquet,test]'` (or `pip install 'benchx[test]'` for the Arrow-free subset)
+followed by `python -m pytest --pyargs benchx`.
 
 The end-to-end examples that build real software are in
 [benchx_examples](https://github.com/benchx-dev/benchx_examples), and the `e2e`

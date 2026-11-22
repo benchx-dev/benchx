@@ -9,7 +9,9 @@ import pytest
 
 from benchx import bench as bench_mod
 from benchx import cli, log
-from conftest import cases, make_build
+from conftest import HAS_PYARROW, cases, make_build
+
+DEFAULT_STORE = re.escape("store.parquet" if HAS_PYARROW else "store.jsonl")
 
 GBENCH = ["--adapter", "google-benchmark", "--suite", "demo-bench"]
 STAMP = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z \d+ benchx(\.\w+)+ [A-Z]+ ")
@@ -46,7 +48,7 @@ def test_the_default_stdout_is_the_table_the_failures_and_the_summary(build, cap
     assert re.search(r"\n\nnot measured \(2\)\n  BM_Broken: .+\n  BM_Skipped: .+\n\n"
                      r"\d+ result\(s\) -> \S+  \(order sha256:\w+\)\n", out)
     assert "ingested" not in out  # a progress message now, and on stderr with the others
-    assert re.fullmatch(START + r"\nprecision: .*\n\S+store\.parquet: ingested \d+, duplicate 0\n", err)
+    assert re.fullmatch(START + rf"\nprecision: .*\n\S+{DEFAULT_STORE}: ingested \d+, duplicate 0\n", err)
 
 
 def test_q_leaves_the_failures_and_the_result_line_and_no_table(build, capsys):
@@ -117,7 +119,7 @@ def test_the_log_holds_the_report_whatever_the_terminal_shows(build, tmp, capsys
     assert any("BM_Quiet/1024" in row for row in rows) and any("BM_Broken" in row for row in rows)
     assert any(" WARNING not measured (2)" in line for line in lines)  # the errors, as a warning
     assert any(re.search(r" INFO \d+ result\(s\) -> ", line) for line in lines)
-    assert any(re.search(r" INFO \S+store\.parquet: ingested \d+, duplicate 0$", line) for line in lines)  # once
+    assert any(re.search(rf" INFO \S+{DEFAULT_STORE}: ingested \d+, duplicate 0$", line) for line in lines)  # once
 
 
 def test_the_log_level_decides_what_of_it_the_log_keeps(build, tmp, capsys):

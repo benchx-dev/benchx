@@ -11,8 +11,7 @@ pytest.importorskip("pyperf")
 
 from benchx import cli, config, core, harnesses, session
 from benchx.errors import SessionError
-from benchx.store import Store
-from conftest import SOURCE_URI
+from conftest import SOURCE_URI, requires_pyarrow
 
 MODULE = textwrap.dedent('''
     def bench_a():
@@ -68,7 +67,9 @@ def test_both_calibration_flags_conflict():
         harnesses.PYPERF.flags_to_precision(min_time=0.1, loops=5)
 
 
+@requires_pyarrow
 def test_bench_command_runs_and_ingests(tree, capsys):
+    from benchx.store import Store
     assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "cli", "--project", "p", *FAST]) == cli.EXIT_OK
     out = capsys.readouterr()
     assert "bench_a" in out.out and "success" in out.out and "bench_b" not in out.out

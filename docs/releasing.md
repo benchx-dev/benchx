@@ -32,7 +32,7 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
 
     ```console
     $ python -m venv venv && source venv/bin/activate
-    $ pip install 'benchx[test]==0.1.0'
+    $ pip install 'benchx[parquet,test]==0.1.0'
     $ bx --help
     $ python -m pytest --pyargs benchx
     ```
@@ -42,8 +42,8 @@ package, waits for approval, publishes to PyPI, and creates the GitHub release. 
    After a new version reaches PyPI, conda-forge's bot opens a pull request there, which can take
    several hours. A maintainer of the feedstock then:
     - Compares the recipe's dependencies with `dependencies` in `pyproject.toml`, and updates the
-      pull request if they changed. `jsonschema[format-nongpl]` is called
-      `jsonschema-with-format-nongpl` on conda-forge.
+      pull request if they changed (`pyarrow` is optional via the `parquet` extra, and format
+      validation uses `rfc3339-validator` and `rfc3986-validator` directly).
     - Merges the pull request once its CI passes.
     - Tests the install, once the package is available:
 

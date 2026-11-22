@@ -1,18 +1,19 @@
-"""The local store: one Parquet file (prototype-design.md §4).
+"""The local store: one Parquet file (`store.parquet`) or JSONL file (`store.jsonl`).
 
-One row per result: the message columns derived from the result schema
-(measurement-result-parquet.md), then the columns the store derives,
-including the canonical document itself and the work order it references.
-Entities, series, and series points are computed from the rows when asked
-for; nothing else is stored. JSON is for documents in transit, never for
-the store.
+One row per result: the validated canonical document plus the store's derived
+columns (store_project, reported_coordinates_fingerprint, payload_sha256,
+attempt_signature, work_order_ref, work_order). Parquet (`benchx[parquet]`) is
+used when PyArrow is available and adds typed message columns
+(measurement-result-parquet.md); JSONL uses only the standard library and
+enforces the exact same schema §5.4 ingest contract.
 
-A Parquet file cannot be appended to, so every ingest that accepts something
-rewrites the file: to a temporary file beside it, synced, then renamed over
-it, which is atomic. The acknowledgment therefore means validated and durable
-(schema §5.4). Uniqueness checks are scans, which is fine at this scale.
+Entities, series, and series points are computed from the rows when asked for;
+nothing else is stored. Every accepting ingest rewrites the file atomically (to
+a temporary file beside it, fsynced, then renamed over it) so an acknowledgment
+means validated and durable.
 """
 
+from datetime import datetime
 import json
 import logging
 import os
@@ -20,59 +21,84 @@ import statistics
 import time
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
-
-from . import core, identity, parquet
-from .core import loader
-from .core.errors import AttemptConflict, DocumentError, IdempotencyConflict, ReadError, UnitConflict
+from . import core, identity
 from .projection import Projection
+from .results import ingest_documents, store_project, sweep_paths, warning_codes
+
+JSON_SUFFIXES = (".jsonl", ".json", ".ndjson")
+
+
+def _is_json_path(path: Path) -> bool:
+    return path.suffix.lower() in JSON_SUFFIXES
+
+
+def _require_pyarrow():
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".")[0] == "pyarrow":
+            raise ModuleNotFoundError(
+                "Parquet store requires pyarrow; install it with `pip install 'benchx[parquet]'`.",
+                name="pyarrow",
+            ) from exc
+        raise
+    from . import parquet
+
+    return pa, pq, parquet
 
 logger = logging.getLogger(__name__)
-MAX_LOGGED = 40  # the log's cap on a list, like its other lists
-
-# Schema §5.3 attempt integrity: what results sharing an attempt_key agree on.
-_ATTEMPT_FIELDS = ("project", "source", "revision", "benchmark")
-_ATTEMPT_COORDINATES = ("workload", "subject", "environment")
-_ATTEMPT_PROVENANCE = ("run_key", "subject_dirty", "subject_tree", "benchmark_dirty", "benchmark_tree")
-
-
-def _attempt_signature(doc: dict) -> str:
-    facts = {k: doc.get(k) for k in _ATTEMPT_FIELDS}
-    facts.update({k: doc["coordinates"][k] for k in _ATTEMPT_COORDINATES})
-    facts["environment"] = {k: facts["environment"][k] for k in ("schema_version", "identity")}
-    facts.update({k: doc["provenance"].get(k) for k in _ATTEMPT_PROVENANCE})
-    return core.sha256_hex(core.canonical(facts))
-
-
-def store_project(doc: dict) -> str:
-    """The project, or local/<hostname> for a thin result (schema §4.1)."""
-    if "project" in doc:
-        return doc["project"]
-    ident = doc["coordinates"]["environment"]["identity"]
-    return f"local/{ident.get('runner') or ident.get('hostname') or 'unknown'}"
 
 
 class Store:
-    """The local store, one Parquet file (prototype-design.md §4). Its place is the
-    project's: `Config.store_path`, by default `store.parquet` in the project root."""
+    """The local store, one Parquet or JSONL file (prototype-design.md §4). Its place
+    is the project's: `Config.store_path`, by default `store.parquet` (with pyarrow)
+    or `store.jsonl` (without) in the project root."""
 
     def __init__(self, path):
         self.path = Path(path)
+        self._json = _is_json_path(self.path)
+        if not self._json:
+            self._pa, self._pq, self._parquet = _require_pyarrow()
 
     # -- reading -------------------------------------------------------------
 
-    def _table(self, columns=None) -> pa.Table | None:
+    def _table(self, columns=None):
         if not self.path.exists():
             logger.debug("%s: absent, read as an empty store", self.path)
             return None
         started = time.monotonic()
-        table = pq.read_table(self.path, columns=columns)
+        table = self._pq.read_table(self.path, columns=columns)
         logger.debug("%s: read %d row(s), %s, in %.2f s", self.path, table.num_rows,
                      ", ".join(columns) if columns else "all columns", time.monotonic() - started)
         return table
 
+    def _json_rows(self) -> list[dict]:
+        if not self.path.exists():
+            logger.debug("%s: absent, read as an empty store", self.path)
+            return []
+        started = time.monotonic()
+        rows = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        logger.debug("%s: read %d row(s) in %.2f s", self.path, len(rows), time.monotonic() - started)
+        return rows
+
     def _index(self) -> list[dict]:
+        if self._json:
+            out = []
+            for row in self._json_rows():
+                doc = json.loads(row["document"])
+                quantity = doc["measurement"]["quantity"]
+                out.append({
+                    "producer": doc["producer"]["name"],
+                    "ingest_key": doc["ingest_key"],
+                    "attempt_key": doc["attempt_key"],
+                    "payload_sha256": row["payload_sha256"],
+                    "attempt_signature": row["attempt_signature"],
+                    "store_project": row["store_project"],
+                    "quantity": quantity["name"],
+                    "unit": quantity["unit"],
+                })
+            return out
         table = self._table(["producer", "ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
                              "store_project", "measurement"])
         if table is None:
@@ -85,6 +111,11 @@ class Store:
                 zip(rest, producers, quantity.field("name").to_pylist(), quantity.field("unit").to_pylist())]
 
     def _documents(self, run_key=None) -> list[dict]:
+        if self._json:
+            docs = [json.loads(row["document"]) for row in self._json_rows()]
+            found = docs if run_key is None else [d for d in docs if d["provenance"]["run_key"] == run_key]
+            logger.debug("documents(%s): %d of %d stored document(s)", run_key, len(found), len(docs))
+            return found
         table = self._table(["provenance", "document"])
         if table is None:
             return []
@@ -99,6 +130,11 @@ class Store:
         return self._documents(run_key)
 
     def order(self, ref: str) -> dict | None:
+        if self._json:
+            for row in self._json_rows():
+                if row.get("work_order_ref") == ref and row.get("work_order") is not None:
+                    return json.loads(row["work_order"])
+            return None
         table = self._table(["work_order_ref", "work_order"])
         if table is None:
             return None
@@ -114,6 +150,40 @@ class Store:
         keeps one store project's results; `workload` keeps those whose benchmark
         name contains it; `measurands` leaves out condition measurements (schema
         §4.4). All are applied before n."""
+        if self._json:
+            all_rows = self._json_rows()
+            if not all_rows:
+                return 0, []
+            parsed = [(i, row, json.loads(row["document"])) for i, row in enumerate(all_rows)]
+            kept = [
+                (i, row, doc) for i, row, doc in parsed
+                if (project is None or row["store_project"] == project)
+                and (workload is None or workload in doc["coordinates"]["workload"]["name"])
+                and not (measurands and doc["measurement"].get("kind", "measurand") == "condition")
+            ]
+            kept = kept[max(0, len(kept) - n):]
+            if not kept:
+                return len(all_rows), []
+            rows = []
+            for position, row, doc in kept:
+                raw_obs = doc["measurement"].get("observations") or []
+                values = [o["value"] if isinstance(o, dict) else o for o in raw_obs]
+                labels_val = doc["provenance"].get("labels")
+                rows.append({
+                    "row": position,
+                    "started_at": datetime.fromisoformat(doc["provenance"]["started_at"]),
+                    "run_key": doc["provenance"]["run_key"],
+                    "project": row["store_project"],
+                    "workload": doc["coordinates"]["workload"]["name"],
+                    "quantity": doc["measurement"]["quantity"]["name"],
+                    "unit": doc["measurement"]["quantity"]["unit"],
+                    "status": doc["measurement"]["status"],
+                    "median": statistics.median(values) if values else None,
+                    "revision": doc["revision"]["key"],
+                    "labels": core.canonical(labels_val).decode() if labels_val is not None else None,
+                    "document": row["document"],
+                })
+            return len(all_rows), rows[::-1]
         table = self._table(["ingest_key", "revision", "coordinates", "measurement", "provenance",
                              "store_project", "document"])
         if table is None:
@@ -184,129 +254,65 @@ class Store:
     def ingest_paths(self, paths) -> dict:
         """Sweep files and directories of JSON documents in transit: work orders
         are attached to the results that reference them, results ingested."""
-        files = []
-        for path in map(Path, paths):
-            files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
-        orders, documents, unreadable = {}, [], []
-        for f in files:
-            # A file that cannot be read is one rejection, not the end of the sweep (§5.4).
-            text = loader.read_text(f)
-            if isinstance(text, ReadError):
-                unreadable.append(_rejection(f.name, text))
-                continue
-            if not f.name.startswith("workorder-"):
-                documents.append((f.name, text))
-                continue
-            order, errors = loader.parse(text)
-            if order is None:
-                unreadable.append(_rejection(f.name, errors[0]))
-            else:
-                orders[core.order_ref(order)] = order
-        logger.debug("swept %d file(s): %d result document(s), %d work order(s), %d unreadable or malformed", len(files),
-                     len(documents), len(orders), len(unreadable))
+        documents, orders, unreadable = sweep_paths(paths)
         outcome = self.ingest(documents, orders)
         outcome["rejected"] = unreadable + outcome["rejected"]
         return outcome
 
     def ingest(self, documents: list[tuple[str, str]], orders: dict | None = None) -> dict:
         """Per-result outcomes; a batch is N independent documents (§5.4)."""
-        orders = orders or {}
         index = self._index()
         existing = {(r["producer"], r["ingest_key"]): r["payload_sha256"] for r in index}
         attempts = {r["attempt_key"]: r["attempt_signature"] for r in index}
         units = {(r["store_project"], r["quantity"]): r["unit"] for r in index}
-
-        accepted, derived = [], []
-        outcome = {"ingested": 0, "duplicate": 0, "rejected": []}
-        used_orders, without_order = set(), 0
-        for name, text in documents:
-            doc, errors = loader.parse(text)
-            if doc is not None:
-                errors = core.check(doc, "measurement-result")
-            if errors:
-                outcome["rejected"].append(_rejection(name, errors[0]))
-                logger.debug("%s: rejected with %d error(s)", name, len(errors))  # the rejection keeps the first
-                for error in errors[:MAX_LOGGED]:
-                    logger.debug("%s: %s at %s: %s%s", name, error.code, error.location or "the document", error.message,
-                                 f" (rule {error.rule})" if getattr(error, "rule", None) else "")
-                if len(errors) > MAX_LOGGED:
-                    logger.debug("%s: and %d more error(s)", name, len(errors) - MAX_LOGGED)
-                continue
-
-            project = store_project(doc)
-            canonical = core.canonical(doc)
-            payload = core.sha256_hex(canonical)
-            key = (doc["producer"]["name"], doc["ingest_key"])
-            quantity = doc["measurement"]["quantity"]
-            known = units.get((project, quantity["name"]))
-            signature = _attempt_signature(doc)
-            if key in existing and existing[key] == payload:
-                outcome["duplicate"] += 1
-                continue
-            if key in existing:
-                conflict = IdempotencyConflict()
-            elif known and known != quantity["unit"]:
-                conflict = UnitConflict(quantity=quantity["name"], project=project,
-                                        known=known, reported=quantity["unit"])
-            elif attempts.setdefault(doc["attempt_key"], signature) != signature:
-                conflict = AttemptConflict(attempt_key=doc["attempt_key"])
-            else:
-                conflict = None
-            if conflict is not None:
-                outcome["rejected"].append(_rejection(name, conflict))
-                if isinstance(conflict, IdempotencyConflict):  # the error does not carry what makes it one
-                    logger.warning("%s: idempotency-conflict: %s already holds payload %s for %s, and this one is %s",
-                                   name, self.path, existing[key][:16], doc["ingest_key"], payload[:16])
-                else:
-                    logger.warning("%s: %s: %s", name, conflict.code, conflict.message)
-                continue
-
-            existing[key] = payload
-            if not known:
-                logger.debug("%s: a new quantity %s [%s] in %s: the first result defines its unit", name,
-                             quantity["name"], quantity["unit"], project)
-            units[(project, quantity["name"])] = quantity["unit"]  # first sight defines the unit
-            ref = doc["provenance"].get("info", {}).get("workorder_ref")
-            order = orders.get(ref)
-            if order is None:
-                without_order += 1
-            else:
-                used_orders.add(ref)
-            accepted.append(doc)
-            derived.append({
-                "store_project": project,
-                "reported_coordinates_fingerprint": identity.reported_coordinates_fingerprint(doc),
-                "payload_sha256": payload,
-                "attempt_signature": signature,
-                "document": canonical.decode(),
-                "work_order_ref": ref,
-                "work_order": core.canonical(order).decode() if order is not None else None,
-            })
-            outcome["ingested"] += 1
-
-        unused = [ref for ref in orders if ref not in used_orders]
-        logger.debug("ingest: %d ingested, %d duplicate, %d rejected; %d work order(s) attached, %d in the sweep "
-                     "that no result references (neither stored nor reported), %d result(s) with no order in the sweep "
-                     "(an order delivered by an earlier ingest is not attached)", outcome["ingested"],
-                     outcome["duplicate"], len(outcome["rejected"]), len(used_orders), len(unused), without_order)
+        accepted, derived, outcome = ingest_documents(
+            documents, orders, existing=existing, attempts=attempts, units=units, store_path=self.path
+        )
         if accepted:
-            try:
-                table = parquet.results_table(accepted, derived)
-            except Exception:  # one list comprehension over the batch: an error there writes nothing
-                logger.error("cannot convert %d result(s) to rows for %s: nothing is written", len(accepted), self.path)
-                raise
-            self._write(table)
+            if self._json:
+                self._write_json(derived)
+            else:
+                try:
+                    table = self._parquet.results_table(accepted, derived)
+                except Exception:  # one list comprehension over the batch: an error there writes nothing
+                    logger.error("cannot convert %d result(s) to rows for %s: nothing is written", len(accepted), self.path)
+                    raise
+                self._write_parquet(table)
         return outcome
 
-    def _write(self, new: pa.Table) -> None:
-        """Rewrite the file with the new rows appended, atomically."""
+    def _write_json(self, new_rows: list[dict]) -> None:
+        """Rewrite the JSONL store with the new rows appended, atomically."""
+        started = time.monotonic()
+        existing = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
+        old_count = sum(1 for line in existing.splitlines() if line.strip())
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        appended = "".join(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n" for row in new_rows)
+        tmp = self.path.with_name(f".{self.path.name}.tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(existing)
+                f.write(appended)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+        except OSError as e:  # disk full, permissions: the results are still in their files
+            logger.error("cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
+                         self.path, len(new_rows), e.strerror or e, tmp)
+            raise
+        logger.debug("wrote %s: %d row(s) added to %d, %.2f s", self.path, len(new_rows), old_count,
+                     time.monotonic() - started)
+
+    def _write_parquet(self, new) -> None:
+        """Rewrite the Parquet store with the new rows appended, atomically."""
         started = time.monotonic()
         old = self._table()
         # Rows written under an older message schema are carried over, with
         # nulls in any column or nested field the schema has since gained.
-        table = new if old is None else pa.concat_tables([old, new], promote_options="permissive")
+        table = new if old is None else self._pa.concat_tables([old, new], promote_options="permissive")
         if old is not None and logger.isEnabledFor(logging.DEBUG):
-            before, after = _fields(old.schema), _fields(table.schema)
+            before, after = _fields(old.schema, self._pa), _fields(table.schema, self._pa)
             added = sorted(set(after) - set(before))
             widened = sorted(f"{path}: {before[path]} to {after[path]}" for path in before if before[path] != after[path])
             if added or widened:  # permissive promotion adds nested fields and widens types, not only columns
@@ -315,7 +321,7 @@ class Store:
         tmp = self.path.with_name(f".{self.path.name}.tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            pq.write_table(table.replace_schema_metadata(new.schema.metadata), tmp, compression="zstd")
+            self._pq.write_table(table.replace_schema_metadata(new.schema.metadata), tmp, compression="zstd")
             with open(tmp, "rb") as f:
                 os.fsync(f.fileno())
             os.replace(tmp, self.path)
@@ -327,7 +333,7 @@ class Store:
                      time.monotonic() - started)
 
 
-def _fields(schema: pa.Schema) -> dict[str, str]:
+def _fields(schema, pa) -> dict[str, str]:
     """Every leaf of a schema by dotted path, with its type: what a schema promotion can change."""
     found = {}
 
@@ -342,11 +348,6 @@ def _fields(schema: pa.Schema) -> dict[str, str]:
     return found
 
 
-def _rejection(name: str, error: DocumentError) -> dict:
-    where = f"at {error.location}: " if error.location else ""
-    return {"document": name, "code": str(error.code), "message": where + error.message}
-
-
 _ENTITY_KEYS = {
     "project": lambda r: r["key"],
     "source": lambda r: (r["project"], r["uri"]),
@@ -357,12 +358,6 @@ _ENTITY_KEYS = {
     "series": lambda r: r["fingerprint"],
     "series_point": lambda r: (r["series_fingerprint"], r["producer"], r["ingest_key"]),
 }
-
-
-def warning_codes(document: dict) -> list[str]:
-    """A result's quality warnings by code: a warning is a token, or an object that has a `code`."""
-    return [w.get("code", str(w)) if isinstance(w, dict) else str(w)
-            for w in document.get("quality", {}).get("warnings", [])]
 
 
 def _add_entities(entities: dict, doc: dict, project: str, projection: Projection) -> None:
