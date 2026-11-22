@@ -27,17 +27,19 @@ Two rules shape the decomposition:
 ## 2. Overview
 
 ```
-                 produce results                consume results
-  ┌────────────┐  ┌────────────┐   ┌───────┐   ┌────────────┐  ┌──────────┐
-  │ Workbench  │  │  Runner +  │   │       │   │ Comparator │  │  Views   │
-  │ (local CLI)│─▶│  Adapters  │──▶│ Store │──▶│  Detector  │─▶│  Alerts  │
-  └────────────┘  └────────────┘   │       │   └────────────┘  └──────────┘
-  ┌────────────┐        ▲          └───────┘
-  │ Importers  │────────┼──────────────▲
-  └────────────┘        │
-                  ┌───────────┐
-                  │ Scheduler │  decides what runs, where, when
-                  └───────────┘
+                        produce results               consume results
+  ┌─────────────────┐  ┌────────────┐   ┌───────┐   ┌────────────┐  ┌──────────┐
+  │ Local workbench │─▶│            │   │       │   │ Comparator │  │  Views   │
+  │   (local CLI)   │  │  Runner +  │──▶│ Store │──▶│  Detector  │─▶│  Alerts  │
+  └─────────────────┘  │  Adapters  │   │       │   └────────────┘  └──────────┘
+  ┌─────────────────┐  │            │   └───▲───┘
+  │  CI workbench   │─▶│            │       │
+  │  (unattended)   │  └────────────┘       │
+  └────────▲────────┘  ┌───────────┐        │
+           │           │ Importers │────────┘
+  ┌────────┴────────┐  └───────────┘
+  │    Scheduler    │  decides what runs, where, when
+  └─────────────────┘
 ```
 
 Everything to the left of the store produces schema results; everything to the
@@ -107,7 +109,12 @@ harness did not report.
 
 ### 3.4 Workbench
 
-**Role:** The developer's local interface for one-off benchmarking.
+**Role:** The orchestrator above the runner and comparator for a given
+execution context — either interactive local use on a developer's machine
+(**local workbench**) or unattended execution on a CI-provisioned node
+(**CI workbench**).
+
+A **local workbench** (such as `bx` or a project front end like `spin bench`):
 
 - Runs and compares benchmarks on the developer's own machine, entirely
   offline: current workspace against a baseline build, one build configuration
@@ -133,10 +140,24 @@ harness did not report.
 - Can promote a kept local result into the result store unchanged — the local
   file and the stored result are the same schema object.
 
-**Does not:** require a server, an account, or any part of the fleet, or
-build anything itself.
-It is the runner plus comparator wrapped for human, interactive use, plus the
-session loop and the call to a target provider.
+A **CI workbench** (`ci-workbench.md`) plays the same orchestrating role for
+unattended jobs triggered by a scheduler or CI workflow (`requester.kind:
+"ci"`):
+
+- Calls the target provider (`prepare`), authors resolved work orders, and
+  invokes the same runner unchanged on the CI-provisioned node (there is no
+  separate "EC2 runner" or CI-specific runner).
+- Handles what unattended and ephemeral machines require: the provisioning
+  handoff (stable logical machine identity and declared L0/L1 facts),
+  time-budgeted and resumable unit execution (or interleaved PR comparison
+  rounds), and incremental raw staging for idempotent store ingest.
+- Leaves CI triggering/queuing to the scheduler (§3.5) and cloud VM
+  provisioning to the CI platform (§5).
+
+**Does not:** build anything itself or provision cloud machines. A local
+workbench requires no server, account, or fleet. A workbench is the runner plus
+comparator wrapped for a specific workflow, plus its execution loop and calls
+to a target provider.
 
 **Target provider (extension point, not a component).** The runner never
 builds, so something must turn a source ref such as `main` into a prepared
