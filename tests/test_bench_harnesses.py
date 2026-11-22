@@ -43,6 +43,29 @@ def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys
     assert {d["coordinates"]["workload"]["name"] for d in Store(tmp / "store.parquet").documents("g1")} == {QUIET, NOISY}
 
 
+def test_google_benchmark_case_name_with_spaces_runs_and_compares(repo, tmp, monkeypatch, capsys):
+    """C++ multi-argument BENCHMARK_TEMPLATE names contain spaces (e.g. `Add<Op, Int64Type>/1024`)."""
+    monkeypatch.chdir(tmp)
+    spaced = "ArrayAdd<Add, Int64Type>/1024"
+    base = make_build(tmp / "base", repo["wt-base"], {spaced: {"mean": 1e-3, "rel_sd": 0.002}}, seed=1)
+    head = make_build(tmp / "head", repo["wt-head"], {spaced: {"mean": 1.2e-3, "rel_sd": 0.002}}, seed=2)
+
+    assert cli.main(["bench", str(base), *GBENCH, "--run-key", "sp1", "--repetitions", "3"]) == cli.EXIT_OK
+    out = capsys.readouterr()
+    assert spaced in out.out and "success" in out.out
+    docs = [d for d in Store(tmp / "store.parquet").documents("sp1") if d["measurement"].get("kind") != "condition"]
+    assert [d["coordinates"]["workload"]["name"] for d in docs] == [spaced]
+    assert " " not in docs[0]["ingest_key"]
+
+    assert cli.main([
+        "compare", str(base), str(head), *GBENCH,
+        "--profile", "revisions", "--rounds", "3", "--repetitions", "3", "--run-key", "sp-cmp", "--json",
+    ]) == cli.EXIT_OK
+    comparison = json.loads(capsys.readouterr().out)
+    assert core.check(comparison, "comparison-document") == []
+    assert [u["workload"]["name"] for u in comparison["units"]] == [spaced]
+
+
 def test_head_table_prints_the_bench_columns_of_the_stored_results(build, capsys):
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "h1"]) == cli.EXIT_OK
     capsys.readouterr()
