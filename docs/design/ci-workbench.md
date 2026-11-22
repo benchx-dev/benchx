@@ -100,8 +100,11 @@ before invoking the CI workbench:
    (`benchmark-environments.md` §5.4).
 2. **Declared L0/L1 facts.** Facts the runner cannot detect — instance type,
    tenancy, base image or AMI identifier, and tuning playbook version — are
-   written to the node's declared-facts file (e.g. `.benchx/setup.json`) or
-   passed into the work order before execution starts.
+   passed into the work order or declared via the project/node configuration
+   channel before execution starts. Prefer keeping configuration consolidated
+   in `benchx.conf.json` in the root directory (or passing a per-node
+   `BENCHX_SETUP_FILE` / work-order declaration) rather than introducing a
+   hidden `.benchx/` directory (`benchmark-environments.md` §3.2, §9 Q4).
 3. **Leak-safe lifecycle.** For ephemeral instances, provisioning and teardown
    bracket the job (`start` and an `always` `stop` step), backed by an
    instance-side max-lifetime shutdown/self-termination guard and periodic
@@ -160,14 +163,18 @@ Following `system-decomposition.md` §3.4 and `runner.md` §6:
   `timeout`). A unit that completed with some failing cases is a finished unit
   and is not retried.
 - A **unit crash** (binary failed to start or produced no results) is recorded
-  as a failed unit attempt so restarts know whether to retry up to the attempt
-  cap.
+  as a failed unit attempt so a restartable workbench knows whether to retry
+  up to the attempt cap (§5).
 
 ## 5. Durable delivery, partial runs, and restarts
 
 Long benchmark suites on ephemeral machines will hit job timeouts, spot
-preemptions, or hanging binaries. Delivery is designed so completed work is
-never lost and restarts are safe:
+preemptions, or hanging binaries. Core `benchx` does not yet implement restarts
+itself — resuming an interrupted run is orthogonal to CI and equally useful for
+long local runs (such as multi-binary suites in the Arrow/`archery` use case),
+and currently lives in the outer workbench layer. For CI workbenches, combining
+unit-level restarts with durable remote staging ensures completed work is never
+lost and restarts are safe:
 
 1. **Unit-level incremental staging.** Each unit's raw result documents and
    work orders are uploaded to durable staging (such as object storage) as soon
@@ -214,10 +221,17 @@ enforce three boundaries:
      credentials to modify or delete compacted store history, push to git
      repositories, or administer CI runners.
 3. **Secret hygiene.** The runner records only allowlisted environment
-   variables (`benchmark-environments.md` §3.1) so CI tokens are never swept
-   into results. Provisioning scripts and target providers must never place
-   secrets in declared provenance (`how_built`, `activation`, or
-   `.benchx/setup.json`).
+   variables (`benchmark-environments.md` §3.1) rather than dumping the full
+   process environment, so CI tokens (e.g. `AWS_TOKEN`, GitHub tokens) are
+   never swept into results. The current allowlist mechanism in `benchx` is
+   still early and ad hoc (a small built-in default covering thread, device,
+   and loader variables such as `OMP_NUM_THREADS`, plus adapter additions and
+   `$BENCHX_ENV_ALLOWLIST`); resolving the tension between excluding secrets
+   and recording execution-shaping variables calls for a documented,
+   configurable "safe to record/echo" allowlist (e.g. in `benchx.conf.json`).
+   Provisioning scripts and target providers must never place secrets in
+   declared provenance (`how_built`, `activation`, or declared setup/config
+   facts).
 
 ## 7. Packaging and repository boundaries
 
@@ -267,14 +281,31 @@ deployments without changing benchx itself:
 ## 10. Open questions
 
 1. **Reusable CLI helpers vs. deployment scripts:** Should core `benchx` ship a
-   thin cloud-agnostic helper for the unit-budget loop and attempt manifest, or
-   should CI workbenches stay small deployment-side scripts calling `bx bench`,
-   `bx run`, and `bx ingest`?
-2. **Attempt and staging manifest schema:** Should the staging layout and
-   attempt record (units expected, units completed, provider failure log,
-   status derivation) become a versioned benchx schema, or remain a convention
-   of object-storage deployments?
+   thin cloud-agnostic helper for resumable unit execution (unit-budget loop,
+   restarts, and attempt manifest), or should CI workbenches stay small
+   deployment-side scripts calling `bx bench`, `bx run`, and `bx ingest`?
+   *Current leaning:* start simple with deployment-side scripts and let real
+   usage guide what (such as restart support, which is also useful locally) is
+   worth moving into core `benchx`.
+2. **Attempt and staging manifest schema vs. usage guides:** Should the staging
+   layout and attempt record (units expected, units completed, provider
+   failure log, status derivation) become a versioned benchx schema, or remain
+   a convention documented in usage guides? *Current leaning:* start with
+   usage guides for concrete setups; once at least two CI setups exist,
+   extract what turns out to be genuinely reusable versus system-specific.
 3. **Cross-revision environments in PR comparison mode:** When baseline and
    contender revisions require different dependency sets on an ephemeral
-   instance, how should a CI workbench budget setup/build time against
-   measurement rounds?
+   instance, the setup takes the cross-environment shape of
+   [UC-04](../use-cases/UC-04-cross-env.md) (cf. the
+   [`pandas-asv`](https://github.com/benchx-dev/benchx_examples/tree/main/examples/pandas-asv)
+   example, which prepares both environments up front and alternates `bx bench`
+   rounds under a shared `--run-key`). What remains open for CI is how a CI
+   workbench should budget the setup/build cost of two distinct environments
+   against measurement rounds within a fixed job budget, and how to surface
+   cases where code and dependencies vary together.
+4. **Environment-variable allowlist:** How should `benchx` evolve its
+   currently ad hoc allowlist (`benchmark-environments.md` §3.1) into a
+   documented, configurable "safe to record/echo" list (e.g. in
+   `benchx.conf.json`) that keeps secrets such as `AWS_TOKEN` out of results
+   while reliably capturing execution-shaping variables such as
+   `OMP_NUM_THREADS`?
