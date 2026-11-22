@@ -1,4 +1,4 @@
-"""`-q` and `-qq` on a run, and the run's report in the log (logging_plan.md §4: the console marker,
+"""`-q` and `-qq` on a run, and the run's report in the log (the console marker,
 extended to stdout). Google Benchmark runs against the fake binary, so these run anywhere."""
 
 import json
@@ -98,7 +98,7 @@ def test_the_start_line_is_said_once_with_v_and_is_in_the_log_whatever_the_termi
 
 
 def test_a_failure_with_no_message_is_one_line_when_the_table_is_hidden(build, capsys, monkeypatch):
-    monkeypatch.setattr(bench_mod, "failures", lambda rows: "")  # the status column was all there was
+    monkeypatch.setattr(bench_mod, "said", lambda document: None)  # the status column was all there was
     one_line = r"\d+ of \d+ cases not measured"
     _, out, _ = bench(build, capsys, "-qq")
     assert re.fullmatch(one_line + "\n", out)
@@ -194,3 +194,56 @@ def test_the_total_of_rounds_is_for_the_start_line_only(clean, tmp, capsys):
     bench(clean, capsys, "--round", "1/5", "--slot", "3", "--no-ingest")
     order = json.loads(next((tmp / "results" / "r1" / "orders").glob("order-0003.json")).read_text())
     assert order["round"] == 1 and order["slot"] == 3 and "rounds" not in order
+
+
+# --- the cases that were not measured, which `bx run` says as `bx bench` does
+
+def row(case, status, message=None):
+    return {"case": case, "status": status, "message": message}
+
+
+def report(rows, verbosity):
+    log.start_console(verbosity)
+    try:
+        cli._report_unmeasured(rows)
+    finally:
+        log.stop()
+
+
+def test_bx_run_reports_the_cases_that_were_not_measured_at_every_verbosity(build, tmp, capsys):
+    bench(build, capsys, "--no-ingest", "--out", str(tmp / "o"))
+    order = next((tmp / "o").rglob("orders/order*.json"))
+    assert cli.main(["run", str(order), "--out", str(tmp / "o1"), "--no-ingest", "-qq"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "not measured (2)" and "BM_Broken: " in out  # it was silent before
+    text = (tmp / "o1" / "bx.log").read_text()
+    assert re.search(r" WARNING not measured \(2\)", text)
+    assert re.search(r" INFO end: ok \(exit 0\), [\d.]+ s, 1 of \d+ cases not measured", text)  # the footer says so
+
+
+def test_a_run_whose_only_messages_are_skips_reports_them_as_expected_not_as_a_warning(repo, tmp, capsys):
+    skipping = make_build(tmp / "skipping", repo["wt-head"], cases(), skip=["BM_Skipped"])
+    code, out, _ = bench(skipping, capsys)
+    assert code == cli.EXIT_OK and "not measured (1)\n  BM_Skipped: " in out  # the default terminal shows it
+    code, out, _ = bench(skipping, capsys, "-q", key="r2")
+    assert "not measured" not in out  # nothing failed: it goes with the table, which -q hides
+    code, out, err = bench(skipping, capsys, "-qq", key="r3")
+    assert (out, err) == ("", "")
+    text = "\n".join(log_of(tmp, "r3"))
+    assert " INFO not measured (1)" in text and " WARNING not measured" not in text
+    assert "cases not measured" not in text  # a skip is not an unmeasured case
+
+
+def test_an_error_that_said_nothing_is_counted_when_a_skip_that_did_speak_is_what_the_table_has(capsys):
+    rows = [row("a", "success"), row("b", "skipped", "no GPU"), row("c", "error (harness.error)")]
+    report(rows, -1)  # -q: the table and the skip's message are hidden, and nothing names `c`
+    assert capsys.readouterr().out == "1 of 3 cases not measured\n"
+    report(rows, 0)  # the default terminal shows the skip, and the table (the caller's) shows `c`
+    out = capsys.readouterr().out
+    assert "b: no GPU" in out and "cases not measured" not in out
+
+
+def test_an_error_that_said_nothing_is_counted_beside_one_that_did(capsys):
+    rows = [row("a", "success"), row("b", "error (harness.error)", "boom"), row("c", "error (harness.error)")]
+    report(rows, -2)
+    assert capsys.readouterr().out == "not measured (1)\n  b: boom\n2 of 3 cases not measured\n"

@@ -109,8 +109,8 @@ with a footer: `end: ok (exit 0), 41 s`. The word is `ok`, `invalid` (exit 1), `
 (exit 2), `crashed` or `interrupted` (Ctrl-C); a log that ends without a footer is the
 trace of a process that was killed (`SIGTERM`, `SIGHUP` or `SIGKILL`). A refusal for a bad
 flag or value leaves no folder; a run refused later, by the session, leaves `RUN_KEY/`
-holding only `bx.log`, which says why. What
-`bx` prints to the terminal does not change: the log is the full record, and `-v` shows its
+holding only `bx.log`, which says why. At the default
+verbosity the terminal shows what `bx` printed before there was a log: the log is the full record, and `-v` shows its
 INFO records on the terminal (`-vv` DEBUG too), `-q` only warnings and errors, `-qq` only
 errors (`$BENCHX_VERBOSE` sets it: -2 or more). A `bx bench` call starts with a line saying what
 it measures and where it sits (`measuring np_mean.py on @numpy (round 1/5, slot 3)`), and `bx run`
@@ -118,7 +118,9 @@ with one naming the order; `-q` keeps it, `-qq` does not. What `bx bench` and `b
 stdout when they finish, the table of results, the cases that were not measured and the result
 line, is in the log as well, a line a record, and `-q` and `-qq` hide it by tiers: `-q` leaves
 the not-measured section and the result line (`N result(s) -> DIR`), `-qq` only the
-not-measured section (a failed case does not change the exit status, so it must not vanish). A
+not-measured section (a failed case does not change the exit status, so it must not vanish; a case that failed
+without a message is counted on a line that both keep, and a case the harness skipped is expected, so what it
+said goes with the table). A
 run that measured everything is silent at `-qq`. The ingest counts that follow a run
 (`STORE: ingested 12, duplicate 0`) are a progress message on stderr, like `precision:`: shown
 by default and with `-v`, not with `-q`. `bx ingest`, `bx compare`, the queries and everything

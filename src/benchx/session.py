@@ -326,7 +326,7 @@ def _refuse_unknown_tree(side: dict, name: str | None = None) -> None:
 
 def _note_local_only(progress, sides) -> None:
     """Say before measuring which (name, side) pairs are not clean: the comparison will be local-only.
-    The messages are INFO, not WARNING: comparing uncommitted work is the expected case (logging_plan.md §4)."""
+    The messages are INFO, not WARNING: comparing uncommitted work is the expected case."""
     for name, side in sides:
         for what, state in (("tree", side["identity"]["dirty"]),
                             ("benchmark file", side["benchmark_dirty"] if side["benchmark"] else "clean")):

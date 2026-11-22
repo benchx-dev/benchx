@@ -133,18 +133,22 @@ measured tree they sit in, so a run's own output does not mark it dirty. The ear
 `.benchx/setup.json` (declared environment facts, §3) is a separate file.
 `schemas/config/0.1.0/examples` has recommended settings for each harness.
 
-**Output channels and the log.** Stdout carries a command's answer (tables, `--json`, the store
-path and the ingest counts, `bx history`'s caveat) whatever the logging settings. Stderr carries
-what the user needs to see: progress, refusals, rejections. Both stay as they were. Beside them
+**Output channels and the log.** Stdout carries a command's answer: a query's tables and `--json`,
+`bx history`'s caveat and the ingest counts of `bx ingest` at every verbosity, and what a measuring command
+reports when it ends (`bx bench`'s table, the cases that were not measured and the result line), which `-q` and
+`-qq` hide by tiers. Stderr carries what the user needs to see: progress (a run's start line, the store path and
+the ingest counts that follow it), refusals, rejections. At the default verbosity both are what they were before
+the log. Beside them
 `bx` keeps a log through the standard library's `logging` (`benchx/log.py`): every module logs to
 `benchx.<module>`, the package installs only a `NullHandler`, and `cli.main` installs the
 handlers. What `bx` shows on stderr is emitted once, as a record marked `console=True`, and the
 console handler writes the bare message, so the default terminal output is byte for byte what
 `print` wrote; `-v` and `-vv` also show the records that are not marked. What a run reports on
-stdout when it ends (`bx bench`'s table and counts) is such a record too, marked `stdout=True`: the
-stdout handler writes it unless `-q` or `-qq` hides it, and the log keeps it. The file handler appends
+stdout when it ends (`bx bench`'s table, not-measured section and result line) is such a record too, marked
+`stdout=True`: the stdout handler writes it unless `-q` or `-qq` hides it, and the log keeps it. The file handler
+appends
 every record at `--log-level` (DEBUG by default) in one line, `UTC-timestamp pid logger LEVEL
-message`, with a header and a footer for each invocation (`logging_plan.md` §3, §4). The default
+message`, with a header and a footer for each invocation. The default
 file is `bx.log` in the run's output folder, which the CLI now settles, with the run key, before
 it resolves any target (`session.run_directory`); a command without an output folder logs only
 when a flag asks. The log makes no claim to protect secrets, since it records the command as

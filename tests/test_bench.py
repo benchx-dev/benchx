@@ -215,7 +215,7 @@ def test_bench_places_calls_in_a_session(tree):
     (["--run-key", "S", "--slot", "-1"], "from 0"),
     (["--run-key", "S", "--slot", "0", "--round", "-1"], "from 0"),
     (["--run-key", "S", "--slot", "0", "--round", "5/5"], "numbered 0 to 4"),
-    (["--run-key", "S", "--slot", "0", "--round", "0/0"], "numbered 0 to -1"),
+    (["--run-key", "S", "--slot", "0", "--round", "0/0"], "at least 1 round, not 0"),
     (["--run-key", "S", "--slot", "0", "--round", "a"], "R/N"),
     (["--run-key", "S", "--slot", "0", "--round", "1/x"], "R/N"),
 ])

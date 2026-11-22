@@ -122,3 +122,32 @@ def test_pyperf_is_given_verbose_and_says_more(tmp):
     loud = next((tmp / "results" / "loud").glob("artifacts/*/0000.stdout")).read_text()
     assert len(loud.splitlines()) > len(quiet.splitlines()) and "- value 1:" in loud and "- value 1:" not in quiet
     assert " --verbose " in (tmp / "results" / "loud" / "bx.log").read_text()
+
+
+def test_verbose_in_the_environment_past_two_is_the_environments_and_does_not_pose_as_a_flag(build, tmp, monkeypatch):
+    monkeypatch.setenv("BENCHX_VERBOSE", "3")
+    assert bench(build) == cli.EXIT_OK
+    assert order_of(tmp)["harness_verbosity"] == 1
+    assert " DEBUG setting harness verbosity: 1 (environment BENCHX_VERBOSE)" in log_of(tmp)
+
+
+def test_an_explicit_harness_verbosity_in_the_environment_beats_verbose_in_the_environment(build, tmp, monkeypatch):
+    monkeypatch.setenv("BENCHX_VERBOSE", "4")
+    monkeypatch.setenv("BENCHX_HARNESS_VERBOSITY", "0")
+    assert bench(build) == cli.EXIT_OK
+    assert "harness_verbosity" not in order_of(tmp)  # 0: nothing more, though BENCHX_VERBOSE=4 says 2
+    assert " DEBUG setting harness verbosity: 0 (environment BENCHX_HARNESS_VERBOSITY)" in log_of(tmp)
+
+
+def test_the_flags_still_beat_the_environment(build, tmp, monkeypatch):
+    monkeypatch.setenv("BENCHX_HARNESS_VERBOSITY", "0")
+    assert bench(build, "-vvv") == cli.EXIT_OK
+    assert order_of(tmp)["harness_verbosity"] == 1
+    assert " DEBUG setting harness verbosity: 1 (flag: -v past -vv)" in log_of(tmp)
+
+
+def test_config_show_refuses_a_bad_harness_verbosity_with_nothing_half_printed(tmp, monkeypatch, capsys):
+    monkeypatch.setenv("BENCHX_HARNESS_VERBOSITY", "loud")
+    assert cli.main(["config", "show"]) == cli.EXIT_REFUSED
+    seen = capsys.readouterr()
+    assert seen.out == "" and "BENCHX_HARNESS_VERBOSITY=loud: not a whole number from 0" in seen.err

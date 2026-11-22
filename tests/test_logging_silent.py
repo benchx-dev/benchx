@@ -1,14 +1,16 @@
-"""What the log says about the decisions that used to be silent (logging_plan.md, Phase 3): the
+"""What the log says about the decisions that used to be silent: the
 comparison's verdicts and what it dropped, a read-mode comparison in the run's log, the tree's identity,
 the store."""
 
 import logging
 import os
 import re
+from pathlib import Path
 
 import pytest
 
-from benchx import cli, compare, snapshot
+from benchx import cli, compare, runner, snapshot
+from benchx import session as session_module  # `session` is a fixture here
 from benchx.store import Store
 from conftest import cases, make_build
 from test_comparator import BASE, HEAD
@@ -162,7 +164,7 @@ def test_a_file_that_cannot_be_read_is_a_warning_naming_it(tmp, caplog):
     assert any(level == "WARNING" and str(hidden) in m and "cannot be identified" in m for level, m in records(caplog))
 
 
-def test_a_setup_file_that_is_missing_or_unreadable_is_a_warning_that_names_the_variable_not_the_path(tmp, caplog):
+def test_a_setup_file_that_is_missing_or_unreadable_is_a_warning_that_names_the_variable_and_the_path(tmp, caplog):
     snapshot.log.configure(False)
     with caplog.at_level(logging.DEBUG, logger="benchx"):
         assert snapshot.setup_facts(tmp, {"BENCHX_SETUP_FILE": str(tmp / "secret-place.json")}) == (None, None)
@@ -170,9 +172,10 @@ def test_a_setup_file_that_is_missing_or_unreadable_is_a_warning_that_names_the_
         broken.write_text("[1, 2]")
         assert snapshot.setup_facts(tmp, {"BENCHX_SETUP_FILE": str(broken)}) == (None, "collector-failed")
     messages = [m for level, m in records(caplog) if level == "WARNING"]
-    assert any(m.startswith("BENCHX_SETUP_FILE names a file that does not exist") for m in messages)
-    assert any("the file named by BENCHX_SETUP_FILE" in m and "not an object" in m for m in messages)
-    assert not any("secret-place" in m or str(broken) in m for m in messages)  # rule 3: not the value
+    # BENCHX_SETUP_FILE is a benchx control variable: its value is logged here as cli._log_environment logs it
+    assert any(m.startswith("BENCHX_SETUP_FILE names a file that does not exist") and "secret-place" in m
+               for m in messages)
+    assert any(str(broken) in m and "not an object" in m for m in messages)
 
 
 def test_the_store_says_what_it_swept_what_it_refused_and_what_it_read(session, tmp, caplog, capsys):
@@ -323,3 +326,74 @@ def test_the_overlap_of_two_sets_of_facts_names_paths_never_values():
     base = {"os": {"family": "Linux", "kernel": "6"}, "process": {"environment": {"A": "1"}}}
     facts = {"os": {"family": "Linux"}, "process": {"environment": {"A": "2"}}, "cpu": {"x": 1}}
     assert runner._overlap(base, facts) == ["/process/environment/A"]
+
+
+# --- review: what is the same in every order is INFO once per distinct thing, not once per command
+
+def identity(path, dirty="dirty"):
+    return {"revision": "a" * 40, "tree": "t" * 40, "dirty": dirty, "changes": ["M a.py"], "path": path}
+
+
+def test_each_distinct_interpreter_and_dirty_tree_is_info_once_and_the_repeats_are_debug(caplog):
+    snapshot.log.configure(False)  # a command's state: nothing spent yet
+    sides = [("/py/base", "/src/base"), ("/py/head", "/src/head")]
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        for python, path in sides * 3:  # three rounds of a comparison whose sides differ in both
+            runner._log_identity({"python": python}, identity(path), None, Path(path))
+    messages = records(caplog)
+    ran = [(level, m) for level, m in messages if m.startswith("the benchmarks run under")]
+    dirty = [(level, m) for level, m in messages if m.startswith("the subject tree is dirty")]
+    assert [level for level, _ in ran] == ["INFO", "INFO"] + ["DEBUG"] * 4
+    assert [m.rsplit(" ", 1)[1] for _, m in ran[:2]] == ["/py/base", "/py/head"]
+    assert [level for level, _ in dirty] == ["INFO", "INFO"] + ["DEBUG"] * 4
+
+
+def test_a_dirty_benchmark_in_git_is_not_said_to_be_outside_git(caplog):
+    snapshot.log.configure(False)
+    suite = {"uri": "file:///suite", "type": "git", "revision": "b" * 40, "tree": "t" * 40, "dirty": "dirty"}
+    with caplog.at_level(logging.INFO, logger="benchx"):
+        runner._log_identity({}, identity("/s", "clean"), suite, "/s")
+        runner._log_identity({}, identity("/s", "clean"), {**suite, "type": "directory", "uri": "file:///other"}, "/s")
+    said = [m for level, m in records(caplog) if m.startswith("the benchmark tree is dirty")]
+    assert len(said) == 2
+    assert "not under git" not in said[0] and said[0].startswith("the benchmark tree is dirty; every result carries")
+    assert "(not under git: a directory of files is always dirty)" in said[1]
+
+
+def test_a_side_with_one_noisy_condition_does_not_spend_the_warning_of_a_side_with_the_other(repo, tmp, caplog):
+    scaling = make_build(tmp / "scaling", repo["wt-base"], cases(), scaling=True)
+    debug = make_build(tmp / "debug", repo["wt-head"], cases(), build_type="debug")
+    store = Store(tmp / "store.parquet")
+    with caplog.at_level(logging.WARNING, logger="benchx"):
+        session_module.compare_targets(
+            f"{scaling}:{repo['wt-base']}", f"{debug}:{repo['wt-head']}", profile="revisions",
+            adapter="google-benchmark", suite="demo-bench", rounds=2, store=store, run_key="n1", out=tmp / "out")
+    said = [m for level, m in records(caplog, logging.WARNING) if "the harness's own context says" in m]
+    assert len(said) == 2  # once for each condition, however many orders and cases
+    assert sum("CPU frequency scaling is enabled" in m for m in said) == 1
+    assert sum("the benchmark library is a debug build" in m for m in said) == 1
+
+
+# --- review: the summary of a comparison
+
+def test_a_missing_unit_makes_the_summary_a_warning(caplog):
+    docs = [d for d in run_of(rounds=3) if not (d["revision"]["key"] == HEAD and
+                                                d["coordinates"]["workload"]["parameters"]["dtype"] == "'int16'")]
+    with caplog.at_level(logging.DEBUG, logger="benchx"):
+        doc = evaluate(docs)
+    assert doc["missing"] and not doc["failed_invariants"] and not doc["exclusions"]
+    summary = [(level, m) for level, m in records(caplog) if m.startswith("compared run")]
+    assert summary[0][0] == "WARNING" and re.search(r"; [1-9]\d* missing, 0 invariant", summary[0][1])
+
+
+def test_the_names_of_the_sides_are_cut_for_revisions_and_whole_for_anything_else(caplog):
+    docs = run_of()
+    doc = evaluate(docs)
+    doc["baseline"], doc["contender"] = "numpy-2.1.0-openblas", "numpy-2.1.0-mkl"
+    for profile, baseline, contender in (("revisions", "numpy-2.1.0-", "numpy-2.1.0-"),
+                                         ("environments", "numpy-2.1.0-openblas", "numpy-2.1.0-mkl")):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="benchx"):
+            compare._log_outcome(doc, docs, run_key="run", profile=profile, baseline=BASE, k=3.0, min_rounds=3)
+        summary = next(m for level, m in records(caplog) if m.startswith("compared run"))
+        assert f"baseline {baseline}, contender {contender}:" in summary

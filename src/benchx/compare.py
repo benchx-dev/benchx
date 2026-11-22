@@ -201,9 +201,13 @@ def _log_outcome(doc, documents, *, run_key, profile, baseline, k, min_rounds) -
                     ", ".join(facts), attempts)
     by_verdict = collections.Counter(u["verdict"] for u in doc["units"])
     indeterminate = collections.Counter(u.get("reason", "-") for u in doc["units"] if u["verdict"] == "indeterminate")
-    logger.log(logging.WARNING if indeterminate or doc["exclusions"] or doc["failed_invariants"] else logging.INFO,
+    def side(name):  # a revision is a commit id, cut to read; an environment or a variant is a name, kept whole
+        text = str(name)
+        return text[:12] if profile == "revisions" else text
+    logger.log(logging.WARNING if indeterminate or doc["exclusions"] or doc["failed_invariants"] or doc["missing"]
+               else logging.INFO,
                "compared run %s, profile %s, baseline %s, contender %s: %d unit(s)%s%s; %d missing, %d invariant(s) "
-               "failed, %d excluded", run_key, profile, str(doc["baseline"])[:12], str(doc.get("contender"))[:12],
+               "failed, %d excluded", run_key, profile, side(doc["baseline"]), side(doc.get("contender")),
                len(doc["units"]), "".join(f", {n} {verdict}" for verdict, n in sorted(by_verdict.items())),
                f" (indeterminate: {', '.join(f'{r} {n}' for r, n in sorted(indeterminate.items()))})" if indeterminate else "",
                len(doc["missing"]), len(doc["failed_invariants"]), len(doc["exclusions"]))

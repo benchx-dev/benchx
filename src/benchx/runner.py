@@ -185,7 +185,7 @@ def _case_line(results, warnings, run_, duration, load, details=None) -> tuple[i
     """The case's line: its statuses with their reasons (the message the producer gave, as `bx bench`
     and `bx compare` show it), the warnings that differ from case to case, the exit status, the
     duration and the load average. The level, and whether the case did badly: a status that is not
-    `success` or `skipped`, or a non-zero exit (R35), or a warning that says the environment recorded may
+    `success` or `skipped`, or a non-zero exit, or a warning that says the environment recorded may
     not be the one the workers had."""
     statuses = []
     for status, reason, document in results:
@@ -209,12 +209,13 @@ def _case_line(results, warnings, run_, duration, load, details=None) -> tuple[i
 
 def _log_identity(runnable, source, benchmark, source_dir):
     """What each order found out about where it runs and what it measures. What is the same in every
-    order of a command (the interpreter, a dirty tree) is INFO the first time and DEBUG after."""
+    order of a command (the interpreter, a dirty tree) is INFO the first time and DEBUG after; the sides of a
+    comparison may differ in those, so each distinct one is INFO once."""
     def level(key):
         return logging.INFO if log.once(key) else logging.DEBUG
     python = runnable.get("python") if isinstance(runnable, dict) else None
     if python:
-        logger.log(level("interpreter"), "the benchmarks run under %s", python)
+        logger.log(level(("interpreter", str(python))), "the benchmarks run under %s", python)
     snapshot.note_identity_fallback(source)
     method = "directory-hash" if source["revision"].startswith("directory-") else "git"
     logger.debug("subject: %s, found by %s: revision %s, tree %s, %s", source_dir, method, source["revision"][:12],
@@ -222,14 +223,22 @@ def _log_identity(runnable, source, benchmark, source_dir):
     if benchmark:
         logger.debug("benchmark: %s, %s: tree %s, %s", benchmark["uri"], benchmark["type"],
                      (benchmark.get("tree") or "none")[:12], benchmark["dirty"])
-    for what, state, changes in (("subject", source["dirty"], source.get("changes")),
-                                 ("benchmark", benchmark["dirty"] if benchmark else None, None)):
+    for what, state, changes, where, in_git in (
+            ("subject", source["dirty"], source.get("changes"), source_dir, method == "git"),
+            ("benchmark", benchmark["dirty"] if benchmark else None, None, benchmark["uri"] if benchmark else None,
+             bool(benchmark) and benchmark["type"] == "git")):
         if state == "dirty":
             shown = (changes or [])[:10]
             more = f", and {len(changes) - len(shown)} more" if changes and len(changes) > len(shown) else ""
-            why = f": {'; '.join(shown)}{more}" if shown else " (not under git: a directory of files is always dirty)"
+            if shown:
+                why = f": {'; '.join(shown)}{more}"
+            elif in_git:  # a repository whose changes were not listed (the benchmark's are not)
+                why = ""
+            else:
+                why = " (not under git: a directory of files is always dirty)"
             code = "dirty-subject-tree" if what == "subject" else "dirty-benchmark-tree"
-            logger.log(level(f"dirty-{what}"), "the %s tree is dirty%s; every result carries %s", what, why, code)
+            logger.log(level(("dirty", what, str(where))), "the %s tree is dirty%s; every result carries %s",
+                       what, why, code)
         elif state == "unknown":  # accepted here, so a result will say nothing about it: say it now
             logger.warning("the %s tree's dirty state is unknown (%s): its results carry no tree id and no warning",
                            what, source.get("why_unknown", "git could not say"))
@@ -365,7 +374,7 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             stem = f"{index:04d}"
             native_path = artifacts_dir / f"{stem}.native.json"
             label = f"case {index + 1}/{len(cases)} {case}"
-            # before the clock starts: nothing is logged while a case runs (plan §7, rule 5)
+            # before the clock starts: nothing is logged while a case runs
             logger.info("%s: starting, limit %g s", label, order["timeouts"]["case_s"])
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("%s: workload %s; %s", label, workloads[index][0],
@@ -388,10 +397,13 @@ def run(order_path, out_dir, allow_collectors=False) -> dict:
             native_system, native_info = adapter.context_facts(run_["native"])
             scaling = native_system.get("cpu", {}).get("scaling_enabled") is True
             debug_build = native_info.get("library_build_type") == "debug"
-            if (scaling or debug_build) and log.once("noisy-context"):  # recorded in the result, flagged nowhere else
-                logger.warning("%s: the harness's own context says %s", label, " and ".join(
-                    text for flag, text in ((scaling, "CPU frequency scaling is enabled"),
-                                            (debug_build, "the benchmark library is a debug build")) if flag))
+            # recorded in the result, flagged nowhere else; each condition once, so that a side with one does not
+            # spend the warning of a side with the other
+            noisy = [text for flag, key, text in ((scaling, "scaling", "CPU frequency scaling is enabled"),
+                                                  (debug_build, "debug", "the benchmark library is a debug build"))
+                     if flag and log.once(("noisy-context", key))]
+            if noisy:
+                logger.warning("%s: the harness's own context says %s", label, " and ".join(noisy))
             case_system, case_warnings = snapshot.merge(system, native_system), []
             if hasattr(adapter, "observed_environment"):
                 facts, case_warnings = adapter.observed_environment(run_, case, env_names)

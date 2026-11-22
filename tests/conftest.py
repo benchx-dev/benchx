@@ -126,6 +126,7 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.delenv("BENCHX_SETUP_FILE", raising=False)
     monkeypatch.delenv("BENCHX_HOME", raising=False)
     monkeypatch.delenv("BENCHX_VERBOSE", raising=False)
+    monkeypatch.delenv("BENCHX_HARNESS_VERBOSITY", raising=False)
     monkeypatch.delenv("BENCHX_LOG_LEVEL", raising=False)
     monkeypatch.chdir(tmp_path)
     snapshot.ignore()

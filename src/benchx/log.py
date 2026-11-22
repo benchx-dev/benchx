@@ -1,7 +1,5 @@
 """benchx's diagnostics: what `bx` decided, warned about and failed at, kept in a log.
 
-    logging_plan.md
-
 Every module logs through the standard library: `log = logging.getLogger(__name__)`, so the
 logger names are `benchx.runner`, `benchx.cli`, and so on. `benchx/__init__.py` gives the
 `benchx` logger a `NullHandler`: a library caller sees nothing unless it configures logging
@@ -17,9 +15,10 @@ itself. The `bx` command installs two kinds of handler (cli.main):
   with) is shown on stderr at `-q` as well;
 * a file, or with `--log` stderr, for the whole log (`configure`), in one line format.
 
-Nothing here changes what a command prints at the default verbosity, what it stores, or its
-exit status (plan §7, rule 1). Query answers and machine-readable output (`--json`, `bx
-head`, `bx target`) stay `print`: they are not records.
+At the default verbosity the terminal shows what `bx` showed before there was a log, and the log changes neither
+what a command stores nor its exit status. `-q` and `-qq` hide the stdout of a run that ended (the table, and by tier
+the rest of its report); they are the only options that take anything off it. Query answers and machine-readable
+output (`--json`, `bx head`, `bx target`) stay `print`: they are not records.
 """
 
 import datetime
@@ -61,7 +60,7 @@ class _Stderr(logging.StreamHandler):
 class _Full(logging.Formatter):
     """`2026-11-02T22:36:12.345Z 48211 benchx.runner INFO message`. A message of several lines
     keeps the prefix on the first and indents the others, so that a reader that goes by line
-    (`grep` for a pid, `sort`) loses none of it (plan R18)."""
+    (`grep` for a pid, `sort`) loses none of it."""
 
     def __init__(self):
         super().__init__(_FORMAT)
@@ -172,7 +171,9 @@ def _apply_level() -> None:
         wanted.append(logging.INFO)  # what `out` says goes by its tier, not its level
     if _state.destination is not None:
         wanted.append(_state.level)
-    _logger().setLevel(min(wanted) if wanted else logging.WARNING)
+    # With nothing to serve the logger defers to the root's, which is WARNING unless a library caller has set
+    # it: a fixed WARNING here would outlive `stop()` and hide the records from a caller that logs at INFO.
+    _logger().setLevel(min(wanted) if wanted else logging.NOTSET)
 
 
 def _remove(handler) -> None:
@@ -249,7 +250,7 @@ def configure(setting, *, level: int = logging.DEBUG, argv=None) -> None:
     _state.configured = False
     _state.degraded = []
     _state.once = set()
-    earlier, shown = (_state.buffer.records if _state.buffer else []), _state.console is not None
+    earlier = _state.buffer.records if _state.buffer else []
     if _state.buffer is not None:  # from here on the destination, if any, takes the records
         _remove(_state.buffer)
         _state.buffer = None
@@ -285,7 +286,10 @@ def stop() -> None:
     _remove(_state.destination)
     _remove(_state.buffer)
     _state.console = _state.stdout = _state.destination = _state.buffer = None
-    _state.configured = False
+    # And what a command left in the state, so that a library call after `cli.main` starts from nothing (`once`,
+    # `degraded` and `quiet` are read without `configure`).
+    _state.configured, _state.verbosity, _state.started = False, 0, None
+    _state.degraded, _state.once = [], set()
     _apply_level()
 
 
@@ -364,7 +368,7 @@ def as_text(data) -> str:
 def command(args, *, scripts=None, temporary=()) -> str:
     """A command line as the log shows it, pastable into a shell (`shlex.join`). Inline code
     after `-c` that is one of `scripts` ({name: text}) is shortened to `<NAME: N lines>`; paths
-    in `temporary` are marked as gone once the call returns. No environment is added (rule 3)."""
+    in `temporary` are marked as gone once the call returns. No environment is added: the inherited one is not logged."""
     shown = [str(a) for a in args]
     for i in range(1, len(shown)):
         if shown[i - 1] == "-c":

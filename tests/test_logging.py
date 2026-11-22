@@ -1,4 +1,4 @@
-"""The log: its switch, levels and file, and what `bx` shows beside it (logging_plan.md, Phase 1).
+"""The log: its switch, levels and file, and what `bx` shows beside it.
 
 Google Benchmark runs against the fake binary, so these run anywhere.
 """
@@ -329,7 +329,7 @@ def test_degraded_phrases_end_the_footer_and_are_warnings(tmp):
 
 
 def test_the_logger_passes_only_the_levels_somebody_wants(tmp):
-    """`isEnabledFor(DEBUG)` is false when nothing wants DEBUG, so a record costs nothing (plan R11). Until the
+    """`isEnabledFor(DEBUG)` is false when nothing wants DEBUG, so a record costs nothing. Until the
     log is on, DEBUG is kept: the command's own checks buffer their records for it."""
     benchx = logging.getLogger("benchx")
     try:
@@ -367,3 +367,55 @@ def test_the_log_names_the_config_file_when_there_is_one(build, tmp):
     path = write_config(tmp, adapter={"name": "google-benchmark", "suite": "demo-bench"})
     assert cli.main(["bench", str(build), "--run-key", "g1"]) == cli.EXIT_OK
     assert f" INFO config file: {path}; project root {tmp}; " in log_of(tmp, "g1")
+
+
+# --- review: a refused log path leaves nothing behind; zeros are arguments; stop() leaves no state
+
+@pytest.mark.parametrize("name, message", [("{out}", "is a directory"), ("{out}/sub/bx.log", "cannot open")])
+def test_a_refused_log_path_in_the_output_folder_does_not_create_the_folder(name, message, build, tmp, capsys):
+    assert cli.main(["bench", str(build), *GBENCH, "--out", str(tmp / "o"), "--log-file", name]) == cli.EXIT_REFUSED
+    assert message in capsys.readouterr().err
+    assert not (tmp / "o").exists()
+
+
+def test_a_log_file_directly_in_the_output_folder_creates_it(build, tmp):
+    assert cli.main(["bench", str(build), *GBENCH, "--out", str(tmp / "o"), "--log-file", "{out}/mine.log",
+                     "--no-ingest"]) == cli.EXIT_OK
+    assert " INFO start: benchx " in (tmp / "o" / "mine.log").read_text()
+
+
+def test_arguments_given_as_zero_are_in_the_arguments_as_parsed(build, tmp):
+    assert bench(build, "--round", "0", "--slot", "0", "-vvv", "--no-ingest", key="z1") == cli.EXIT_OK
+    parsed = next(l for l in log_of(tmp, "z1").splitlines() if " DEBUG arguments as parsed: " in l)
+    assert "slot=0" in parsed and "round='0'" in parsed
+    assert "verbose_extra" not in parsed and "verbosity" not in parsed  # computed, not given
+
+
+def test_stop_leaves_no_state_for_a_library_call_that_follows():
+    log.start_console(-2)
+    log.configure(False)
+    assert log.once("k") and not log.once("k")
+    log.degraded("something undone")
+    log.stop()
+    assert log.quiet() == 0 and log.once("k")  # the key was forgotten, as it was for a fresh process
+    assert log._state.degraded == [] and log._state.started is None
+
+
+def test_stop_hands_the_logger_back_to_the_root_not_to_a_fixed_level():
+    benchx, root = logging.getLogger("benchx"), logging.getLogger()
+    log.start_console(0)
+    log.stop()
+    assert benchx.level == logging.NOTSET and not benchx.isEnabledFor(logging.INFO)  # the root's WARNING
+    earlier = root.level
+    root.setLevel(logging.INFO)  # a library caller that logs at INFO sees benchx's records
+    try:
+        assert benchx.isEnabledFor(logging.INFO) and not benchx.isEnabledFor(logging.DEBUG)
+    finally:
+        root.setLevel(earlier)
+
+
+def test_a_refused_comparison_does_not_print_the_store_path(tmp, capsys):
+    assert cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3"]) \
+        == cli.EXIT_REFUSED  # no adapter
+    err = capsys.readouterr().err
+    assert "--adapter is required" in err and "store.parquet" not in err

@@ -1,5 +1,5 @@
-"""What the log says about a run: the order, each case, the files, the harness output, the end
-(logging_plan.md, Phase 2). Google Benchmark runs against the fake binary, so these run anywhere."""
+"""What the log says about a run: the order, each case, the files, the harness output, the end.
+Google Benchmark runs against the fake binary, so these run anywhere."""
 
 import logging
 import os

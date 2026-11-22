@@ -57,7 +57,7 @@ from . import benchx_params, pyperf
 from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
                    note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
 
-# asv's skip warnings are shown to the user, as `bx` shows its other messages (plan §4): the one
+# asv's skip warnings are shown to the user, as `bx` shows its other messages: the one
 # library module that makes console messages, until `list_cases` returns them as data.
 say = log.console(__name__)
 logger = logging.getLogger(__name__)
