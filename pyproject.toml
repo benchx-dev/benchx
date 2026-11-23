@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 [project.urls]
-Documentation = "https://benchx-dev.github.io/benchx/benchx/"
+Documentation = "https://benchx.dev/benchx/"
 Repository = "https://github.com/benchx-dev/benchx"
 
 [project.optional-dependencies]
