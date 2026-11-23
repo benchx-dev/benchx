@@ -40,6 +40,8 @@ and are exercised by CI:
   (`bx bench` and replaying orders with `bx run`).
 - `examples/numpy-venvs` — cross-environment comparison across two virtual
   environments ([UC-04](use-cases/UC-04-cross-env.md)).
+- `examples/pandas-asv` -- cross-environment comparison run of a specific benchmark
+  from the pandas ASV suite. Also shows how to run existing ASV benchmarks.
 - `examples/arrow/demo/run.sh` — CMake + Google Benchmark walkthrough covering
   comparison profiles on a small C++ suite.
 - `examples/arrow/archery-local` — target provider walkthrough
