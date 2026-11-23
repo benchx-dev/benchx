@@ -76,12 +76,17 @@ def test_a_change_to_a_tracked_file_makes_the_checkout_dirty_with_a_tree_no_comm
     (lambda root: (root / "bench.py").unlink(), " D bench.py"),
     (lambda root: (root / "bench.py").chmod(0o755), " M bench.py"),
     (lambda root: git(root, "mv", "bench.py", "renamed.py"), "R  bench.py -> renamed.py"),
-], ids=["deleted", "mode", "renamed"])
-def test_a_deleted_a_chmodded_and_a_renamed_file_are_changes(checkout, change, status):
+    (lambda root: ((root / "new.py").write_text("z = 1\n"), git(root, "add", "new.py")), "A  new.py"),
+    (lambda root: git(root, "rm", "-q", "--cached", "bench.py"), "D  bench.py"),
+], ids=["deleted", "mode", "renamed", "staged_new", "untracked_by_rm_cached"])
+def test_a_deleted_a_chmodded_a_renamed_and_a_staged_file_are_changes(checkout, change, status):
     change(checkout)
     identity = snapshot.git_identity(checkout)
     assert identity["dirty"] == "dirty" and identity["changes"] == [status]
     assert identity["tree"] != head_tree(checkout)
+    # Committing the change reproduces the id: what is staged is part of the tree, as `git mv` and `git add` leave it.
+    git(checkout, "commit", "-qam", "change")
+    assert git(checkout, "rev-parse", "HEAD^{tree}") == identity["tree"]
 
 
 def test_two_untracked_states_have_one_tree_id_and_two_edits_have_two(checkout):
