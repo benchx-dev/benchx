@@ -74,6 +74,10 @@ bx ingest <dir|file>                     # result files and work orders → the 
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query); dirty ones are marked
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
+bx view [--out DIR] [--serve] [--host 127.0.0.1] [--port 8000] [--open]
+        [--store PATH | --results PATH… | --runs DIR]
+        [--project-file PATH] [--title TITLE] [--repo DIR] [--marts | --no-marts] [--stamp STR]
+                                         # build and serve the static benchmark dashboard (no --out: temp dir + serve)
 
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
@@ -333,6 +337,14 @@ outside the checkout is identified by one file): put it inside the checkout.
   deviation (not asv's `±`); `Change` and `Verdict` are the comparator's verdict (`+`
   regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
   times it), and `Ratio` is After over Before. A text view: not with `--json`.
+- **Views** (`bx view`, `benchx/views/`) derive flat tables (`commits`, `points`, `changes`,
+  `latest`, `movers`) and static JSON view payloads (`landing`, `series`, `sparks`,
+  `history/<suite>`, `commits/<sha>`) in pure Python from the local Parquet store, JSON result
+  files (`--results`, no PyArrow required), or a CI `runs/<sha>/<node>/` directory (`--runs`,
+  with `run.parquet` and `results.parquet`). With no `--out`, `bx view` builds into a temporary
+  directory and serves the bundled static dashboard over local HTTP until Ctrl-C; with `--out DIR`,
+  it writes a deployable static site (and optional Parquet marts under `data/` when `pyarrow` is
+  installed, unless `--no-marts`).
 
 **Stopping a run.** Ctrl-C stops the benchmarks `bx` started, within about a second; pyperf gets the Ctrl-C and stops its worker.
 A second Ctrl-C does not wait. Results already stored

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from typing import get_args
@@ -22,6 +23,7 @@ from . import config as config_mod
 from . import core, harnesses, log, orders, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
+from . import views as views_mod
 from .core.validation import Kind
 from .results import MemoryStore, warning_codes
 
@@ -973,6 +975,107 @@ def cmd_validate(args):
     return EXIT_OK if valid == len(args.files) else EXIT_INVALID
 
 
+def cmd_view(args):
+    """Build static dashboard views and optionally serve them over local HTTP."""
+    if (cfg := _load("view")) is None:
+        return EXIT_REFUSED
+    serve = args.serve or args.out is None
+    if args.open and not serve:
+        say.error("bx view: error: --open goes with serving (omit --out, or pass --serve)")
+        return EXIT_REFUSED
+    if (cfg := _start_logging(cfg, args, None, "view")) is None:
+        return EXIT_REFUSED
+
+    source_kwargs: dict = {}
+    if args.runs is not None:
+        source_kwargs["runs_dir"] = args.runs
+    elif args.results is not None:
+        source_kwargs["results_paths"] = list(args.results)
+    else:
+        source_kwargs["store_path"] = args.store if args.store is not None else cfg.store_path
+
+    if args.marts:
+        write_marts: bool | None = True
+    elif args.no_marts:
+        write_marts = False
+    elif args.out is None:
+        write_marts = False
+    else:
+        write_marts = None
+
+    repo = Path(args.repo) if args.repo is not None else cfg.root
+    build_kwargs = {
+        **source_kwargs,
+        "project_file": Path(args.project_file) if args.project_file else None,
+        "title": args.title,
+        "repo": repo,
+        "write_marts": write_marts,
+        "stamp": args.stamp,
+        "config": cfg,
+    }
+
+    def _run_build(out_dir: Path) -> dict | None:
+        try:
+            return views_mod.build_site(out_dir, **build_kwargs)
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.split(".")[0] == "pyarrow":
+                hint = ""
+                if "store_path" in source_kwargs:
+                    hint = ", or pass --results DIR to build views from JSON results directly"
+                say.error(f"bx view: error: {exc}{hint}")
+                return None
+            raise
+        except views_mod.ViewError as exc:
+            say.error(f"bx view: error: {exc}")
+            return None
+
+    port = 8000 if args.port is None else args.port
+    fallback_port = args.port is None
+
+    def _finish(summary: dict, out_dir: Path) -> int:
+        exit_code = EXIT_OK
+        if summary["outcome"] and summary["outcome"]["rejected"]:
+            exit_code = _report(summary["outcome"])
+        counts = summary["counts"]
+        if args.out is not None:
+            print(
+                f"{counts['points']} result(s), {counts['series']} series, "
+                f"{counts['distinct_commits']} commit(s) -> {summary['out']}"
+            )
+        else:
+            print(
+                f"{counts['points']} result(s), {counts['series']} series, "
+                f"{counts['distinct_commits']} commit(s)"
+            )
+        if serve:
+            try:
+                views_mod.serve_site(
+                    out_dir,
+                    host=args.host,
+                    port=port,
+                    fallback_port=fallback_port,
+                    open_browser=args.open,
+                )
+            except OSError as exc:
+                say.error(f"bx view: error: cannot serve on {args.host}:{port}: {exc}")
+                return EXIT_REFUSED
+        return exit_code
+
+    if args.out is not None:
+        out_dir = Path(args.out)
+        summary = _run_build(out_dir)
+        if summary is None:
+            return EXIT_REFUSED
+        return _finish(summary, out_dir)
+
+    with tempfile.TemporaryDirectory(prefix="benchx-view-") as tmp:
+        out_dir = Path(tmp)
+        summary = _run_build(out_dir)
+        if summary is None:
+            return EXIT_REFUSED
+        return _finish(summary, out_dir)
+
+
 def _add_target_options(parser, command):
     """The options `bx bench` and `bx compare` (measure mode) share: the harness,
     its suite and cases, its precision flags, and where the results go."""
@@ -1175,6 +1278,37 @@ def main(argv=None):
     p.add_argument("--kind", choices=get_args(Kind), default="measurement-result",
                    help="kind of document being checked (default: %(default)s)")
     p.set_defaults(fn=cmd_validate)
+
+    p = sub.add_parser(
+        "view",
+        parents=[options],
+        help="build and serve the static benchmark dashboard",
+        description="Build static dashboard views from the local Parquet store, JSON result files "
+                    "(--results, no PyArrow required), or a runs/<sha>/<node>/ directory (--runs). "
+                    "With no --out, builds into a temporary directory and serves locally until Ctrl-C; "
+                    "with --out DIR, writes the static site (add --serve to also serve it).",
+    )
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--store", help="local Parquet store (default: paths.store / $BENCHX_HOME/store.parquet)")
+    src.add_argument("--results", nargs="+",
+                     help="JSON result files or directories, read directly without PyArrow")
+    src.add_argument("--runs", help="runs/<sha>/<node>/ directory holding run.parquet and results.parquet")
+    p.add_argument("--out", help="write the static site into DIR instead of a temporary directory")
+    p.add_argument("--serve", action="store_true", help="serve the built site over local HTTP")
+    p.add_argument("--host", default="127.0.0.1", help="bind address for local serving (default %(default)s)")
+    p.add_argument("--port", type=int, default=None,
+                   help="TCP port for local serving (default 8000, falling back to a free port if busy)")
+    p.add_argument("--open", action="store_true", help="open the served dashboard in the default web browser")
+    p.add_argument("--project-file", help="project.json describing title, links, and upstream commit URL")
+    p.add_argument("--title", help="override the dashboard page title")
+    p.add_argument("--repo", help="git checkout used to enrich commit metadata for --store / --results")
+    marts_group = p.add_mutually_exclusive_group()
+    marts_group.add_argument("--marts", action="store_true",
+                             help="write derived Parquet tables under data/ (requires benchx[parquet])")
+    marts_group.add_argument("--no-marts", action="store_true",
+                             help="skip writing derived Parquet tables under data/")
+    p.add_argument("--stamp", help="cache-busting version stamped onto static asset URLs in index.html")
+    p.set_defaults(fn=cmd_view)
 
     args, extra = ap.parse_known_args(argv)
     # argparse takes a nargs="*" positional only from the first run of positionals, so cases
