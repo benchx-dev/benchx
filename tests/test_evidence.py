@@ -348,3 +348,50 @@ def test_a_unit_whose_benchmark_was_edited_has_no_series():
 
 def by_name_series(doc):
     return {u["workload"]["name"]: u.get("series") for u in doc["units"]}
+
+
+# --- review follow-ups -----------------------------------------------------------------------
+
+def _without_observations(doc):
+    doc["measurement"] = {"quantity": doc["measurement"]["quantity"], "status": "success",
+                          "summaries": [{"type": "estimate", "source": "producer", "value": 1.0,
+                                         "estimator": {"name": "mean", "method_version": "x", "input_level": "observations"}}]}
+    return doc
+
+
+def test_a_success_without_observations_is_excluded_listed_and_not_counted():
+    """comparator.md §3: no usable estimate, so excluded with its reason, and `rounds` counts only the pairs used."""
+    docs = run()
+    _without_observations(docs[1])  # the head's round 0
+    doc = evaluate(docs, min_rounds=2)
+    unit = doc["units"][0]
+    assert doc["exclusions"] == [{"result": {"producer": "benchx/gbench-adapter", "ingest_key": docs[1]["ingest_key"]},
+                                  "reason": "no usable estimate: the result has no observations"}]
+    assert unit["details"]["rounds"] == 2 == unit["details"]["degrees_of_freedom"] + 1
+    assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
+
+
+def test_a_retry_without_observations_does_not_make_two_usable_results():
+    docs = run()
+    retry = _without_observations(copy.deepcopy(docs[1]))
+    retry["ingest_key"] += ":retry"
+    base = copy.deepcopy(docs[0])
+    base["ingest_key"] += ":retry"
+    base["measurement"] = {"quantity": base["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
+    doc = evaluate([*docs, retry, base])  # equal attempts; one usable result per side in round 0
+    assert invariants(doc) == [] and doc["units"][0]["details"]["rounds"] == 3
+
+
+def test_a_selector_with_named_sides_but_no_run_renders_generically():
+    """render() must not assume run-profile's params (anchored history has sides, no single run)."""
+    from test_comparator import rendered_doc
+    doc = rendered_doc()
+    doc["selector"] = {"name": "test/anchored", "version": "v0", "params": {"target_run": "night-12"}}
+    assert compare.render(doc).splitlines()[0].startswith("test/anchored  target_run night-12  baseline ")
+
+
+def test_a_label_given_to_another_profile_does_not_change_the_document():
+    docs = run()
+    plain = compare.compare(copy.deepcopy(docs), run_key="run", profile="revisions", baseline=BASE)
+    labelled = compare.compare(copy.deepcopy(docs), run_key="run", profile="revisions", baseline=BASE, label="build")
+    assert labelled == plain and "label" not in plain["selector"]["params"]

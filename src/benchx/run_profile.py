@@ -131,7 +131,7 @@ class RunProfile(Selector):
         documents = _run_documents(documents, run_key)
         naming = projection.axis[0]
         varying = dotted(naming)
-        params = {"run_key": run_key, "profile": profile, "baseline": baseline, **({"label": label} if label else {}),
+        params = {"run_key": run_key, "profile": profile, "baseline": baseline, **({"label": label} if profile == "environments" and label else {}),
                   **({"parameter": parameter} if profile == "variants" else {})}
         selection = Selection(
             selector={"name": self.name, "version": self.version, "params": params},
@@ -302,7 +302,10 @@ def _row(doc: dict, side: str) -> Row:
         return Row(result_ref(doc), side, columns, exclusion=f"{why}: {said(doc)}" if said(doc) else why,
                    status=status)
     batch = values(doc)
-    return Row(result_ref(doc), side, columns, estimate(identity.MEDIAN, batch), tuple(batch))
+    found = estimate(identity.MEDIAN, batch)
+    if found is None:  # comparator.md §3: a result without a usable estimate is excluded with its reason
+        return Row(result_ref(doc), side, columns, exclusion="no usable estimate: the result has no observations")
+    return Row(result_ref(doc), side, columns, found, tuple(batch))
 
 
 def _benchmark_file(documents, names, sides) -> list[dict]:

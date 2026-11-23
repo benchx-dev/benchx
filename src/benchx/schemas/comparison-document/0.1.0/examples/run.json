@@ -126,6 +126,7 @@
       "excluded": [],
       "details": {
         "rounds": 2,
+        "reference_estimate": 0.00071,
         "noise_kind": "standard-error",
         "noise_source": "paired-rounds"
       },

@@ -32,9 +32,10 @@ detector decides when and which series to evaluate continuously, while policy
 decides whether a verdict should block or alert.
 
 **Implemented today:** run mode (`run-profile`), and the framework it runs on.
-History mode and detectors are specified here and exercised by test-only
-prototypes, whose tests follow in a separate change; they have no CLI and no
-configuration.
+History mode and detectors are specified here only. They were prototyped while
+designing the framework, to check that its types can express them, but that code
+is not in the repository: it, and tests that pin the numbers of §8, are planned
+as follow-up changes. Neither has a CLI or configuration yet.
 
 ## 2. Input
 
@@ -174,9 +175,10 @@ Checks belong to whoever needs them to be true. A failure is recorded in
 `failed_invariants`, and the affected units get no verdict.
 
 **The framework** checks that a result has a usable estimate. Anything else is
-excluded with its reason, and a target without one is indeterminate, never
-replaced by an older successful point. Excluded points and their reasons remain
-visible in the output.
+excluded with its reason, including a `success` with no observations to take the
+estimator from, and a target without one is indeterminate, never replaced by an
+older successful point. Excluded points and their reasons remain visible in the
+output.
 
 **The selector or profile** checks what makes the sides meaningful. A failed
 invariant of the run stops the whole run; `sides-agree`, about one unit, takes out
@@ -230,8 +232,8 @@ what it declared:
 | `duplicate-points` | unit | no cell of the method's layout holds two usable results; the comparator never picks one implicitly |
 
 A method that does not require alternation may still evaluate a run that did not
-alternate. The document records the schedule, and the unit carries the caveat
-`sides-did-not-alternate`.
+alternate, and the unit says so with a caveat: `sides-did-not-alternate` when the
+slots do not alternate, `sides-not-scheduled` when the results have no slot.
 
 `duplicate-points` as a requirement sees one cell of the layout. A revision that
 contributes two points to a history reference is a different case, since a
@@ -449,7 +451,8 @@ document even after newer points arrive.
 
 One series throughout: NumPy `sort`, float64, 10⁶ elements, wall time. **The values
 are constructed to show the mechanism, not measured.** Every number below was
-computed from these values by test code that returns in a follow-up change.
+computed from these values by the prototypes of §1, which are not in the repository
+yet; tests that pin the numbers are planned with them.
 All three use *k* = 3.
 
 ### 8.1 Run mode: paired by round

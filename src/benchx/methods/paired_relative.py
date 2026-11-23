@@ -64,11 +64,6 @@ class PairedRelative(Method):
 
         if evidence.no_verdict:
             return indeterminate(evidence.no_verdict)
-        complete = [(b[0], c[0]) for b, c in layout.cells if b and c]
-        if empty := [row.result["ingest_key"] for pair in complete for row in pair if row.estimate is None]:
-            logger.warning("%s: %d success(es) with no observations are dropped from the pairs; rounds counts %d "
-                           "pair(s) before this and the threshold %d after it: %s", label, len(empty), len(complete),
-                           len(pairs), ", ".join(empty[:3]) + (", …" if len(empty) > 3 else ""))
         estimates = [(b.estimate, c.estimate) for b, c in pairs]
         if estimates:
             details["reference_estimate"] = statistics.median(b for b, _ in estimates)

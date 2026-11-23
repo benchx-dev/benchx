@@ -40,3 +40,17 @@ def test_a_design_that_cannot_reach_alpha_is_indeterminate():
 ])
 def test_exact_p_values(a, b, u, p):
     assert rank_test(a, b) == (u, pytest.approx(p))
+
+
+def test_a_run_with_no_slots_is_compared_with_a_caveat_that_says_so():
+    docs = run(rounds=4, base_values=VALUES[:4], ratio=1.5)
+    for d in docs:
+        d["procedure"].pop("slot")
+    unit = evaluate(docs)["units"][0]
+    assert unit["verdict"] == "regressed" and "sides-not-scheduled" in unit["caveats"]
+
+
+def test_alpha_must_be_below_one():
+    import pytest as _pytest
+    with _pytest.raises(compare.CompareError, match="maximum of 1"):
+        compare._configure(METHOD, {"alpha": 1.0})

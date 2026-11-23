@@ -20,6 +20,8 @@ from .projection import workload_label
 from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
 logger = logging.getLogger(__name__)
+# The caveat a unit carries when its method does not require alternation and the run did not alternate.
+UNSCHEDULED = {"not-alternating": "sides-did-not-alternate", "absent": "sides-not-scheduled"}
 
 
 def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, method=methods.DEFAULT,
@@ -133,8 +135,8 @@ def evaluate(selection: Selection, method: Method, configuration: dict) -> dict:
             failed.append({"invariant": problem[0], **where, "detail": problem[1]})
             continue
         if evidence.no_verdict not in NOT_COMPARABLE:  # a unit not compared lists nothing that went wrong in it
-            doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}  # results that did not measure
-                                     for row in evidence.rows if row.exclusion and row.status != "success")
+            doc["exclusions"].extend({"result": row.result, "reason": row.exclusion}  # no usable estimate
+                                     for row in evidence.rows if row.exclusion)
         doc["units"].append(_unit(selection, evidence, layout, method, configuration, where))
     return doc
 
@@ -189,8 +191,8 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
         logger.warning("%s [%s]: %d result(s) with %s are left unpaired", workload_label(evidence.workload),
                        evidence.quantity["name"], n, reason)
     caveats = list(evidence.caveats)
-    if selection.slots == "not-alternating" and "alternating-slots" not in method.requires:
-        caveats = sorted({*caveats, "sides-did-not-alternate"})
+    if "alternating-slots" not in method.requires and selection.slots in UNSCHEDULED:
+        caveats = sorted({*caveats, UNSCHEDULED[selection.slots]})
     # How each side's attempts ended, by status: the evidence behind a reason such as `not-measured`.
     attempts = {side: dict(sorted(collections.Counter(row.status for row in evidence.rows if row.side == side).items()))
                 for side in evidence.sides}
@@ -297,11 +299,12 @@ def _missing(items) -> list[str]:
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
     params, sides = doc["selector"]["params"], doc.get("sides", {})
-    if sides:
+    if sides and "run_key" in params and "profile" in params:
         header = (f"run {params['run_key']}  profile {params['profile']}  "
                   f"baseline {str(sides['baseline'])[:12]}  contender {str(sides.get('contender'))[:12]}")
-    else:  # a selector with sides of its own, such as reference and target
-        header = "  ".join([doc["selector"]["name"], *(f"{k} {v}" for k, v in params.items())])
+    else:  # another selector, such as one with sides of its own (reference and target)
+        header = "  ".join([doc["selector"]["name"], *(f"{k} {v}" for k, v in params.items()),
+                            *(f"{role} {str(sides[role])[:12]}" for role in ("baseline", "contender") if role in sides)])
     lines = [header + ("  [local-only]" if doc["local_only"] else "")]
     for role, side in sides.get("declared", {}).items():
         name = sides[role]

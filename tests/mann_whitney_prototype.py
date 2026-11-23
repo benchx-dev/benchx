@@ -42,7 +42,7 @@ def _exact_p(ranks: list[int], observed: int, m: int) -> float:
     return extreme / comb(len(ranks), m)
 
 
-def rank_test(reference: list[float], target: list[float]) -> tuple[float, float, str]:
+def rank_test(reference: list[float], target: list[float]) -> tuple[float, float]:
     """(U of the target, exact two-sided p-value)."""
     n, m = len(reference), len(target)
     ranks = _doubled_midranks([*reference, *target])
@@ -60,7 +60,7 @@ class MannWhitney(Method):
         "type": "object",
         "additionalProperties": False,
         "required": ["alpha"],
-        "properties": {"alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}},
+        "properties": {"alpha": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}},
     }
     details_schema = {
         "type": "object",
@@ -103,7 +103,8 @@ class MannWhitney(Method):
             return indeterminate("insufficient-attempts")
         u, p = rank_test(before, after)
         details.update(u=u, p_value=p)
-        verdict = (change_label(u - n * m / 2, evidence.quantity.get("direction")) if p <= config["alpha"]
+        shift = u - n * m / 2  # an exact tie has no direction, so it is no change whatever alpha says
+        verdict = (change_label(shift, evidence.quantity.get("direction")) if p <= config["alpha"] and shift
                    else "no-change-detected")
         effect = None if center == 0 else {"measure": "relative-median", "value": statistics.median(after) / center - 1}
         return Assessment(verdict, effect=effect, used=used, excluded=excluded, details=details)
