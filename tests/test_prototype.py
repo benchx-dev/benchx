@@ -10,6 +10,7 @@ import pytest
 
 from benchx import cli, compare, core, identity, runner
 from benchx.core.errors import StructureError
+from benchx.store import Store
 from conftest import NOISY, QUIET, SOURCE_URI, cases, git, make_build, order, requires_pyarrow, run_rounds
 
 
@@ -74,7 +75,6 @@ def test_results_are_valid_documents(revisions_run):
 
 @requires_pyarrow
 def test_revisions_profile(revisions_run, repo, tmp):
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     assert store.ingest_paths([revisions_run])["ingested"] == 48  # with the load averages
     doc = compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions",
@@ -89,7 +89,6 @@ def test_revisions_profile(revisions_run, repo, tmp):
 
 @requires_pyarrow
 def test_environments_profile(environments_run, tmp):
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([environments_run])
     doc = compare.compare(store.documents("env-1"), run_key="env-1", profile="environments", label="build",
@@ -112,7 +111,6 @@ def test_environments_needs_a_real_difference(repo, tmp):
 
 @requires_pyarrow
 def test_ingest_contract(revisions_run, tmp):
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     assert store.ingest_paths([revisions_run]) == {"ingested": 48, "duplicate": 0, "rejected": []}
     # criterion 2: re-ingest is a visible no-op
@@ -141,7 +139,6 @@ def test_ingest_contract(revisions_run, tmp):
 @requires_pyarrow
 def test_same_document_from_any_store(revisions_run, repo, tmp):
     """Criterion 8: a throwaway store and a persistent one give one document."""
-    from benchx.store import Store
     documents = []
     for name in ("persistent", "throwaway"):
         store = Store(tmp / f"{name}.parquet")
@@ -154,7 +151,6 @@ def test_same_document_from_any_store(revisions_run, repo, tmp):
 @requires_pyarrow
 def test_traceability(revisions_run, tmp):
     """Criterion 6: result → order, verdict → results."""
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     docs = store.documents("rev-1")
@@ -199,7 +195,6 @@ def _dirty_run(repo, tmp, profile_sides, run_key):
 @requires_pyarrow
 def test_ad_hoc_is_thin_and_a_dirty_run_is_accepted(repo, tmp):
     """Criterion 7: no project, no configuration; a dirty single run is recorded as dirty (UC-01)."""
-    from benchx.store import Store
     out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
                                                      {"build": head, "source": repo["wt-head"]}], "adhoc")
     docs = results(out)
@@ -214,7 +209,6 @@ def test_ad_hoc_is_thin_and_a_dirty_run_is_accepted(repo, tmp):
 def test_revisions_labels_a_dirty_side_local_only(repo, tmp):
     """Criterion 7, UC-03 §10: a revisions comparison with a dirty side is compared and labeled
     local-only, and the sides that are not clean are named."""
-    from benchx.store import Store
     out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
                                                      {"build": head, "source": repo["wt-head"]}], "dirty-rev")
     store = Store(tmp / "store.parquet")
@@ -233,7 +227,6 @@ def test_revisions_labels_a_dirty_side_local_only(repo, tmp):
 @requires_pyarrow
 def test_environments_labels_a_dirty_side_local_only(repo, tmp):
     """Criterion 7, schema §5.5: the environments profile still allows a dirty side, labeled."""
-    from benchx.store import Store
     out = _dirty_run(repo, tmp, lambda base, head: [
         {"build": base, "source": repo["wt-head"], "labels": {"build": "a"}},
         {"build": make_build(tmp / "b3", repo["wt-head"], cases(quiet=1.02e-3), hardened=True),
@@ -285,7 +278,6 @@ def test_a_single_run_records_an_unknown_tree_without_a_tree_id(repo, tmp):
 @requires_pyarrow
 def test_head_and_history_show_the_dirty_warnings(repo, tmp, capsys):
     """Q7: the listings mark a dirty result and leave a clean one unmarked."""
-    from benchx.store import Store
     out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
                                                      {"build": head, "source": repo["wt-head"]}], "listed")
     store = Store(tmp / "store.parquet")
@@ -305,7 +297,6 @@ def test_head_and_history_show_the_dirty_warnings(repo, tmp, capsys):
 
 @requires_pyarrow
 def test_tracked_series_and_history(revisions_run, tmp):
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     series = store.series(workload=QUIET, quantity="wall-time")
@@ -325,7 +316,6 @@ def test_tracked_series_and_history(revisions_run, tmp):
 @requires_pyarrow
 def test_another_projection_on_request(revisions_run, tmp):
     """Schema §4.3: the same results under the revisions profile's projection, one series per tree."""
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     profile = compare.PROFILES["revisions"]
@@ -527,7 +517,6 @@ def test_artifacts(repo, tmp):
 @requires_pyarrow
 def test_duplicate_keys_are_malformed(revisions_run, tmp):
     """S1: the one check only the strict loader makes."""
-    from benchx.store import Store
     text = json.dumps(results(revisions_run)[0])
     duplicated = text[:-1] + ', "ingest_key": "other"}'
     outcome = Store(tmp / "store.parquet").ingest([("dup.json", duplicated)])
@@ -538,7 +527,6 @@ def test_duplicate_keys_are_malformed(revisions_run, tmp):
 def test_entities_auto_create(revisions_run, tmp):
     """S6: first sight creates the core rows of schema §4.1 (locked decision),
     derived from the one Parquet file that is the whole store."""
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     assert [p.name for p in tmp.glob("store*")] == ["store.parquet"]
@@ -553,7 +541,6 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
     """Schema §5.4: a batch is N independent documents with N outcomes. A file that is
     not UTF-8, or is not there, is rejected as malformed, and the rest is ingested."""
     from benchx import cli
-    from benchx.store import Store
     sweep = tmp / "sweep"
     sweep.mkdir()
     (sweep / "good.json").write_text(json.dumps(adhoc))
@@ -580,7 +567,6 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
 def test_reads_files_from_an_older_schema(revisions_run, tmp):
     """A store written before a column existed takes new rows; old ones read the column as null."""
     import pyarrow.parquet as pq
-    from benchx.store import Store
     files = sorted(p for p in revisions_run.glob("*.json") if not p.name.startswith("workorder-"))
     store = Store(tmp / "store.parquet")
     store.ingest_paths(files[:10])
@@ -594,7 +580,6 @@ def test_reads_files_from_an_older_schema(revisions_run, tmp):
 @requires_pyarrow
 def test_store_keeps_documents_exactly(revisions_run, tmp):
     """The document column is the canonical document, so nothing outside the file is needed."""
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     stored = {d["ingest_key"]: d for d in store.documents("rev-1")}
@@ -605,7 +590,6 @@ def test_store_keeps_documents_exactly(revisions_run, tmp):
 @requires_pyarrow
 def test_head(revisions_run, tmp):
     """bx head: the latest rows, newest first."""
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     assert store.head() == (0, [])
     store.ingest_paths([revisions_run])
@@ -620,7 +604,6 @@ def test_head(revisions_run, tmp):
 def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     """bx run writes result files and ingests exactly those into the one local store."""
     from benchx import cli
-    from benchx.store import Store
     build = make_build(tmp / "b", repo["wt-head"], cases())
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))

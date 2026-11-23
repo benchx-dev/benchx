@@ -11,6 +11,7 @@ pytest.importorskip("pyperf")
 
 from benchx import bench, cli, core, harnesses
 from benchx.adapters import asv, asv_runtime
+from benchx.store import Store
 from conftest import requires_pyarrow, warnings_of
 
 SUITE =textwrap.dedent('''
@@ -120,7 +121,6 @@ def test_asv_target_reads_the_benchmark_dir(suite, tmp):
 
 @requires_pyarrow
 def test_asv_command_runs_every_time_benchmark(suite, capsys):
-    from benchx.store import Store
     assert cli.main([*ASV, "--run-key", "all", "--project", "p", *FAST]) == cli.EXIT_OK
     err = capsys.readouterr().err
     assert "skipped module benchmarks.needs_missing" in err

@@ -14,6 +14,7 @@ import pytest
 
 from benchx import cli, core, harnesses, runner, session
 from benchx.results import MemoryStore
+from benchx.store import Store
 from conftest import SOURCE_URI, git, requires_pyarrow
 
 MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"]
@@ -116,7 +117,6 @@ def param_worktrees(tmp_path):
 
 @requires_pyarrow
 def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
-    from benchx.store import Store
     pytest.importorskip("pyperf")
 
     def provider(spec, operation, provider=None):  # what a minimal provider for two worktrees would answer
@@ -141,7 +141,6 @@ def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
 @requires_pyarrow
 def test_each_combination_of_a_function_with_params_is_a_unit(tmp, param_worktrees):
     """Two combinations are two units, each paired with the same combination on the other side."""
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     doc = session.compare_targets(
         str(param_worktrees["base"]), str(param_worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
@@ -156,7 +155,6 @@ def test_each_combination_of_a_function_with_params_is_a_unit(tmp, param_worktre
 def test_a_filter_that_selects_no_case_refuses_the_comparison(tmp, worktrees):
     """A comparison with nothing measured on a side is not "no difference": it is refused with the
     side's own refusal, before any case runs, and nothing reaches the store."""
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     store = Store(tmp / "s.parquet")
     with pytest.raises(runner.Refused, match=r"filter '\^\(nosuch\)\$' selects no case in mod.py"):
@@ -170,7 +168,6 @@ def test_a_filter_that_selects_no_case_refuses_the_comparison(tmp, worktrees):
 @requires_pyarrow
 def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):
     """Without a provider, a bare path is a working tree for pyperf (as it is a build for Google Benchmark)."""
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     doc = session.compare_targets(
         str(worktrees["base"]), str(worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
@@ -225,7 +222,6 @@ def variants_tree(tmp, source, files=None):
 def run_variants(tmp, tree, **kwargs):
     """`session.compare_variants` on `tree`: the document, the store, and what the session said."""
     pytest.importorskip("pyarrow")
-    from benchx.store import Store
     store, said = Store(tmp / "s.parquet"), []
     settings = {"suite": "mod.py", "rounds": 2, "min_rounds": 2, "adapter": "pyperf", "flags": FAST,
                 "out": tmp / "out", "run_key": "v", **kwargs}
@@ -267,7 +263,6 @@ def test_variants_run_one_order_per_value_and_round_with_that_values_cases_only(
 
 @requires_pyarrow
 def test_variants_the_baseline_is_the_first_declared_value_and_can_be_swapped(tmp):
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     tree = variants_tree(tmp, VARIANTS)
     doc, _, said = run_variants(tmp, tree)
@@ -284,7 +279,6 @@ def test_variants_the_baseline_is_the_first_declared_value_and_can_be_swapped(tm
 
 @requires_pyarrow
 def test_variants_an_environment_variable_is_a_second_parameter(tmp):
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     tree, store = variants_tree(tmp, VARIANTS), Store(tmp / "s.parquet")
     with pytest.raises(session.SessionError, match=r"several workload parameters: OMP_NUM_THREADS \(-e\), role "
@@ -330,7 +324,6 @@ def test_variants_a_benchmark_without_the_parameter_runs_on_neither_side_and_is_
         "unquoted-baseline", "mistyped-baseline"])
 @requires_pyarrow
 def test_variants_refusals_come_before_anything_runs(tmp, source, kwargs, message):
-    from benchx.store import Store
     pytest.importorskip("pyperf")
     tree, store = variants_tree(tmp, source), Store(tmp / "s.parquet")
     with pytest.raises(session.SessionError, match=message):

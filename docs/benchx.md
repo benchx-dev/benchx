@@ -28,8 +28,8 @@ implement a missing feature.
 Install from [PyPI](https://pypi.org/project/benchx/):
 
 ```console
-$ pip install benchx                # minimal: run with --no-ingest, validate, and compare --results
-$ pip install 'benchx[parquet]'     # adds PyArrow for the local Parquet store and history queries
+$ pip install benchx                # JSONL store, compare, validate, and bx view (no PyArrow required)
+$ pip install 'benchx[parquet]'     # adds PyArrow for the Parquet store and CI --runs views
 ```
 
 

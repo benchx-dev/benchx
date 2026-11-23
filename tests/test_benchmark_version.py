@@ -14,6 +14,7 @@ import textwrap
 import pytest
 
 from benchx.adapters import benchx_params as params
+from benchx.store import Store
 
 _counter = itertools.count()
 
@@ -162,7 +163,6 @@ def compare(tmp_path, module, run_key, names=("f",)):
     pytest.importorskip("pyperf")
     pytest.importorskip("pyarrow")
     from benchx import harnesses, session
-    from benchx.store import Store
     from test_compare_harnesses import make_worktrees
     trees = make_worktrees(tmp_path, module)
     return session.compare_targets(
