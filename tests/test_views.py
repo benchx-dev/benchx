@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from benchx import cli, views
+from benchx.store import Store
 from benchx.views import inputs, marts as marts_mod, payloads, site
 from conftest import NOISY, QUIET, cases, make_build, requires_pyarrow, run_rounds
 
@@ -306,7 +307,6 @@ def test_view_pyarrow_errors_are_actionable(tmp, monkeypatch, capsys):
 @requires_pyarrow
 def test_view_from_local_store_collapses_rounds_and_writes_marts(repo, tmp, capsys):
     import pyarrow.parquet as pq
-    from benchx.store import Store
 
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
     head = make_build(tmp / "b-head", repo["wt-head"], cases(quiet=1.10e-3, noisy=2.00e-3))
@@ -339,7 +339,6 @@ def test_view_from_local_store_collapses_rounds_and_writes_marts(repo, tmp, caps
 @requires_pyarrow
 def test_view_from_runs_dir_with_logs_and_failed_build(repo, tmp, capsys):
     import pyarrow.parquet as pq
-    from benchx.store import Store
 
     runs_dir = tmp / "runs"
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
@@ -549,8 +548,6 @@ def test_remote_uri_rejected_clearly(tmp, monkeypatch, capsys, flag, uri):
 
 @requires_pyarrow
 def test_path_traversal_and_orphan_results_in_runs_dir(repo, tmp, capsys):
-    from benchx.store import Store
-
     runs_dir = tmp / "runs"
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
     res_out = tmp / "raw-base"
@@ -627,8 +624,6 @@ def test_safe_path_segment_strips_windows_unsafe_and_traversal_chars():
 
 @requires_pyarrow
 def test_runs_dir_collapses_duplicate_attempts_without_self_changes(repo, tmp):
-    from benchx.store import Store
-
     runs_dir = tmp / "runs"
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
     out = run_rounds(
@@ -656,8 +651,6 @@ def test_runs_dir_collapses_duplicate_attempts_without_self_changes(repo, tmp):
 
 def test_jsonl_store_builds_views_without_pyarrow(repo, tmp, monkeypatch):
     """Default `bx bench` + `bx view --out site` works end-to-end via store.jsonl without pyarrow."""
-    from test_minimal_deps import _block_pyarrow
-
     _block_pyarrow(monkeypatch)
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
     assert cli.main([
@@ -675,3 +668,26 @@ def test_jsonl_store_builds_views_without_pyarrow(repo, tmp, monkeypatch):
     assert manifest["source"] == "store"
     assert manifest["counts"]["points"] == 2
     assert not list((site_dir / "data").glob("*.parquet"))
+
+
+def test_nested_python_suites_do_not_collide_while_binaries_use_basename(adhoc, tmp, monkeypatch):
+    _block_pyarrow(monkeypatch)
+    assert inputs._normalize_suite_name("benchmarks/a/bench.py") == "benchmarks/a/bench.py"
+    assert inputs._normalize_suite_name("./benchmarks/b/bench.py") == "benchmarks/b/bench.py"
+    assert inputs._normalize_suite_name("/abs/path/bench.py") == "bench.py"
+    assert inputs._normalize_suite_name("release/arrow-bit-util-benchmark") == "arrow-bit-util-benchmark"
+
+    res_dir = tmp / "nested-suites"
+    res_dir.mkdir()
+    for idx, suite_path in enumerate(("benchmarks/a/bench.py", "benchmarks/b/bench.py"), start=1):
+        doc = json.loads(json.dumps(adhoc))
+        doc["ingest_key"] = f"nested-{idx}"
+        doc["provenance"].setdefault("info", {})["suite"] = suite_path
+        (res_dir / f"result-{idx}.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    site_dir = tmp / "nested-site"
+    assert cli.main(["view", "--results", str(res_dir), "--out", str(site_dir)]) == cli.EXIT_OK
+    series = _load(site_dir / "data" / "views" / "series.json")
+    assert {s["suite"] for s in series} == {"benchmarks/a/bench.py", "benchmarks/b/bench.py"}
+    assert (site_dir / "data" / "views" / "history" / "benchmarks_a_bench.py.json").is_file()
+    assert (site_dir / "data" / "views" / "history" / "benchmarks_b_bench.py.json").is_file()

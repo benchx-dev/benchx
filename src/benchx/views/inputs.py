@@ -191,16 +191,28 @@ def _canonical_params(value) -> str:
     return str(value)
 
 
+def _normalize_suite_name(raw: str) -> str:
+    text = str(raw).replace("\\", "/").strip()
+    if not text:
+        return "default"
+    # Preserve relative Python script paths (e.g. benchmarks/a/bench.py) so nested
+    # suites sharing a filename do not collide, while stripping directory prefixes
+    # from absolute paths and compiled binary paths (e.g. release/arrow-foo-benchmark).
+    if not text.startswith("/") and not (len(text) >= 2 and text[1] == ":") and text.endswith(".py"):
+        return text.removeprefix("./") or "default"
+    return text.rsplit("/", 1)[-1] or "default"
+
+
 def _extract_suite(work_order: dict, doc_or_row: dict) -> str:
     suites = work_order.get("suites") if isinstance(work_order, dict) else None
     if isinstance(suites, list) and suites:
         first = suites[0]
         if isinstance(first, dict) and first.get("suite"):
-            return str(first["suite"]).rsplit("/", 1)[-1]
+            return _normalize_suite_name(first["suite"])
     provenance = doc_or_row.get("provenance") or {}
     info = _parse_json_obj(provenance.get("info"))
     if info.get("suite"):
-        return str(info["suite"]).rsplit("/", 1)[-1]
+        return _normalize_suite_name(info["suite"])
     return "default"
 
 

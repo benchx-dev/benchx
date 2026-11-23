@@ -14,7 +14,7 @@ const PAGE = 50;
 const MARK = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="10" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 24 L46 52 M46 24 L18 52" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>';
 const MARK_SMALL = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="8" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 26 L46 52 M46 26 L18 52" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg>';
 function wordmark(small) { return h("span", { class: "benchx" }, h("span", { html: small ? MARK_SMALL : MARK }), h("span", { class: "wm" }, "bench", h("b", {}, "x"))); }
-const state = { v: "", project: null, manifest: null, landing: null, series: null, histories: new Map(), commits: new Map(), charts: [], cleanup: [], colorSlots: new Map(), routeSeq: 0 };
+const state = { v: "", project: null, manifest: null, landing: null, series: null, multiQty: new Set(), histories: new Map(), commits: new Map(), charts: [], cleanup: [], colorSlots: new Map(), routeSeq: 0 };
 
 // ---- utilities ------------------------------------------------------------------
 
@@ -51,14 +51,28 @@ async function getJSON(path, { fresh = false } = {}) {
   return r.json();
 }
 
+async function loadCommit(sha) {
+  let c = state.commits.get(sha);
+  if (!c) {
+    c = await getJSON(`views/commits/${encodeURIComponent(safeFile(sha))}.json`);
+    state.commits.set(sha, c);
+  }
+  return c;
+}
+
 const UNITS = {
   s: [["ns", 1e-9], ["µs", 1e-6], ["ms", 1e-3], ["s", 1]],
   B: [["B", 1], ["KiB", 1024], ["MiB", 1024 ** 2], ["GiB", 1024 ** 3]],
+  "B/s": [["B/s", 1], ["KB/s", 1e3], ["MB/s", 1e6], ["GB/s", 1e9], ["TB/s", 1e12]],
+  "By/s": [["B/s", 1], ["KB/s", 1e3], ["MB/s", 1e6], ["GB/s", 1e9], ["TB/s", 1e12]],
+  "1/s": [["/s", 1], ["k/s", 1e3], ["M/s", 1e6], ["G/s", 1e9]],
+  "i/s": [["/s", 1], ["k/s", 1e3], ["M/s", 1e6], ["G/s", 1e9]],
 };
 function pickScale(values, unit) {
   const table = UNITS[unit];
   const m = Math.max(...values.filter((v) => v != null && isFinite(v)).map(Math.abs), 0);
-  if (!table || !m) return [unit || "", 1];
+  if (!table) return [unit || "", 1];
+  if (!m) return table[0];
   let best = table[0];
   for (const t of table) if (m >= t[1]) best = t;
   return best;
@@ -120,6 +134,12 @@ function shortSha(sha, len = 10) {
   return sha.slice(0, len);
 }
 function isFailed(status) { return Boolean(status && !["success", "partial", "skipped"].includes(status)); }
+function upstreamFileUrl(sha, relPath) {
+  if (!sha || sha.includes("-dirty-") || !relPath || relPath.startsWith("/") || !relPath.endsWith(".py")) return null;
+  const url = (state.project?.upstream?.url || "").replace(/\.git$/, "").replace(/\/$/, "");
+  if (!/^https?:\/\/github\.com\//.test(url)) return null;
+  return `${url}/blob/${encodeURIComponent(sha)}/${relPath.split("/").map(encodeURIComponent).join("/")}`;
+}
 function upstreamCommit(sha) {
   if (!sha || sha.includes("-dirty-")) return null;
   const tpl = state.project?.upstream?.commit_url;
@@ -175,7 +195,41 @@ function benchHref(s, { node } = {}) {
   const qs = q.toString();
   return `#/b/${encodeURIComponent(s.suite)}/${encodeURIComponent(s.case)}${qs ? "?" + qs : ""}`;
 }
-function caseLabel(s) { return s.params ? `${s.case} ${s.params}` : s.case; }
+function formatParams(raw) {
+  if (!raw) return "";
+  if (raw.startsWith("{")) {
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        return Object.entries(obj).map(([k, v]) => (k === "params" ? String(v) : `${k}=${v}`)).join(" · ");
+      }
+    } catch (_) { /* keep raw */ }
+  }
+  return raw;
+}
+function caseLabel(s) {
+  const p = formatParams(s.params);
+  return p ? `${s.case} (${p})` : s.case;
+}
+const SHORT_QTY = {
+  "wall-time": "wall",
+  "cpu-time": "cpu",
+  "throughput-bytes": "B/s",
+  "throughput-items": "items/s",
+};
+function shortQty(q) { return SHORT_QTY[q] || q || ""; }
+function hasMultiQty(s) { return state.multiQty.has(`${s.suite}|${s.case}|${s.params || ""}`); }
+function qtyTag(s, force = false) {
+  if (!s.quantity || (!force && !hasMultiQty(s))) return null;
+  return h("span", { class: "tag qty", title: s.quantity }, shortQty(s.quantity));
+}
+function benchLink(s, opts = {}) {
+  const p = formatParams(s.params);
+  return h("span", { class: "bench-name" },
+    h("a", { href: benchHref(s, opts), class: "mono", title: `${caseLabel(s)} (${s.suite})` },
+      s.case, p ? [" ", h("span", { class: "bench-params" }, p)] : null),
+    qtyTag(s, opts.forceQty));
+}
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function seriesColor(key) {
   if (!state.colorSlots.has(key)) state.colorSlots.set(key, state.colorSlots.size % SERIES_VARS.length);
@@ -216,14 +270,18 @@ function table(headers, rows, opts = {}) {
     }
     return h("th", { class: `${right ? "r" : ""}${sep}`.trim() }, label);
   })));
-  const bodyRows = rows.length ? rows.map((cells) => h("tr", {}, cells.map((cell, i) => {
-    const right = headers[i].startsWith(">");
-    const sep = opts.sepAt && opts.sepAt.includes(i) ? " col-sep" : "";
-    const isObj = cell && typeof cell === "object" && !cell.nodeType && "v" in cell;
-    const content = isObj ? cell.v : cell;
-    const extra = isObj && cell.cls ? ` ${cell.cls}` : "";
-    return h("td", { class: `${right ? "r num" : ""}${sep}${extra}`.trim() }, content);
-  }))) : [h("tr", {}, h("td", { colspan: headers.length, class: "empty" }, opts.empty || "nothing yet"))];
+  const bodyRows = rows.length ? rows.map((row) => {
+    const isRowObj = row && !Array.isArray(row) && "cells" in row;
+    const cells = isRowObj ? row.cells : row;
+    return h("tr", { class: isRowObj ? row.cls : null }, cells.map((cell, i) => {
+      const right = headers[i].startsWith(">");
+      const sep = opts.sepAt && opts.sepAt.includes(i) ? " col-sep" : "";
+      const isObj = cell && typeof cell === "object" && !cell.nodeType && "v" in cell;
+      const content = isObj ? cell.v : cell;
+      const extra = isObj && cell.cls ? ` ${cell.cls}` : "";
+      return h("td", { class: `${right ? "r num" : ""}${sep}${extra}`.trim() }, content);
+    }));
+  }) : [h("tr", {}, h("td", { colspan: headers.length, class: "empty" }, opts.empty || "nothing yet"))];
   return h("div", { class: "wrap" }, h("table", {}, h("thead", {}, ...theadRows), h("tbody", {}, ...bodyRows)));
 }
 
@@ -270,10 +328,10 @@ function renderLanding() {
     const moverPanel = (title, list, emptyMsg) => {
       const rows = list.map((m) => {
         const cls = changeCellClass(m.rel_change, m.direction, m.noise);
-        const nameCell = h("span", {},
-          h("a", { href: benchHref(m, { node: m.node }), class: "mono", title: `${caseLabel(m)} (${m.suite})` }, caseLabel(m)),
-          " ", h("span", { class: "note" }, shortSuite(m.suite)),
-          ctl.node === "all" && multiNode() ? [" ", h("span", { class: "note" }, `· ${m.node}`)] : null);
+        const metaParts = [shortSuite(m.suite), ctl.node === "all" && multiNode() ? m.node : null].filter(Boolean);
+        const nameCell = h("div", { class: "bench-cell" },
+          benchLink(m, { node: m.node }),
+          metaParts.length ? h("div", { class: "bench-meta" }, metaParts.join(" · ")) : null);
         const beforeAfter = h("span", { class: "num note" }, `${fmtValue(m.prev_estimate, m.unit)} → ${fmtValue(m.estimate, m.unit)}`);
         const dCell = h("span", { class: "delta-cell" }, m.prev_is_parent ? null : gapTag(m), delta(m.rel_change, m.direction, { noise: m.noise, unit: m.unit }));
         return [nameCell, beforeAfter, { v: dCell, cls }];
@@ -315,26 +373,32 @@ function renderLanding() {
       (ctl.node === "all" || c.node === ctl.node) &&
       (!needle || `${c.sha} ${c.subject} ${c.node} ${c.state}`.toLowerCase().includes(needle)));
     const pct = `${Math.round(L.notable * 100)}%`;
+    let prevSha = null;
     const rows = list.map((c) => {
+      const sameCommit = c.sha === prevSha;
+      prevSha = c.sha;
       const logUrl = runLog(c.sha, c.node, c.has_log);
       const regCell = c.compared ? (c.regressed ? { v: h("span", { class: "delta regressed" }, c.regressed), cls: "cell-bad" } : "0") : "–";
       const impCell = c.compared ? (c.improved ? { v: h("span", { class: "delta improved" }, c.improved), cls: "cell-good" } : "0") : "–";
       const failCell = c.failed_results ? { v: h("span", { class: "bad" }, c.failed_results), cls: "cell-bad" } : "0";
-      return [
-        h("span", { title: fmtDate(c.finished_at || c.started_at || c.committer_date) }, ago(c.finished_at || c.started_at || c.committer_date) || fmtDate(c.committer_date)),
-        c.node,
-        c.state === "finished" ? "ok" : stateTag(c),
-        c.results.toLocaleString(),
-        failCell,
-        regCell,
-        impCell,
-        logUrl ? h("a", { href: logUrl, target: "_blank", rel: "noopener" }, "log") : "",
-        h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short),
-        h("span", {}, c.subject.length > 84 ? c.subject.slice(0, 82) + "…" : c.subject),
-      ];
+      return {
+        cls: sameCommit ? "same-commit" : null,
+        cells: [
+          { v: h("span", { title: fmtDate(c.finished_at || c.started_at || c.committer_date) }, ago(c.finished_at || c.started_at || c.committer_date) || fmtDate(c.committer_date)), cls: "nowrap" },
+          { v: c.node, cls: "nowrap" },
+          c.state === "finished" ? "ok" : stateTag(c),
+          c.results.toLocaleString(),
+          failCell,
+          regCell,
+          impCell,
+          logUrl ? h("a", { href: logUrl, target: "_blank", rel: "noopener" }, "log") : "",
+          { v: h("a", { href: `#/c/${encodeURIComponent(c.sha)}`, class: "mono" }, c.short), cls: "nowrap commit-col" },
+          { v: h("span", {}, c.subject.length > 84 ? c.subject.slice(0, 82) + "…" : c.subject), cls: "commit-col" },
+        ],
+      };
     });
     runsHost.replaceChildren(table(
-      ["Time", "Machine", "State", ">Results", ">Failed", `>Regressed >${pct}`, `>Improved >${pct}`, "", "Hash", "Message"],
+      ["Time", "Machine", "State", ">Results", ">Failed", `>Regressed >${pct}`, `>Improved >${pct}`, "Log", "Hash", "Message"],
       rows,
       {
         groups: [{ label: "Run", span: 8 }, { label: "Commit", span: 2 }],
@@ -366,20 +430,27 @@ function renderLanding() {
       h("h2", {}, "Runs history"),
       h("div", { class: "filters", style: "margin:0" }, runSearch)),
     runsHost,
-    (L.noisiest.length || L.suite_time.length) ? h("details", { class: "fold" },
-      h("summary", {}, "Noisiest series & suite wall time"),
-      h("div", { class: "cols" },
-        h("section", { class: "panel" },
-          h("div", { class: "panel-head" }, h("h3", {}, "Noisiest series"), h("span", { class: "note" }, "median commit-to-commit |Δ|")),
-          table(["Benchmark", "Machine", ">Noise", ">Pts"],
-            L.noisiest.map((s) => [h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)), s.node, fmtAbsPct(s.noise), s.points]),
-            { empty: "needs at least 3 measurements per series" })),
-        h("section", { class: "panel" },
-          h("div", { class: "panel-head" }, h("h3", {}, "Suite wall time"), h("span", { class: "note" }, "latest commit")),
-          table(["Suite", "Machine", ">Cases", ">Failed", ">Time"],
-            L.suite_time.map((s) => [h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)), s.node, s.cases,
-              s.failed ? h("span", { class: "bad" }, s.failed) : "0",
-              s.seconds < 120 ? `${s.seconds}s` : `${Math.round(s.seconds / 60)}m`]))))) : null,
+    (L.noisiest.length || L.suite_time.length) ? (() => {
+      const nonZeroSuites = L.suite_time.filter((s) => s.seconds > 0);
+      const shownSuites = (nonZeroSuites.length ? nonZeroSuites : L.suite_time).slice(0, 20);
+      const suiteNote = nonZeroSuites.length
+        ? `top ${shownSuites.length} of ${nonZeroSuites.length} timed suites`
+        : `showing ${shownSuites.length} of ${L.suite_time.length} suites`;
+      return h("details", { class: "fold" },
+        h("summary", {}, "Noisiest series & suite wall time"),
+        h("div", { class: "cols" },
+          h("section", { class: "panel" },
+            h("div", { class: "panel-head" }, h("h3", {}, "Noisiest series"), h("span", { class: "note" }, "median commit-to-commit |Δ|")),
+            table(["Benchmark", "Machine", ">Noise", ">Pts"],
+              L.noisiest.map((s) => [benchLink(s, { node: s.node }), { v: s.node, cls: "nowrap" }, fmtAbsPct(s.noise), s.points]),
+              { empty: "needs at least 3 measurements per series" })),
+          h("section", { class: "panel" },
+            h("div", { class: "panel-head" }, h("h3", {}, "Suite wall time"), h("span", { class: "note" }, suiteNote)),
+            table(["Suite", "Machine", ">Cases", ">Failed", ">Time"],
+              shownSuites.map((s) => [h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)), { v: s.node, cls: "nowrap" }, s.cases,
+                s.failed ? h("span", { class: "bad" }, s.failed) : "0",
+                s.seconds < 120 ? `${s.seconds}s` : `${Math.round(s.seconds / 60)}m`])))));
+    })() : null,
     footer());
 
   drawMovers();
@@ -411,9 +482,11 @@ function renderBenchmarks(query) {
   const all = state.series || [];
   const suites = [...new Set(all.map((s) => s.suite))].sort();
   const nodes = [...new Set(all.map((s) => s.node))].sort();
+  const quantities = [...new Set(all.map((s) => s.quantity).filter(Boolean))].sort();
   const ctl = {
     suite: query.get("suite") || "all",
     node: query.get("node") || "all",
+    qty: query.get("q") || "all",
     status: query.get("status") || "all",
     text: query.get("f") || "",
     hideNoise: query.get("hide_noise") === "1",
@@ -426,6 +499,7 @@ function renderBenchmarks(query) {
     const p = new URLSearchParams();
     if (ctl.suite !== "all") p.set("suite", ctl.suite);
     if (ctl.node !== "all") p.set("node", ctl.node);
+    if (ctl.qty !== "all") p.set("q", ctl.qty);
     if (ctl.status !== "all") p.set("status", ctl.status);
     if (ctl.text) p.set("f", ctl.text);
     if (ctl.hideNoise) p.set("hide_noise", "1");
@@ -462,11 +536,12 @@ function renderBenchmarks(query) {
     const filtered = all.filter((s) => {
       if (ctl.suite !== "all" && s.suite !== ctl.suite) return false;
       if (ctl.node !== "all" && s.node !== ctl.node) return false;
+      if (ctl.qty !== "all" && s.quantity !== ctl.qty) return false;
       if (ctl.status === "failing" && !isFailed(s.status)) return false;
       if (ctl.status === "regressed" && verdict(s.vs_prev, s.direction) !== "regressed") return false;
       if (ctl.status === "improved" && verdict(s.vs_prev, s.direction) !== "improved") return false;
       if (ctl.hideNoise && s.vs_prev != null && withinNoise(s.vs_prev, s.noise)) return false;
-      if (needle && !`${s.case} ${s.params} ${s.suite} ${s.node}`.toLowerCase().includes(needle)) return false;
+      if (needle && !`${s.case} ${s.params} ${s.suite} ${s.node} ${s.quantity}`.toLowerCase().includes(needle)) return false;
       return true;
     }).sort((a, b) => cmpVal(sortVal(a, ctl.sort), sortVal(b, ctl.sort), ctl.dir) || caseLabel(a).localeCompare(caseLabel(b)));
 
@@ -482,9 +557,9 @@ function renderBenchmarks(query) {
         ? failTag(s.reason, s.status)
         : delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit });
       return [
-        h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)),
-        h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)),
-        s.node,
+        benchLink(s, { node: s.node }),
+        { v: h("a", { href: `#/s/${encodeURIComponent(s.suite)}` }, shortSuite(s.suite)), cls: "nowrap" },
+        { v: s.node, cls: "nowrap" },
         fmtValue(s.estimate, s.unit),
         { v: changeEl, cls },
         fmtAbsPct(s.noise),
@@ -518,6 +593,7 @@ function renderBenchmarks(query) {
     h("div", { class: "filters" },
       nodes.length > 1 ? select("Machine", "node", ["all", ...nodes], (v) => (v === "all" ? "all" : v)) : null,
       select("Suite", "suite", ["all", ...suites], (v) => (v === "all" ? "all suites" : shortSuite(v))),
+      quantities.length > 1 ? select("Quantity", "qty", ["all", ...quantities], (v) => (v === "all" ? "all" : v)) : null,
       select("Status", "status", ["all", "regressed", "improved", "failing"]),
       h("input", { type: "search", placeholder: "filter by name…", value: ctl.text, "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; ctl.page = 0; draw(); } }),
       h("label", {}, h("input", { type: "checkbox", checked: ctl.hideNoise, onchange: (e) => { ctl.hideNoise = e.target.checked; ctl.page = 0; draw(); } }), "hide within-noise"),
@@ -537,7 +613,7 @@ function renderSuites() {
   }
   for (const s of state.series) {
     const e = by.get(s.suite) || { suite: s.suite, series: 0, cases: new Set(), nodes: new Set(), regressed: 0, improved: 0, failing: 0, seconds: timeBySuite.get(s.suite) || 0 };
-    e.series++; e.cases.add(`${s.case}|${s.params}`); e.nodes.add(s.node);
+    e.series++; e.cases.add(`${parseSeriesSpec(s).family}|${s.quantity}`); e.nodes.add(s.node);
     if (isFailed(s.status)) e.failing++;
     else if (s.vs_prev != null && Math.abs(s.vs_prev) > state.landing.notable) {
       const v = verdict(s.vs_prev, s.direction);
@@ -566,7 +642,8 @@ function renderSuites() {
       ["Suite", ">Benchmarks", ">Series", "Machines", ">Failing", `>Regressed >${pct}`, `>Improved >${pct}`, ">Time"],
       rows.map((e) => [
         h("a", { href: `#/s/${encodeURIComponent(e.suite)}`, class: "mono" }, e.suite),
-        e.cases.size, e.series, [...e.nodes].sort().join(", "),
+        e.cases.size, e.series,
+        h("div", { class: "machines-list" }, [...e.nodes].sort().map((n) => h("span", { class: "chip" }, n))),
         e.failing ? { v: h("span", { class: "bad" }, e.failing), cls: "cell-bad" } : "0",
         e.regressed ? { v: h("span", { class: "delta regressed" }, e.regressed), cls: "cell-bad" } : "0",
         e.improved ? { v: h("span", { class: "delta improved" }, e.improved), cls: "cell-good" } : "0",
@@ -587,7 +664,10 @@ function renderSuites() {
 
 async function loadHistory(suite) {
   let hist = state.histories.get(suite);
-  if (!hist) { hist = await getJSON(`views/history/${encodeURIComponent(safeFile(suite))}.json`); state.histories.set(suite, hist); }
+  if (!hist) {
+    hist = await getJSON(`views/history/${encodeURIComponent(safeFile(suite))}.json`);
+    state.histories.set(suite, hist);
+  }
   return hist;
 }
 
@@ -761,8 +841,8 @@ function benchCard(g) {
   const failed = isFailed(g.status);
   const plot = h("div", { class: "spark" });
   const sub = [
-    g.variantCount > 1 ? `${g.variantCount} params` : null,
-    g.quantity !== "wall-time" ? g.quantity : null,
+    g.variantCount > 1 ? (g.list.length > MAX_AUTO_VARIANTS ? `${MAX_AUTO_VARIANTS}/${g.variantCount} params` : `${g.variantCount} params`) : null,
+    g.quantity !== "wall-time" ? shortQty(g.quantity) : null,
     n && multiNode() ? n.node : null,
   ].filter(Boolean).join(" · ");
   const points = n?.points ?? 0;
@@ -821,13 +901,16 @@ async function renderSuite(suite, seq) {
     return { newest, change: newest?.vs_prev ?? null, status: failing ? failing.status : "success", reason: failing?.reason };
   }).sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-  const ctl = { mode: "table", text: "", sort: "name", dir: "asc" };
+  const quantities = [...new Set(rows.map((r) => r.quantity).filter(Boolean))].sort();
+  const ctl = { mode: "table", text: "", qty: "all", sort: "name", dir: "asc", page: 0 };
   const host = h("div", {});
+  const pagerHost = h("div", {});
   const status = h("span", { class: "note" });
 
   const onSort = (key) => {
     if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
     else { ctl.sort = key; ctl.dir = key === "name" || key === "node" ? "asc" : "desc"; }
+    ctl.page = 0;
     draw();
   };
 
@@ -836,19 +919,23 @@ async function renderSuite(suite, seq) {
     const needle = ctl.text.trim().toLowerCase();
     if (ctl.mode === "table") {
       const shown = rows
-        .filter((s) => !needle || `${s.case} ${s.params} ${s.node}`.toLowerCase().includes(needle))
+        .filter((s) => (ctl.qty === "all" || s.quantity === ctl.qty) && (!needle || `${s.case} ${s.params} ${s.node} ${s.quantity}`.toLowerCase().includes(needle)))
         .sort((a, b) => {
           const v = (x) => ctl.sort === "name" ? caseLabel(x) : ctl.sort === "value" ? x.estimate : ctl.sort === "change" ? (x.vs_prev == null ? null : Math.abs(x.vs_prev)) : ctl.sort === "noise" ? x.noise : ctl.sort === "points" ? x.points : x.node;
           return cmpVal(v(a), v(b), ctl.dir) || caseLabel(a).localeCompare(caseLabel(b));
         });
-      status.textContent = `${shown.length} of ${rows.length} series`;
+      const totalPages = Math.max(1, Math.ceil(shown.length / PAGE));
+      ctl.page = Math.min(ctl.page, totalPages - 1);
+      const start = ctl.page * PAGE;
+      const slice = shown.slice(start, start + PAGE);
+      status.textContent = shown.length ? `Showing ${start + 1}–${start + slice.length} of ${shown.length.toLocaleString()} series` : "0 series";
       host.replaceChildren(table(
         ["Benchmark", "Machine", ">Latest", ">vs previous", ">vs 10 back", ">Noise", ">Points"],
-        shown.map((s) => {
+        slice.map((s) => {
           const cls = isFailed(s.status) ? "cell-bad" : changeCellClass(s.vs_prev, s.direction, s.noise);
           return [
-            h("a", { href: benchHref(s, { node: s.node }), class: "mono" }, caseLabel(s)),
-            s.node,
+            benchLink(s, { node: s.node }),
+            { v: s.node, cls: "nowrap" },
             fmtValue(s.estimate, s.unit),
             { v: isFailed(s.status) ? failTag(s.reason, s.status) : delta(s.vs_prev, s.direction, { noise: s.noise, unit: s.unit }), cls },
             delta(s.vs_10, s.direction, { unit: s.unit }),
@@ -857,9 +944,15 @@ async function renderSuite(suite, seq) {
           ];
         }),
         { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "node", "value", "change", null, "noise", "points"] } }));
+      pagerHost.replaceChildren(shown.length > PAGE ? h("div", { class: "pager" },
+        h("span", { class: "note" }, `Page ${ctl.page + 1} of ${totalPages}`),
+        h("div", { class: "btns" },
+          h("button", { class: "ghost", disabled: ctl.page === 0, onclick: () => { ctl.page--; draw(); window.scrollTo(0, 0); } }, "← Prev"),
+          h("button", { class: "ghost", disabled: ctl.page >= totalPages - 1, onclick: () => { ctl.page++; draw(); window.scrollTo(0, 0); } }, "Next →"))) : "");
     } else {
-      const shown = groups.filter((g) => !needle || g.displayName.toLowerCase().includes(needle) || g.list.some((s) => caseLabel(s).toLowerCase().includes(needle)));
+      const shown = groups.filter((g) => (ctl.qty === "all" || g.quantity === ctl.qty) && (!needle || g.displayName.toLowerCase().includes(needle) || g.list.some((s) => caseLabel(s).toLowerCase().includes(needle))));
       status.textContent = `${shown.length} of ${groups.length} benchmarks`;
+      pagerHost.replaceChildren();
       const grid = h("div", { class: "grid" });
       const cards = shown.map((g) => { const [card, plot] = benchCard(g); grid.append(card); return [g, plot]; });
       host.replaceChildren(grid);
@@ -872,16 +965,20 @@ async function renderSuite(suite, seq) {
 
   const btnTable = h("button", { class: "active", onclick: () => { ctl.mode = "table"; btnTable.className = "active"; btnGrid.className = ""; draw(); } }, "Table");
   const btnGrid = h("button", { onclick: () => { ctl.mode = "grid"; btnGrid.className = "active"; btnTable.className = ""; draw(); } }, "Sparklines");
+  const qtySelect = quantities.length > 1 ? h("label", {}, "Quantity",
+    h("select", { onchange: (e) => { ctl.qty = e.target.value; ctl.page = 0; draw(); } },
+      ["all", ...quantities].map((qv) => h("option", { value: qv, selected: qv === ctl.qty }, qv === "all" ? "all" : qv)))) : null;
   const failing = groups.filter((g) => isFailed(g.status)).length;
   const main = h("main", {},
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "overview"), " / ", h("a", { href: "#/suites" }, "suites"), " / ", suite),
     h("h2", { class: "mono title" }, suite),
-    h("p", { class: "lead" }, `${groups.length} benchmarks (${rows.length} series) across ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null),
+    h("p", { class: "lead" }, `${groups.length} benchmarks (${rows.length.toLocaleString()} series) across ${hist.commits.length} measured commits`, failing ? [", ", h("span", { class: "bad" }, `${failing} failing`)] : null),
     h("div", { class: "filters" },
       h("div", { class: "seg" }, btnTable, btnGrid),
-      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; draw(); } }),
+      qtySelect,
+      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.text = e.target.value; ctl.page = 0; draw(); } }),
       status, sharedLegend(nodes)),
-    host, footer());
+    host, pagerHost, footer());
   draw();
   return main;
 }
@@ -1023,6 +1120,12 @@ async function renderBench(suite, kase, query, seq) {
       });
     }
 
+    const fixedAxes = varyingAxes.filter((ax) => !activeVarying.includes(ax));
+    const summaryRep = plotted.find((s) => s._vid === summaryVid) || plotted[0];
+    const fixedSummaryText = multiVariantShown && fixedAxes.length && summaryRep
+      ? fixedAxes.map((ax) => (/^arg\d+$/.test(ax.key) ? valOf(summaryRep, ax.key) : `${ax.key}=${valOf(summaryRep, ax.key)}`)).join(" / ")
+      : null;
+
     const variantSelector = multiVariantShown
       ? h("select", {
           class: "summary-variant",
@@ -1037,6 +1140,7 @@ async function renderBench(suite, kase, query, seq) {
     summaryHost.replaceChildren(h("aside", { class: "summary-box" },
       h("h3", {}, "Summary"),
       variantSelector,
+      fixedSummaryText ? h("p", { class: "summary-fixed mono", title: "Fixed parameter axes" }, fixedSummaryText) : null,
       kpi ? h("dl", { class: "kv" },
         h("dt", {}, "Latest"), h("dd", { class: "big num" }, fmtValue(kpi.estimate, unit)),
         h("dt", {}, "vs prev"), h("dd", {}, delta(kpi.vs_prev, direction, { unit, noise: kpi.noise })),
@@ -1046,10 +1150,12 @@ async function renderBench(suite, kase, query, seq) {
         h("dt", {}, "Points"), h("dd", { class: "num" }, `${kpi.points}${reps > 1 ? ` (${reps} reps)` : ""}`),
         h("dt", {}, "Commit"), h("dd", {}, h("a", { href: `#/c/${encodeURIComponent(kpi.sha)}`, class: "mono" }, shortSha(kpi.sha, 8))),
         h("dt", {}, "Machine"), h("dd", {}, kpi.node),
+        h("dt", {}, "Suite"), h("dd", {}, h("a", { href: `#/s/${encodeURIComponent(suite)}`, class: "mono" }, suite)),
       ) : h("p", { class: "note" }, "No successful measurement yet."),
       h("div", { class: "summary-actions" },
         h("button", { class: "ghost", onclick: () => exportCsv(shown, hist.commits, suite, familyName, unit) }, "Download CSV"),
-        kpi ? h("a", { class: "button", href: `#/c/${encodeURIComponent(kpi.sha)}` }, "Open commit") : null)));
+        kpi ? h("a", { class: "button", href: `#/c/${encodeURIComponent(kpi.sha)}` }, "Open commit") : null,
+        kpi && upstreamFileUrl(kpi.sha, suite) ? h("a", { class: "button", href: upstreamFileUrl(kpi.sha, suite), target: "_blank", rel: "noopener" }, "View suite") : null)));
 
     if (varyingAxes.length > 0) {
       const refForPin = shown.find((s) => s._vid === summaryVid) || focused || members[0];
@@ -1116,11 +1222,11 @@ async function renderBench(suite, kase, query, seq) {
         histRows.push({
           order: s.orders[i],
           cells: [
-            h("a", { href: `#/c/${encodeURIComponent(c.sha || "")}`, class: "mono" }, c.short || ""),
-            fmtDate(c.date),
+            { v: h("a", { href: `#/c/${encodeURIComponent(c.sha || "")}`, class: "mono" }, c.short || ""), cls: "nowrap" },
+            { v: fmtDate(c.date), cls: "nowrap" },
             (c.subject || "").length > 64 ? c.subject.slice(0, 62) + "…" : (c.subject || ""),
-            s.node,
-            ...(multiVariantShown ? [h("span", { class: "mono" }, s._plabel)] : []),
+            { v: s.node, cls: "nowrap" },
+            ...(multiVariantShown ? [{ v: h("span", { class: "mono" }, s._plabel), cls: "nowrap" }] : []),
             est != null ? fmtValue(est, unit, scale) : failTag(s.reasons?.[i], s.statuses?.[i] || "failed"),
             range,
             { v: delta(rel, direction, { unit, noise: sLatest?.noise }), cls: changeCellClass(rel, direction, sLatest?.noise) },
@@ -1131,9 +1237,23 @@ async function renderBench(suite, kase, query, seq) {
     }
     histRows.sort((a, b) => b.order - a.order);
     const headers = ["Commit", "Date", "Subject", "Machine", ...(multiVariantShown ? ["Parameters"] : []), `>Median`, ">Min–Max (n)", ">vs prev"];
-    historyTableHost.replaceChildren(
-      h("h3", {}, `Measurements (${histRows.length})`),
-      table(headers, histRows.map((r) => r.cells), { empty: "no measurements" }));
+    let histPage = 0;
+    const drawHistTable = () => {
+      const totalPages = Math.max(1, Math.ceil(histRows.length / PAGE));
+      histPage = Math.min(histPage, totalPages - 1);
+      const start = histPage * PAGE;
+      const slice = histRows.slice(start, start + PAGE);
+      const pager = histRows.length > PAGE ? h("div", { class: "pager" },
+        h("span", { class: "note" }, `Showing ${start + 1}–${start + slice.length} of ${histRows.length.toLocaleString()} · Page ${histPage + 1} of ${totalPages}`),
+        h("div", { class: "btns" },
+          h("button", { class: "ghost", disabled: histPage === 0, onclick: () => { histPage--; drawHistTable(); } }, "← Prev"),
+          h("button", { class: "ghost", disabled: histPage >= totalPages - 1, onclick: () => { histPage++; drawHistTable(); } }, "Next →"))) : null;
+      historyTableHost.replaceChildren(
+        h("h3", {}, `Measurements (${histRows.length.toLocaleString()})`),
+        table(headers, slice.map((r) => r.cells), { empty: "no measurements" }),
+        pager);
+    };
+    drawHistTable();
   };
 
   const failing = members
@@ -1151,9 +1271,10 @@ async function renderBench(suite, kase, query, seq) {
     quantities.length > 1 ? select("Quantity", "q", quantities, activeQty) : null,
     nodes.length > 1 ? select("Machine", "node", ["all", ...nodes], nodeFilter) : null);
 
+  const activeDir = members.find((s) => s.quantity === activeQty)?.direction || members[0]?.direction;
   const leadBits = [
     activeQty,
-    members[0]?.direction ? members[0].direction.replace(/-/g, " ") : null,
+    activeDir ? activeDir.replace(/-/g, " ") : null,
     totalVariants > 1 ? `${totalVariants} parameter variants` : null,
   ].filter(Boolean).join(" · ");
 
@@ -1262,10 +1383,11 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
         },
       };
 
+  const axisInk = cssVar("--ink-2");
   const xAxis = useDate
-    ? { stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "11.5px system-ui, sans-serif" }
+    ? { stroke: axisInk, grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "12px system-ui, sans-serif" }
     : {
-        stroke: cssVar("--muted"), grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "11.5px system-ui, sans-serif", space: 70, gap: 6,
+        stroke: axisInk, grid: { show: false }, ticks: { stroke: cssVar("--axis"), width: 1 }, font: "12px system-ui, sans-serif", space: 72, gap: 6,
         splits: (u, axisIdx, min, max, incr) => { const step = Math.max(1, Math.ceil(incr)); const out = []; for (let i = Math.max(0, Math.ceil(min)); i <= Math.min(xs.length - 1, Math.floor(max)); i += step) out.push(i); return out; },
         values: (u, vals) => vals.map((v) => axis[v] ? (axis[v].short.includes("+dirty") ? axis[v].short.slice(0, 13) : axis[v].short.slice(0, 7)) : ""),
       };
@@ -1278,7 +1400,7 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
     scales: { x: xScale, y: yScale },
     axes: [
       xAxis,
-      { stroke: cssVar("--muted"), grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "11.5px system-ui, sans-serif", size: 58, values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
+      { stroke: axisInk, grid: { stroke: cssVar("--grid"), width: 1 }, ticks: { show: false }, font: "12px system-ui, sans-serif", size: 64, values: (u, vals) => vals.map((v) => fmtNum(v, 3)) },
     ],
     series: [{ label: useDate ? "date" : "commit" }, ...seriesList.map((s, k) => {
       const lbl = labelFor(s);
@@ -1330,15 +1452,15 @@ function drawHistory(wrap, seriesList, axis, unit, title, plotOpts, noise) {
 // ---- commit detail (#/c/<sha>) ------------------------------------------------------
 
 async function renderCommit(sha, seq) {
-  let c = state.commits.get(sha);
-  if (!c) { c = await getJSON(`views/commits/${encodeURIComponent(safeFile(sha))}.json`); state.commits.set(sha, c); }
+  const c = await loadCommit(sha);
   if (seq != null && seq !== state.routeSeq) return null;
-  const ctl = { needle: "", min: 0, hideNoise: false, sort: "change", dir: "desc" };
+  const ctl = { needle: "", min: 0, hideNoise: false, sort: "change", dir: "desc", page: 0 };
   const body = h("div", {});
 
   const onSort = (key) => {
     if (ctl.sort === key) ctl.dir = ctl.dir === "asc" ? "desc" : "asc";
     else { ctl.sort = key; ctl.dir = key === "name" || key === "suite" ? "asc" : "desc"; }
+    ctl.page = 0;
     draw();
   };
 
@@ -1351,20 +1473,30 @@ async function renderCommit(sha, seq) {
         const v = (x) => ctl.sort === "name" ? caseLabel(x) : ctl.sort === "suite" ? x.suite : ctl.sort === "before" ? x.prev_estimate : ctl.sort === "after" ? x.estimate : ctl.sort === "noise" ? x.noise : Math.abs(x.rel_change);
         return cmpVal(v(a), v(b), ctl.dir);
       });
+    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE));
+    ctl.page = Math.min(ctl.page, totalPages - 1);
+    const start = ctl.page * PAGE;
+    const slice = rows.slice(start, start + PAGE);
+    const pager = rows.length > PAGE ? h("div", { class: "pager" },
+      h("span", { class: "note" }, `Showing ${start + 1}–${start + slice.length} of ${rows.length.toLocaleString()} (${c.changes.length.toLocaleString()} compared) · Page ${ctl.page + 1} of ${totalPages}`),
+      h("div", { class: "btns" },
+        h("button", { class: "ghost", disabled: ctl.page === 0, onclick: () => { ctl.page--; draw(); } }, "← Prev"),
+        h("button", { class: "ghost", disabled: ctl.page >= totalPages - 1, onclick: () => { ctl.page++; draw(); } }, "Next →")))
+      : h("p", { class: "note" }, `${rows.length.toLocaleString()} of ${c.changes.length.toLocaleString()} compared series`);
     body.replaceChildren(table(
       ["Benchmark", "Suite", "Machine", "Baseline", ">Before", ">After", ">Change", ">Noise"],
-      rows.map((ch) => [
-        h("a", { href: benchHref(ch, { node: ch.node }), class: "mono" }, caseLabel(ch)),
-        shortSuite(ch.suite),
-        ch.node,
-        h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, shortSha(ch.prev_sha, 7))),
+      slice.map((ch) => [
+        benchLink(ch, { node: ch.node }),
+        { v: shortSuite(ch.suite), cls: "nowrap" },
+        { v: ch.node, cls: "nowrap" },
+        { v: h("span", {}, gapTag(ch), " ", h("a", { href: `#/c/${encodeURIComponent(ch.prev_sha)}`, class: "mono" }, shortSha(ch.prev_sha, 7))), cls: "nowrap" },
         fmtValue(ch.prev_estimate, ch.unit),
         fmtValue(ch.estimate, ch.unit),
         { v: delta(ch.rel_change, ch.direction, { noise: ch.noise, unit: ch.unit }), cls: changeCellClass(ch.rel_change, ch.direction, ch.noise) },
         fmtAbsPct(ch.noise),
       ]),
       { sort: { key: ctl.sort, dir: ctl.dir, onSort, keys: ["name", "suite", null, null, "before", "after", "change", "noise"] }, empty: "no changes match" }),
-      h("p", { class: "note" }, `${rows.length} of ${c.changes.length} compared series`));
+      pager);
   };
 
   const upUrl = upstreamCommit(c.sha);
@@ -1397,10 +1529,10 @@ async function renderCommit(sha, seq) {
         h("a", { href: benchHref(f, { node: f.node }), class: "mono" }, caseLabel(f)), shortSuite(f.suite), f.node, f.quantity, h("code", {}, f.reason || f.status)]))] : null,
     h("h3", {}, "Changes against previous measured point"),
     h("div", { class: "filters" },
-      h("label", {}, "Min |Δ|", h("select", { onchange: (e) => { ctl.min = Number(e.target.value) / 100; draw(); } },
+      h("label", {}, "Min |Δ|", h("select", { onchange: (e) => { ctl.min = Number(e.target.value) / 100; ctl.page = 0; draw(); } },
         [0, 1, 2, 5, 10].map((p) => h("option", { value: p }, p ? `≥ ${p}%` : "all")))),
-      h("label", {}, h("input", { type: "checkbox", onchange: (e) => { ctl.hideNoise = e.target.checked; draw(); } }), "hide within-noise"),
-      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.needle = e.target.value; draw(); } })),
+      h("label", {}, h("input", { type: "checkbox", onchange: (e) => { ctl.hideNoise = e.target.checked; ctl.page = 0; draw(); } }), "hide within-noise"),
+      h("input", { type: "search", placeholder: "filter benchmarks…", "aria-label": "filter benchmarks", oninput: (e) => { ctl.needle = e.target.value; ctl.page = 0; draw(); } })),
     body, footer());
   draw();
   return main;
@@ -1469,7 +1601,14 @@ function header() {
       if (items.length >= 14) break;
     }
     list.hidden = items.length === 0;
-    items.forEach((s) => list.append(h("li", { role: "option", onclick: () => go(s) }, h("span", { class: "mono" }, caseLabel(s)), h("span", { class: "where" }, shortSuite(s.suite)))));
+    items.forEach((s) => {
+      const p = formatParams(s.params);
+      list.append(h("li", { role: "option", onclick: () => go(s) },
+        h("span", { class: "search-main" },
+          h("span", { class: "mono" }, s.case, p ? [" ", h("span", { class: "bench-params" }, p)] : null),
+          qtyTag(s)),
+        h("span", { class: "where" }, shortSuite(s.suite))));
+    });
   };
   const go = (s) => { input.value = ""; list.hidden = true; location.hash = benchHref(s); };
   input.addEventListener("input", show);
@@ -1556,6 +1695,14 @@ async function init() {
     state.v = state.manifest.built_at;
     [state.project, state.landing, state.series] = await Promise.all([
       getJSON("project.json").catch(() => ({})), getJSON("views/landing.json"), getJSON("views/series.json")]);
+    const qByCase = new Map();
+    for (const s of state.series) {
+      const k = `${s.suite}|${s.case}|${s.params || ""}`;
+      let qs = qByCase.get(k);
+      if (!qs) { qs = new Set(); qByCase.set(k, qs); }
+      if (s.quantity) qs.add(s.quantity);
+    }
+    state.multiQty = new Set([...qByCase].filter(([, qs]) => qs.size > 1).map(([k]) => k));
   } catch (e) {
     root.replaceChildren(h("main", {}, h("section", { class: "empty-box" },
       h("h2", {}, "This page has not been built yet"),
