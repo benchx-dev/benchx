@@ -1,9 +1,13 @@
 """benchx/paired-relative/v1 (comparator.md §4.4): mean relative difference over paired rounds."""
 
+import logging
 import math
 import statistics
 
-from ..evidence import Assessment, Method, change_label
+from ..evidence import NOT_COMPARABLE, Assessment, Method, change_label
+from ..projection import workload_label
+
+logger = logging.getLogger(__name__)
 
 # The noise is the standard error of the per-round differences, so a verdict needs
 # at least two pairs, whatever `min_rounds` a caller asks for.
@@ -45,6 +49,13 @@ class PairedRelative(Method):
             else:
                 excluded.extend((row, "unpaired") for row in (*baseline, *contender))
         used = tuple(row for pair in pairs for row in pair)
+        label = f"{workload_label(evidence.workload)} [{evidence.quantity['name']}]"
+        one_sided = [(r, "baseline" if baseline else "contender") for r, (baseline, contender)
+                     in zip(layout.coords.get("round", ()), layout.cells) if bool(baseline) != bool(contender)]
+        if one_sided and evidence.no_verdict not in NOT_COMPARABLE:
+            logger.debug("%s: %d round(s) paired, %d dropped for a success on one side only (%s)", label,
+                         len(layout.cells) - len(one_sided), len(one_sided),
+                         "; ".join(f"round {r} has {side} only" for r, side in one_sided))
         details = {"rounds": sum(1 for baseline, contender in layout.cells if baseline and contender),
                    "noise_kind": "standard-error", "noise_source": "paired-rounds"}
 
@@ -53,6 +64,11 @@ class PairedRelative(Method):
 
         if evidence.no_verdict:
             return indeterminate(evidence.no_verdict)
+        complete = [(b[0], c[0]) for b, c in layout.cells if b and c]
+        if empty := [row.result["ingest_key"] for pair in complete for row in pair if row.estimate is None]:
+            logger.warning("%s: %d success(es) with no observations are dropped from the pairs; rounds counts %d "
+                           "pair(s) before this and the threshold %d after it: %s", label, len(empty), len(complete),
+                           len(pairs), ", ".join(empty[:3]) + (", …" if len(empty) > 3 else ""))
         estimates = [(b.estimate, c.estimate) for b, c in pairs]
         if estimates:
             details["reference_estimate"] = statistics.median(b for b, _ in estimates)
@@ -73,6 +89,23 @@ class PairedRelative(Method):
                    else change_label(effect, evidence.quantity.get("direction")))
         return Assessment(verdict, effect={"measure": "relative", "value": effect}, used=used,
                           excluded=tuple(excluded), details=details)
+
+    def configured(self, config):
+        if config["min_rounds"] < MIN_PAIRS:
+            logger.warning("min_rounds %d is below %d, the fewest rounds a verdict needs: %d is used",
+                           config["min_rounds"], MIN_PAIRS, MIN_PAIRS)
+
+    def log_facts(self, unit, config):
+        details = unit["details"]
+        facts = [f"rounds {details['rounds']}"]
+        if "reference_estimate" in details:
+            facts.append(f"reference {details['reference_estimate']:.6g}")
+        if "effect" in unit:
+            facts += [f"effect {unit['effect']['value']:+.2%}", f"noise {details['noise']:.2%}",
+                      f"k x noise {details['threshold']:.2%}"]
+        if unit.get("reason") == "insufficient-rounds":
+            facts.append(f"{max(config['min_rounds'], MIN_PAIRS)} paired rounds required")
+        return facts
 
     def describe(self, effect, details):
         shown = f"{effect['value']:+8.2%}" if effect else "       ?"

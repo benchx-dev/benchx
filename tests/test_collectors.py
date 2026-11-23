@@ -178,7 +178,7 @@ def result_of(run_key):
 
 def test_bench_runs_the_collector_and_records_its_facts(project):
     configure(project)
-    assert cli.main(["bench", "@x", *FAST, "--run-key", "c1"]) == cli.EXIT_OK
+    assert cli.main(["bench", "@x", *FAST, "--run-key", "c1", "--no-ingest"]) == cli.EXIT_OK
     document = result_of("c1")
     assert core.check(document, "measurement-result") == []
     assert document["coordinates"]["environment"]["system"]["facts"]["s"] == 1 and "sha256" in document["coordinates"]["environment"]["system"]["facts"]
@@ -190,7 +190,7 @@ def test_bench_runs_the_collector_and_records_its_facts(project):
 def test_a_mismatch_refuses_the_order_before_any_case(project, capsys, monkeypatch):
     configure(project)
     monkeypatch.setenv("K", "2")
-    assert cli.main(["bench", "@x", *FAST, "--run-key", "c2"]) == cli.EXIT_REFUSED
+    assert cli.main(["bench", "@x", *FAST, "--run-key", "c2", "--no-ingest"]) == cli.EXIT_REFUSED
     assert "how_built /k: declared 1, observed 2" in capsys.readouterr().err
     assert not list(project.glob("results/c2/*_wall-time.json"))
 
@@ -198,7 +198,7 @@ def test_a_mismatch_refuses_the_order_before_any_case(project, capsys, monkeypat
 def test_a_warn_mismatch_runs_and_marks_every_result(project, monkeypatch):
     configure(project, on_fail="warn")
     monkeypatch.setenv("K", "2")
-    assert cli.main(["bench", "@x", *FAST, "--run-key", "c3"]) == cli.EXIT_OK
+    assert cli.main(["bench", "@x", *FAST, "--run-key", "c3", "--no-ingest"]) == cli.EXIT_OK
     assert warnings_of(result_of("c3")) == ["collector-mismatch"]
 
 
@@ -206,7 +206,7 @@ def test_bx_run_refuses_an_order_with_collectors_unless_allowed(project, tmp, ca
     configure(project)
     assert cli.main(["bench", "@x", *FAST, "--run-key", "c4", "--no-ingest"]) == cli.EXIT_OK
     order = project / "results" / "c4" / "orders" / "order.json"
-    assert cli.main(["run", str(order), "--out", str(tmp / "o1")]) == cli.EXIT_REFUSED
+    assert cli.main(["run", str(order), "--out", str(tmp / "o1"), "--no-ingest"]) == cli.EXIT_REFUSED
     assert "--allow-collectors" in capsys.readouterr().err
     with pytest.raises(runner.Refused):
         runner.run(order, tmp / "o2")

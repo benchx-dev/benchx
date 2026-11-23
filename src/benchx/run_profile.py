@@ -7,8 +7,10 @@ checks a method needs, such as alternation, are the method's to ask for. Units
 are the profile projection's series.
 """
 
+import collections
 import dataclasses
 import json
+import logging
 import re
 
 from . import identity
@@ -17,7 +19,9 @@ from .evidence import COLUMNS, CompareError, Evidence, Row, Selection, Selector,
 from .key import escape, get
 from .projection import Projection, axis_order, declared_workload, estimate, said, values
 from .snapshot import DIRTY_WARNINGS
-from .store import store_project
+from .results import store_project
+
+logger = logging.getLogger(__name__)
 
 PROFILES = {
     # UC-03: two subject trees from one run.
@@ -178,6 +182,13 @@ class RunProfile(Selector):
             return selection
         contender = next(side for side in names if side != base)
         selection.sides["contender"] = names[contender]
+        if profile == "revisions":
+            how = ("a prefix of the side's tree id" if any(str(names[s]).startswith(baseline) for s in matches)
+                   else "a prefix of a result's revision.key")
+        else:
+            how = "equality with the recorded value"
+        logger.info("baseline %s (asked: %s, matched by %s), contender %s", names[base], baseline, how, names[contender])
+        _log_declarations(documents, sides, base, contender)
         selection.sides["declared"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == side))
                                        for role, side in zip(ROLES, (base, contender))}
         selection.slots = slot_schedule((COLUMNS["slot"].read(d), s) for d, s in zip(documents, sides))
@@ -188,6 +199,10 @@ class RunProfile(Selector):
         selection.units.extend(
             self._unit(projection, unit, base, contender, strict)
             for unit in sorted(units, key=lambda u: _unit_order(_workload(u["docs"], projection.axis), u["quantity"])))
+        ignored = collections.Counter(p for u in selection.units for p in (u.unmatched_differences or ()))
+        if ignored:
+            logger.debug("facts that differ between the sides but that the identity policy ignores, so no invariant "
+                         "fails: %s", ", ".join(f"{pointer} ({n} unit(s))" for pointer, n in sorted(ignored.items())))
         return selection
 
     def _profile_invariants(self, projection, documents, names, sides, base, contender, varying) -> list[dict]:
@@ -360,6 +375,22 @@ def _diff(pointer: str, found: list) -> list[str]:
 def _differing(facts: list[dict]) -> list[str]:
     """Pointers whose value is not the same in every one of `facts` (pointer -> value)."""
     return sorted(p for key in set().union(*facts) for p in _diff(key, [f.get(key, _ABSENT) for f in facts]))
+
+
+def _log_declarations(documents, sides, base, contender) -> None:
+    """`sides` takes each side's declarations (how built, activation, shell, provider) from its first result in
+    sort order and never looks at the others: say which result that was, and warn when the others disagree
+    (the fields' names: never their values, which are the user's text and the inherited environment)."""
+    for role, side in zip(ROLES, (base, contender)):
+        ours = [d for d, x in zip(documents, sides) if x == side]
+        first = _declared(ours[0])
+        logger.debug("the %s side's declarations come from %s %s", role, ours[0]["producer"]["name"],
+                     ours[0]["ingest_key"])
+        differing = sorted({k for d in ours[1:] for k in set(first) | set(_declared(d))
+                            if first.get(k) != _declared(d).get(k)} - {"observed_env"})
+        if differing:
+            logger.warning("the %s side's results disagree about %s: the comparison shows the first result's",
+                           role, ", ".join(differing))
 
 
 def _declared(document) -> dict:

@@ -5,7 +5,10 @@ writes its JSON format. Behaviour comes from fake-bench.json beside it:
 
   {"seed": 1, "cases": {"BM_Quiet/1024": {"mean": 1e-3, "rel_sd": 0.002}},
    "error": ["BM_Broken"], "skip": ["BM_Skipped"], "sleep": {"BM_Slow": 5},
-   "ghost": ["BM_Ghost"]}
+   "ghost": ["BM_Ghost"], "scaling": true, "build_type": "debug"}
+
+A "scaling" build says in its context that CPU frequency scaling is on; a "build_type" other than the default
+"release" is the benchmark library's.
 
 A ghost case is listed but never reported, as a binary that drops a case does.
 
@@ -65,7 +68,8 @@ for case in cases:
                          "real_time": value * 1e9, "cpu_time": value * 0.99e9, "time_unit": "ns"})
 
 native = {"context": {"date": "2026-09-25T10:00:00+00:00", "host_name": "fake-host", "num_cpus": 8,
-                      "mhz_per_cpu": 3000, "cpu_scaling_enabled": False, "library_build_type": "release",
+                      "mhz_per_cpu": 3000, "cpu_scaling_enabled": bool(config.get("scaling", False)),
+                      "library_build_type": config.get("build_type", "release"),
                       "library_version": "v1.9.1-fake", "executable": sys.argv[0]},
           "benchmarks": rows}
 if "--benchmark_out" in args:

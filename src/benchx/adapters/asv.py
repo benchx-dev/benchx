@@ -44,18 +44,23 @@ is part of the protocol, so editing a benchmark starts a new series.
 """
 
 import json
+import logging
 import math
 import shutil
 import statistics
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-from .. import snapshot
+from .. import log, snapshot
 from . import benchx_params, pyperf
-from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
-                   kill_group, stop_group)
+from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
+                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
+
+# asv's skip warnings are shown to the user, as `bx` shows its other messages: the one
+# library module that makes console messages, until `list_cases` returns them as data.
+say = log.console(__name__)
+logger = logging.getLogger(__name__)
 
 NAME = "asv"
 CONTEXT_KEY = "asv"
@@ -135,12 +140,15 @@ def _which_python(env: dict) -> str | None:
     return shutil.which("python", path=path) or shutil.which("python3", path=path)
 
 
-def _read_conf(path: Path) -> dict:
-    """asv.conf.json allows // comments; drop whole-line ones, as asv does."""
+def _read_conf(path: Path, level=logging.WARNING) -> dict:
+    """asv.conf.json allows // comments; drop whole-line ones, as asv does. A file that is not JSON gives
+    `{}` and a record at `level`: WARNING from the shorthand, which reads it once per command, DEBUG from
+    `_project`, which reads it again for every order."""
     lines = [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("//")]
     try:
         return json.loads("\n".join(lines))
-    except ValueError:
+    except ValueError as e:
+        logger.log(level, "%s is not valid JSON, so its settings are not applied: %s", path, e)
         return {}
 
 
@@ -149,7 +157,7 @@ def _project(benchmark_dir: Path, root: Path) -> str | None:
     for directory in [benchmark_dir, *benchmark_dir.parents]:
         for name in CONF_NAMES:
             if (directory / name).is_file():
-                return _read_conf(directory / name).get("project")
+                return _read_conf(directory / name, logging.DEBUG).get("project")
         if directory == root:
             break
     return None
@@ -186,13 +194,19 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         shutil.copy(PARAMS, scratch)
         out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
                           timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
-                          env=env, cwd=scratch)
+                          env=env, cwd=scratch, temporary=[scratch])
     if out.returncode != 0:
         raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
     listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
-        print(f"asv: skipped module {failure['module']}: {failure['error']}", file=sys.stderr)
+        say.warning(f"asv: skipped module {failure['module']}: {failure['error']}")
+        # the traceback, beside the console warning; a failed package's submodules are not scanned
+        log.harness_output(logger, f"module {failure['module']}", "traceback", failure.get("traceback"), failed=False)
+        logger.debug("module %s failed to import, so its submodules were not scanned", failure["module"])
+    if listing.get("left_out"):
+        logger.debug("%d benchmark(s) the suite switched off with skip_benchmark: %s%s", len(listing["left_out"]),
+                     ", ".join(listing["left_out"][:40]), ", …" if len(listing["left_out"]) > 40 else "")
     cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
@@ -207,8 +221,8 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
             continue
         scope = info["declared"].get("setup_scope", "call")
         if scope not in SETUP_SCOPES:
-            print(f"asv: skipped {info['name']}: setup_scope must be one of {', '.join(map(repr, SETUP_SCOPES))}, "
-                  f"not {scope!r}", file=sys.stderr)
+            say.warning(f"asv: skipped {info['name']}: setup_scope must be one of "
+                        f"{', '.join(map(repr, SETUP_SCOPES))}, not {scope!r}")
             continue
         runnable["benchmarks"][info["name"]] = info
         for case, target in selected:
@@ -229,8 +243,9 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         raise no_cases(runnable["benchmark_dir"], case_filter,
                        {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
     if other:
-        print(f"asv: not run (only time benchmarks map to wall-time): {not_run}", file=sys.stderr)
-    return cases
+        say.warning(f"asv: not run (only time benchmarks map to wall-time): {not_run}")
+    note_parameters(logger, runnable)
+    return note_cases(logger, cases, case_filter)
 
 
 def _describe(target: tuple[str, int | None]) -> str:
@@ -269,6 +284,31 @@ def _plan(info: dict, invocation: dict) -> dict:
     return {"processes": invocation["processes"], "values": values, "values_from": source, "loops": loops,
             "min_time": min_time, "warmups": warmups, "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT)),
             "loops_from": loops_from, "setup_scope": scope}
+
+
+def _note_plan(info: dict, invocation: dict, plan: dict) -> None:
+    """The case's plan, each setting with where it came from, and what the order asked for that did not
+    apply. The sources are worked out here, for the log: the plan itself is written into the `asv-case`
+    artifact and gets no new keys."""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    declared = info["declared"]
+    sources = {"min_time": "order" if invocation["min_time"] is not None
+               else "sample_time" if "sample_time" in declared else "default",
+               "warmups": "order" if invocation["warmups"] is not None
+               else "warmup_time" if "warmup_time" in declared else "default",
+               "timeout": "timeout" if "timeout" in declared else "default"}
+    logger.debug("plan: values %s (%s), loops %s (%s), min_time %s (%s), warmups %s (%s), timeout %s (%s)",
+                 plan["values"], plan["values_from"], plan["loops"], plan["loops_from"] or "adaptive calibration",
+                 plan["min_time"], sources["min_time"], plan["warmups"], sources["warmups"], plan["timeout"],
+                 sources["timeout"])
+    if invocation["min_time"] is not None and plan["loops"] is not None and plan["loops_from"] != "order":
+        logger.debug("the order's min_time %g s is lost: the loops are fixed at %s by %s", invocation["min_time"],
+                     plan["loops"], "a declared number" if plan["loops_from"] == "number"
+                     else "the default setup_scope of call (any benchmark with a setup hook has it)")
+    if invocation["values"] is None and plan["values_from"] == "default" and declared.get("repeat") is not None:
+        logger.debug("repeat %r is not a form asv_runner reads here, so the default %s values are used",
+                     declared["repeat"], plan["values"])
 
 
 def _flags(plan: dict) -> list[str]:
@@ -345,17 +385,20 @@ finally:
 def _read_json(path: Path):
     try:
         return json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        if path.exists():  # an absent file is how a skipped case or a missing probe looks: not worth a line
+            logger.debug("%s exists but cannot be read: %s", path, e)
         return None
 
 
-def run_case(runnable, case, invocation, env, timeout, native_path, env_names=None) -> dict:
+def run_case(runnable, case, invocation, env, timeout, native_path, env_names=None, harness_verbosity=0) -> dict:
     """One pyperf run for the case; never raises for harness failures, which become results."""
     if env_names is None:
         env_names = snapshot.env_allowlist(env, ENV_ALLOWLIST)
     name, index = runnable["cases"][case]
     info = runnable["benchmarks"][name]
     plan = _plan(info, invocation)
+    _note_plan(info, invocation, plan)
     stem = native_path.name.removesuffix(".native.json")
     driver = native_path.with_name(f"{stem}.driver.py")
     worker_env = native_path.with_name(f"{stem}.worker-env.json")
@@ -373,8 +416,10 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             env_names=list(env_names), benchmark_dir=str(runnable["benchmark_dir"]), module=info["module"],
             attr=info["attr"], index=index, case=case, has_cache=bool(info["setup_cache_key"]),
             skipped=str(skipped), facts=str(facts), project=runnable["project"] or ""))
-        args = [runnable["python"], str(driver.resolve()), *_flags(plan), "-o", str(native_path.resolve())]
+        args = [runnable["python"], str(driver.resolve()), *_flags(plan), *(["--verbose"] if harness_verbosity else []),
+                "-o", str(native_path.resolve())]  # the workers are pyperf's: its --verbose
         # Its own process group, so a timeout takes the workers down with the manager.
+        note_case(logger, args, cwd=scratch, timeout=timeout)
         proc = subprocess.Popen(args, env=env, cwd=scratch, text=True, start_new_session=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
@@ -389,6 +434,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
         skip = _read_json(skipped)
         observed = _read_json(facts) or {}
     native = _read_json(native_path)
+    note_case_ended(logger, status, timeout, native_path, parsed=native is not None, skipped=skip is not None)
     if native is not None:
         native_path.write_text(json.dumps(native, indent=1) + "\n")
     asv = {"benchmark": info, "case": case, "plan": plan, "skipped": skip, **observed}
@@ -403,6 +449,9 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             "stdout": stdout or "", "stderr": stderr or "",
             "native": {**(native or {"benchmarks": []}), "benchx_asv": asv}, "artifacts": artifacts,
             "worker_env": _read_json(worker_env), "passed_env_digest": pyperf.env_digest(env)}
+
+
+explain_warnings = pyperf.explain_warnings  # the workers are pyperf's
 
 
 def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict:

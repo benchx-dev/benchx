@@ -6,10 +6,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
-    "pyarrow>=19",
-    # format-nongpl makes `format: uri` and `format: date-time` actually checked.
-    "jsonschema[format-nongpl]>=4.18",
-    "jsonpointer>=2.0",
+    "jsonschema>=4.18",
+    # Format validators for the formats used by the shipped schemas (`date-time`, `uri`).
+    "rfc3339-validator",
+    "rfc3986-validator>0.1.0",
     "referencing",
     "rfc8785",
 ]
@@ -24,6 +24,7 @@ Documentation = "https://benchx-dev.github.io/benchx/benchx/"
 Repository = "https://github.com/benchx-dev/benchx"
 
 [project.optional-dependencies]
+parquet = ["pyarrow>=19"]
 test = ["pytest", "pyperf", "asv_runner"]
 
 [project.scripts]

@@ -69,14 +69,22 @@ Optional hooks (the runner calls them when present)
 
 import difflib
 import json
+import logging
+import math
 import os
 import re
 import signal
 import subprocess
 import textwrap
+import time
+from pathlib import Path
 
+from .. import log
 from ..core import Refusal, Rejected
 from .benchx_params import combination, search_name
+
+
+logger = logging.getLogger(__name__)
 
 
 class Unsupported(Rejected):
@@ -220,7 +228,49 @@ def stop_group(proc, grace=STOP_GRACE_S) -> None:
     kill_group(proc)
 
 
-def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess:
+def note_cases(adapter_logger, cases, case_filter, limit=40) -> list:
+    """What `list_cases` found, for the log: how many, under which filter, and the first `limit` names."""
+    shown = cases[:limit]
+    more = f", and {len(cases) - len(shown)} more" if len(cases) > len(shown) else ""
+    adapter_logger.debug("%d case(s)%s: %s%s", len(cases), f" for the filter {case_filter!r}" if case_filter else "",
+                         ", ".join(shown), more)
+    return cases
+
+
+def note_parameters(adapter_logger, runnable, limit=40) -> None:
+    """The parametrized benchmarks `list_cases` found: each one's parameters with their values (asv's `repr()`
+    strings) and the number of combinations, one case each. At most `limit` benchmarks."""
+    found = [(name, info) for name, info in runnable.get("benchmarks", {}).items() if info.get("param_names")]
+    for name, info in found[:limit]:
+        values = ", ".join(f"{parameter}: {', '.join(shown[:10])}{', …' if len(shown) > 10 else ''}"
+                           for parameter, shown in zip(info["param_names"], info["params"]))
+        adapter_logger.debug("%s: %d combination(s) of %s", name, math.prod(len(shown) for shown in info["params"]),
+                             values)
+    if len(found) > limit:
+        adapter_logger.debug("and %d more parametrized benchmark(s)", len(found) - limit)
+
+
+def note_case(adapter_logger, args, *, cwd, timeout) -> None:
+    """The command a `run_case` is about to start, as the log shows it, with the directory it
+    runs in (a relative path in the arguments only means something from there) and its limit."""
+    adapter_logger.debug("run_case: %s (in %s, limit %g s)", log.command(args), cwd or Path.cwd(), timeout)
+
+
+def note_case_ended(adapter_logger, status, timeout, native_path, *, parsed, skipped=False) -> None:
+    """After `run_case`'s process: a timeout that killed the group, and the native output file, which a
+    case that exited 0 should have left (WARNING when it is missing or does not parse). A case that
+    failed or timed out has its case line as the warning, so a missing file is then DEBUG; so is the
+    file of a benchmark that skipped itself, which has none."""
+    if status is None:
+        adapter_logger.debug("timed out after %g s: the process group was killed", timeout)
+    if not native_path.exists():
+        if not skipped:
+            adapter_logger.log(logging.WARNING if status == 0 else logging.DEBUG, "native output missing: %s", native_path)
+    elif not parsed:
+        adapter_logger.warning("native output does not parse: %s", native_path)
+
+
+def run_bounded(args, *, timeout, what, scripts=None, temporary=(), **kwargs) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True, **kwargs)` with a time limit.
 
     The child leads its own process group, and the whole group is killed when the limit
@@ -229,13 +279,25 @@ def run_bounded(args, *, timeout, what, **kwargs) -> subprocess.CompletedProcess
     `what` was being done: an order whose discovery cannot finish cannot be planned.
     `timeout` None means no limit.
     """
+    logger.debug("%s: %s (in %s, limit %s)", what, log.command(args, scripts=scripts, temporary=temporary),
+                 kwargs.get("cwd") or Path.cwd(), f"{timeout:g} s" if timeout else "none")
+    started = time.monotonic()
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             start_new_session=True, **kwargs)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as error:
-        kill_group(proc)
+        stdout, stderr = kill_group(proc)
         if isinstance(error, subprocess.TimeoutExpired):
+            logger.debug("%s: no exit after %.1f s; its process group was killed", what, time.monotonic() - started)
+            log.harness_output(logger, what, "stderr", stderr, failed=True)
+            log.harness_output(logger, what, "stdout", stdout, failed=True)
             raise Unsupported(f"{what} did not finish within {timeout:g} s (timeouts.order_s)") from None
+        logger.debug("%s: interrupted (%s); its process group was killed", what, type(error).__name__)
         raise
+    logger.debug("%s: exit %d in %.1f s", what, proc.returncode, time.monotonic() - started)
+    # stdout is the listing benchx parses, so it is logged only when the call failed
+    log.harness_output(logger, what, "stderr", stderr, failed=proc.returncode != 0)
+    if proc.returncode != 0:
+        log.harness_output(logger, what, "stdout", stdout, failed=True)
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)

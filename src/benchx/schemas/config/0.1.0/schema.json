@@ -42,6 +42,7 @@
           "type": "string",
           "minLength": 1
         },
+        "verbosity": { "description": "How much the harness itself is asked to say: 0 (the default), or more (pyperf and asv: --verbose; Google Benchmark: --v=N). The same as --harness-verbosity.", "type": "integer", "minimum": 0 },
         "quantities": {
           "description": "What one run collects, from those the harness reports.",
           "type": "array",
@@ -85,7 +86,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "store": { "description": "The local store (default store.parquet).", "type": "string", "minLength": 1 },
+        "store": { "description": "The local store (default store.parquet when pyarrow is installed, else store.jsonl).", "type": "string", "minLength": 1 },
         "results": { "description": "Where result files are written (default results).", "type": "string", "minLength": 1 }
       }
     },
@@ -98,6 +99,17 @@
         "k": { "type": "number", "exclusiveMinimum": 0 },
         "min_rounds": { "type": "integer", "minimum": 1 }
       }
+    },
+    "logging": {
+      "description": "Diagnostics: false (off), true (to stderr), or a file to append to, relative to this file's directory. {out} in the path is the run's output folder and {root} the project root, as in collectors. Default: {out}/bx.log.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "string", "minLength": 1, "not": { "pattern": "\\.json$" } }
+      ]
+    },
+    "log_level": {
+      "description": "Level of what the log keeps: debug (the default), info, warning or error.",
+      "enum": ["debug", "info", "warning", "error"]
     }
   }
 }

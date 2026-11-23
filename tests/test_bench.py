@@ -11,8 +11,7 @@ pytest.importorskip("pyperf")
 
 from benchx import cli, config, core, harnesses, session
 from benchx.errors import SessionError
-from benchx.store import Store
-from conftest import SOURCE_URI
+from conftest import SOURCE_URI, requires_pyarrow
 
 MODULE = textwrap.dedent('''
     def bench_a():
@@ -68,7 +67,9 @@ def test_both_calibration_flags_conflict():
         harnesses.PYPERF.flags_to_precision(min_time=0.1, loops=5)
 
 
+@requires_pyarrow
 def test_bench_command_runs_and_ingests(tree, capsys):
+    from benchx.store import Store
     assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "cli", "--project", "p", *FAST]) == cli.EXIT_OK
     out = capsys.readouterr()
     assert "bench_a" in out.out and "success" in out.out and "bench_b" not in out.out
@@ -213,6 +214,11 @@ def test_bench_places_calls_in_a_session(tree):
     (["--run-key", "S", "--slot", "0", "--label", "env"], "NAME=VALUE"),
     (["--run-key", "S", "--slot", "0", "--label", "env=a", "--label", "env=b"], "given twice"),
     (["--run-key", "S", "--slot", "-1"], "from 0"),
+    (["--run-key", "S", "--slot", "0", "--round", "-1"], "from 0"),
+    (["--run-key", "S", "--slot", "0", "--round", "5/5"], "numbered 0 to 4"),
+    (["--run-key", "S", "--slot", "0", "--round", "0/0"], "at least 1 round, not 0"),
+    (["--run-key", "S", "--slot", "0", "--round", "a"], "R/N"),
+    (["--run-key", "S", "--slot", "0", "--round", "1/x"], "R/N"),
 ])
 def test_session_flags_are_refused_before_anything_runs(extra, message, tree, capsys):
     assert cli.main(["bench", "mod.py", "bench_a", "--no-ingest", *extra, *FAST]) == cli.EXIT_REFUSED

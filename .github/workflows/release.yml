@@ -72,7 +72,7 @@ jobs:
         run: |
           uv venv --python 3.13 "$RUNNER_TEMP/venv"
           source "$RUNNER_TEMP/venv/bin/activate"
-          uv pip install "$(ls dist/*.whl)[test]"
+          uv pip install "$(ls dist/*.whl)[parquet,test]"
           # Away from the checkout, so that nothing can import it instead of the installed package.
           cd "$RUNNER_TEMP"
           bx --help

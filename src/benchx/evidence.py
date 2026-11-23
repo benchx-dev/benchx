@@ -130,6 +130,14 @@ class Method:
         """One line of the reviewer's table for a unit this method assessed."""
         raise NotImplementedError
 
+    def configured(self, config: dict) -> None:
+        """Log what of `config` the method will not take as given; once per comparison. Nothing by default."""
+
+    def log_facts(self, unit: dict, config: dict) -> list[str]:
+        """The facts of a unit the log records after its verdict and reason, such as `rounds 5`."""
+        return [*([f"effect {unit['effect']['measure']} {unit['effect']['value']:+.4g}"] if "effect" in unit else []),
+                *(f"{key} {value}" for key, value in unit["details"].items())]
+
 
 class Selector:
     """A selector forms the evidence (comparator.md §2.2, §2.3, §2.5)."""

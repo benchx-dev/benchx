@@ -21,6 +21,8 @@ import textwrap
 
 import pytest
 
+pytest.importorskip("pyarrow")
+
 from benchx import harnesses, session
 from benchx.store import Store
 from conftest import SOURCE_URI, git

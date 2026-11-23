@@ -9,6 +9,7 @@ in comparator.md; a selector for them would call `evaluate` as run mode does.
 
 import collections
 import json
+import logging
 
 from jsonschema import Draft202012Validator
 
@@ -18,17 +19,80 @@ from .evidence import NOT_COMPARABLE, SIDE, CompareError, Evidence, Layout, Meth
 from .projection import workload_label
 from .run_profile import PROFILES, RUN_PROFILE, _declared, dotted, infer_parameter, profile_projection  # noqa: F401
 
+logger = logging.getLogger(__name__)
+
 
 def compare(documents, *, run_key, profile, baseline, label=None, parameter=None, method=methods.DEFAULT,
             **config) -> dict:
     """Two sides of one run under a method. `label` names the sides of `environments`, and
     `parameter` those of `variants`. Any other keyword is the method's configuration, such
-    as `k` and `min_rounds` for the default."""
+    as `k` and `min_rounds` for the default. The comparator's contract is about its result (the same
+    inputs give the same document), which logging does not touch: this logs the inputs, then the
+    outcome from the document, so that every return path gets its records."""
     chosen = methods.get(method)
     configuration = _configure(chosen, config)
     selection = RUN_PROFILE.select(documents, run_key=run_key, profile=profile, baseline=baseline, label=label,
                                    parameter=parameter)
-    return evaluate(selection, chosen, configuration)
+    doc = evaluate(selection, chosen, configuration)
+    _log_outcome(doc, documents, chosen, configuration, asked=baseline)
+    return doc
+
+
+def _log_outcome(doc, documents, method: Method, configuration: dict, *, asked=None) -> None:
+    """What the comparison found, one record per fact that explains a verdict or the lack of one."""
+    params, sides = doc["selector"]["params"], doc.get("sides", {})
+    run_key, profile = params.get("run_key"), params.get("profile")
+    ours = [d for d in documents if d["provenance"].get("run_key") == run_key]
+    logger.debug("compare: run %s, profile %s, varying %s, identity schema %s, baseline as typed %r, method %s (%s); "
+                 "%d result document(s) used of %d offered (the others are conditions, such as the load average)",
+                 run_key, profile, sides.get("varying"), doc["identity_schema"], asked, method.id,
+                 ", ".join(f"{key} {value}" for key, value in configuration.items()), len(doc["inputs"]), len(ours))
+    if doc["local_only"]:
+        dirty = sorted({f"the {what} tree {(d['provenance'].get(tree) or d['revision']['key'])[:12]} is "
+                        f"{d['provenance'][flag]}" for d in ours
+                        for flag, tree, what in (("subject_dirty", "subject_tree", "subject"),
+                                                 ("benchmark_dirty", "benchmark_tree", "benchmark"))
+                        if d["provenance"][flag] != "clean"})
+        logger.info("local-only: %s", "; ".join(dirty))
+    for failed in doc["failed_invariants"]:
+        if "workload" in failed:
+            where = f"{workload_label(failed['workload'])} [{failed['quantity']}]"
+            logger.warning("invariant %s failed for %s: %s", failed["invariant"], where, failed["detail"])
+        else:
+            logger.error("invariant %s failed: %s; no unit was compared", failed["invariant"], failed["detail"])
+    groups = collections.defaultdict(list)
+    for exclusion in doc["exclusions"]:
+        groups[exclusion["reason"]].append(exclusion["result"])
+    for reason, results in groups.items():
+        logger.warning("excluded %d result(s): %s", len(results), reason)
+        for result in results:
+            logger.debug("excluded: %s %s", result["producer"], result["ingest_key"])
+    if doc["missing"]:
+        first = ", ".join(f"{workload_label(m['workload'])} [{m['quantity']}] on {m['side']}" for m in doc["missing"][:3])
+        logger.warning("%d unit(s) have no result on a side: %s%s", len(doc["missing"]), first,
+                       ", …" if len(doc["missing"]) > 3 else "")
+        for m in doc["missing"]:
+            logger.debug("missing: %s [%s] on %s", workload_label(m["workload"]), m["quantity"], m["side"])
+    for unit in doc["units"]:
+        facts = [unit["verdict"], *([f"reason {unit['reason']}"] if "reason" in unit else []),
+                 *method.log_facts(unit, configuration)]
+        attempts = "; ".join(f"{role} " + ", ".join(f"{status} {n}" for status, n in counts.items())
+                             for role, counts in unit.get("attempts", {}).items())
+        logger.info("unit %s [%s]: %s; attempts %s", workload_label(unit["workload"]), unit["quantity"],
+                    ", ".join(facts), attempts)
+    by_verdict = collections.Counter(u["verdict"] for u in doc["units"])
+    indeterminate = collections.Counter(u.get("reason", "-") for u in doc["units"] if u["verdict"] == "indeterminate")
+
+    def side(name):  # a revision is a commit id, cut to read; an environment or a variant is a name, kept whole
+        text = str(name)
+        return text[:12] if profile == "revisions" else text
+    logger.log(logging.WARNING if indeterminate or doc["exclusions"] or doc["failed_invariants"] or doc["missing"]
+               else logging.INFO,
+               "compared run %s, profile %s, baseline %s, contender %s: %d unit(s)%s%s; %d missing, %d invariant(s) "
+               "failed, %d excluded", run_key, profile, side(sides.get("baseline")), side(sides.get("contender")),
+               len(doc["units"]), "".join(f", {n} {verdict}" for verdict, n in sorted(by_verdict.items())),
+               f" (indeterminate: {', '.join(f'{r} {n}' for r, n in sorted(indeterminate.items()))})" if indeterminate else "",
+               len(doc["missing"]), len(doc["failed_invariants"]), len(doc["exclusions"]))
 
 
 def _configure(method: Method, config: dict) -> dict:
@@ -36,6 +100,7 @@ def _configure(method: Method, config: dict) -> dict:
     errors = [e.message for e in Draft202012Validator(method.config_schema).iter_errors(configuration)]
     if errors:
         raise CompareError(f"{method.id}: {'; '.join(errors)}")
+    method.configured(configuration)
     return configuration
 
 
@@ -118,6 +183,11 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
                **({"reference": list(evidence.reference)} if evidence.reference else {}),
                **({"ordering": evidence.ordering} if evidence.ordering else {}),
                **({"boundaries": list(evidence.boundaries)} if evidence.boundaries else {})}
+    found = _partition(evidence, assessment, method.dims)
+    lacking = collections.Counter(e["reason"] for e in found["excluded"] if e["reason"].startswith("no "))
+    for reason, n in lacking.items():  # a result with no value for a dimension cannot be lined up, so is unpaired
+        logger.warning("%s [%s]: %d result(s) with %s are left unpaired", workload_label(evidence.workload),
+                       evidence.quantity["name"], n, reason)
     caveats = list(evidence.caveats)
     if selection.slots == "not-alternating" and "alternating-slots" not in method.requires:
         caveats = sorted({*caveats, "sides-did-not-alternate"})
@@ -127,7 +197,7 @@ def _unit(selection: Selection, evidence: Evidence, layout: Layout, method: Meth
     unit = {**where, **({"series": evidence.series} if evidence.series else {}), "attempts": attempts,
             **({"evidence": summary} if summary else {}),
             "method": {"name": method.name, "version": method.version}, "verdict": assessment.verdict,
-            **_partition(evidence, assessment, method.dims), "details": assessment.details}
+            **found, "details": assessment.details}
     if assessment.reason:
         unit["reason"] = assessment.reason
     if assessment.effect:

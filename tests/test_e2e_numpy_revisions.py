@@ -236,7 +236,7 @@ def test_a_workspace_git_cannot_hash_is_refused_before_anything_runs(project, wo
         unreadable.unlink()
     assert done.returncode == 2, done.stderr[-3000:]
     assert "has no working-tree id" in done.stderr and "unknown" in done.stderr
-    assert not (project / "results" / "e2e-unknown").exists()  # no order was written
+    assert [p.name for p in (project / "results" / "e2e-unknown").iterdir()] == ["bx.log"]  # no order was written
 
 
 @pytest.mark.skipif(not SPIN_EXAMPLE, reason="set BENCHX_E2E_SPIN_EXAMPLE to the numpy-spin example directory")

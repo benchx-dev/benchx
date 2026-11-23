@@ -31,6 +31,7 @@ passed, and warns `env-mismatch` when the two differ.
 
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -39,8 +40,10 @@ from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import (Unsupported, check_filter, last_json, name_only_note, no_cases, parametrized_workload, run_bounded,
-                   kill_group, stop_group)
+from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
+                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
+
+logger = logging.getLogger(__name__)
 
 NAME = "pyperf"
 # The suite is a Python source file, which may live outside the subject's checkout.
@@ -196,33 +199,48 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         where = runnable["module"]
     out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), str(PARAMS)],
                       timeout=timeout, what=f"importing {runnable['module'].name} to list its benchmarks",
-                      env=env, cwd=runnable["root"])
+                      env=env, cwd=runnable["root"], scripts={"LISTER": LISTER})
     if out.returncode != 0:
         raise Unsupported(f"cannot import {runnable['module'].name}: "
                           f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
     listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
-    cases, unmatched = [], []
+    cases, unmatched, left_out, unversioned = [], [], 0, []
     for info in listing:
         name = info["name"]
         if not case_filter and not name.startswith(DEFAULT_CASE_PREFIXES):
+            left_out += 1
             continue
         selected = benchx_params.expand(name, info["params"], case_filter)
         if not selected:
+            if "error" in info:  # not selected, so not refused: the log is the only place that says so
+                logger.debug("%s: its params could not be read, and it was not selected: %s", name, info["error"])
             if benchx_params.matches_name_only(name, info["params"], case_filter):
                 unmatched.append(info)
             continue
         if "error" in info:
             raise Unsupported(f"cannot read the params of {name} in {where}: {info['error']}")
+        if info.get("version") is None:
+            unversioned.append(name)
         runnable["benchmarks"][name] = info
         for case, index in selected:
             runnable["cases"][case] = (name, index)
             cases.append(case)
+    if left_out:
+        logger.debug("with no filter only bench_* and benchmark_* functions are cases: %d other callable(s) of %s "
+                     "were left out", left_out, where)
+    if unversioned:  # no `version` attribute, and its source cannot be read: no benchmark_version in its results
+        logger.debug("no version for %s: an edit to it starts no new series and is not caught as a failed "
+                     "`sides-agree`", ", ".join(unversioned[:40]))
+    if unmatched:
+        logger.debug("a filter that matches the name but not the arguments of %d parametrized benchmark(s): %s",
+                     len(unmatched), ", ".join(info["name"] for info in unmatched[:3]))
     if not cases:
         defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
         raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],
                        [name_only_note(unmatched)] if unmatched else [])
-    return cases
+    note_parameters(logger, runnable)
+    return note_cases(logger, cases, case_filter)
 
 
 workload = parametrized_workload  # the function, and its parameters as value strings
@@ -272,8 +290,9 @@ runner.bench_func({case!r}, func, *args)
 '''
 
 
-def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -> dict:
-    """Run one case; never raises for harness failures, which become results."""
+def run_case(runnable, case, flags, env, timeout, native_path, env_names=None, harness_verbosity=0) -> dict:
+    """Run one case; never raises for harness failures, which become results. A `harness_verbosity` above 0
+    asks pyperf for `--verbose`: its workers then print a line after every value they measure."""
     if env_names is None:
         env_names = snapshot.env_allowlist(env, ENV_ALLOWLIST)
     stem = native_path.name.removesuffix(".native.json")
@@ -289,8 +308,10 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
         module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case, function=function, index=index,
         params=str(params.resolve())))
     # Absolute: the child runs in the tree, not where the output directory was named.
-    args = [runnable["python"], str(driver.resolve()), *flags, "-o", str(native_path.resolve())]
+    args = [runnable["python"], str(driver.resolve()), *flags, *(["--verbose"] if harness_verbosity else []),
+            "-o", str(native_path.resolve())]
     # Its own process group, so a timeout takes the workers down with the manager.
+    note_case(logger, args, cwd=runnable["root"], timeout=timeout)
     proc = subprocess.Popen(args, env=env, cwd=runnable["root"], text=True, start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
@@ -309,6 +330,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
             native_path.write_text(json.dumps(native, indent=1) + "\n")
         except ValueError:
             native = None
+    note_case_ended(logger, status, timeout, native_path, parsed=native is not None)
     captured = None
     if worker_env.exists():
         try:
@@ -498,6 +520,22 @@ def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[st
         if captured is None:
             warnings.append("env-capture-missing")
     return facts, warnings
+
+
+def explain_warnings(run: dict, case: str, warnings: list[str]) -> dict[str, str]:
+    """The reason behind each of `observed_environment`'s warnings, for the case's line in the log."""
+    details = {}
+    native = run["native"]
+    benchmark = _benchmark(native, case)
+    if "env-mismatch" in warnings and benchmark is not None:
+        digests = [md.get(ENV_DIGEST_KEY) for r, md in _runs(native, benchmark) if r.get("values")]
+        matched = sum(1 for digest in digests if digest == run["passed_env_digest"])
+        details["env-mismatch"] = f"{matched} of {len(digests)} worker(s) had the environment the manager passed"
+    if "env-capture-missing" in warnings:
+        written = any(kind == "worker-environment" for kind, _, _ in run.get("artifacts", []))
+        details["env-capture-missing"] = ("the worker-environment file did not parse" if written
+                                          else "no worker-environment file was written")
+    return details
 
 
 def default_precision() -> dict:

@@ -42,7 +42,7 @@ bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compar
          [--adapter …] [--filter REGEX] [--quantity NAMES] [-e NAME=VALUE ...]
          [precision flags, as for bx compare]
          [--project P | --no-project] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
-         [--label NAME=VALUE ... --round N --slot K]   # one side of a session other calls join
+         [--label NAME=VALUE ... --round R[/N] --slot K]   # one side of a session other calls join
          [--case-timeout S] [--no-ingest]
 bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
                                          # shorthand: the module's checkout, pyperf → result files → store → table
@@ -119,8 +119,7 @@ walking up from the working directory; its directory is the root, and with no fi
 root is the working directory (`schemas/config/0.1.0`). It holds `project`, `source.uri`,
 `provider.command`, an `adapter` block (`name`, `suite`, `quantities`, `precision`),
 `environment_variables`, `collectors`, `timeouts`, `paths.store` and `paths.results` (default
-`store.parquet` and `results/` in the root, and relative to the root), and `compare`
-(`profile`, `rounds`, `k`, `min_rounds`). A command-line argument wins; if it is missing the
+`store.parquet` and `results/` in the root, and relative to the root), `compare` (`profile`, `rounds`, `k`, `min_rounds`), and the log (`logging`, `log_level`). A command-line argument wins; if it is missing the
 value is read from the file; if that is missing too, a built-in default applies, where one
 exists. A required value with none of the three (`adapter.name`, `adapter.suite`, the
 target, and for `bx compare` the profile and the rounds) is a hard failure that names the
@@ -133,6 +132,27 @@ measured tree they sit in, so a run's own output does not mark it dirty. The ear
 `.benchx/provider.json`, `.benchx/config.json` and the `~/.benchx` home directory are gone and not read (only `$BENCHX_HOME` survives, as a store override);
 `.benchx/setup.json` (declared environment facts, §3) is a separate file.
 `schemas/config/0.1.0/examples` has recommended settings for each harness.
+
+**Output channels and the log.** Stdout carries a command's answer: a query's tables and `--json`,
+`bx history`'s caveat and the ingest counts of `bx ingest` at every verbosity, and what a measuring command
+reports when it ends (`bx bench`'s table, the cases that were not measured and the result line), which `-q` and
+`-qq` hide by tiers. Stderr carries what the user needs to see: progress (a run's start line, the store path and
+the ingest counts that follow it), refusals, rejections. At the default verbosity both are what they were before
+the log. Beside them
+`bx` keeps a log through the standard library's `logging` (`benchx/log.py`): every module logs to
+`benchx.<module>`, the package installs only a `NullHandler`, and `cli.main` installs the
+handlers. What `bx` shows on stderr is emitted once, as a record marked `console=True`, and the
+console handler writes the bare message, so the default terminal output is byte for byte what
+`print` wrote; `-v` and `-vv` also show the records that are not marked. What a run reports on
+stdout when it ends (`bx bench`'s table, not-measured section and result line) is such a record too, marked
+`stdout=True`: the stdout handler writes it unless `-q` or `-qq` hides it, and the log keeps it. The file handler
+appends
+every record at `--log-level` (DEBUG by default) in one line, `UTC-timestamp pid logger LEVEL
+message`, with a header and a footer for each invocation. The default
+file is `bx.log` in the run's output folder, which the CLI now settles, with the run key, before
+it resolves any target (`session.run_directory`); a command without an output folder logs only
+when a flag asks. The log makes no claim to protect secrets, since it records the command as
+given (see `docs/benchx.md`, "The log").
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
 (a path read by the harness, or `@CONFIG[=SOURCE_REF]`, a call to the project's

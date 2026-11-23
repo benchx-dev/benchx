@@ -18,8 +18,10 @@ that names the flag and the key (`Config.pick`).
 """
 
 import copy
+import importlib.util
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,8 +34,29 @@ CONFIG_FILE = "benchx.conf.json"
 LEGACY_FILES = (Path(".benchx") / "provider.json", Path(".benchx") / "config.json")
 HOME_ENV = "BENCHX_HOME"
 DEFAULT_STORE = "store.parquet"
+DEFAULT_JSON_STORE = "store.jsonl"
 DEFAULT_RESULTS = "results"
 REQUIRED = object()
+
+
+def _has_pyarrow() -> bool:
+    """Whether pyarrow is importable, without importing it."""
+    if "pyarrow" in sys.modules:
+        return sys.modules["pyarrow"] is not None
+    return importlib.util.find_spec("pyarrow") is not None
+
+
+def _default_store_in(directory: Path) -> Path:
+    """Pick the default store file in `directory`: keep whichever already exists
+    (preferring Parquet so an existing Parquet store is never silently split into
+    a second JSONL file), else Parquet when pyarrow is available and JSONL otherwise."""
+    parquet_path = directory / DEFAULT_STORE
+    if parquet_path.exists():
+        return parquet_path
+    jsonl_path = directory / DEFAULT_JSON_STORE
+    if jsonl_path.exists():
+        return jsonl_path
+    return parquet_path if _has_pyarrow() else jsonl_path
 
 
 class ConfigError(Exception):
@@ -54,6 +77,7 @@ class Config:
     root: Path
     path: Path | None  # None: no file was found, and root is the working directory
     data: dict
+    log_file: Path | None = None  # the log's file, once cli._start_logging has resolved it
 
     @property
     def where(self) -> str:
@@ -66,15 +90,24 @@ class Config:
     def adapter(self) -> dict:
         return self.section("adapter")
 
-    def pick(self, flag_value, file_value, default=REQUIRED, *, flag, key):
-        """The command-line value, else the file's, else `default`; ConfigError when
-        none is given and the value is required."""
-        for value in (flag_value, file_value):
-            if value is not None:
-                return value
+    def pick_with_source(self, flag_value, file_value, default=REQUIRED, *, flag, key, env=None):
+        """The value and where it came from: the command line (`flag`), else the environment
+        variable named `env` (`env`; an empty one counts as unset), else the file's (`file`),
+        else `default` (`default`); ConfigError when none is given and the value is required."""
+        if flag_value is not None:
+            return flag_value, "flag"
+        if env and (from_env := os.environ.get(env)):
+            return from_env, "env"
+        if file_value is not None:
+            return file_value, "file"
         if default is REQUIRED:
             raise ConfigError(f"{flag} is required: give it, or set {key} in {self.where}")
-        return default
+        return default, "default"
+
+    def pick(self, flag_value, file_value, default=REQUIRED, *, flag, key, env=None):
+        """The command-line value, else the file's, else `default`; ConfigError when
+        none is given and the value is required."""
+        return self.pick_with_source(flag_value, file_value, default, flag=flag, key=key, env=env)[0]
 
     def _path(self, value) -> Path:
         path = Path(value).expanduser()
@@ -82,15 +115,24 @@ class Config:
 
     @property
     def store_path(self) -> Path:
-        """The store: `$BENCHX_HOME/store.parquet` when that is set (it wins over the
-        file, as it relocates the store for tests and CI), else `paths.store`."""
+        """The store: `$BENCHX_HOME/store.{parquet,jsonl}` when that is set (it wins
+        over the file, as it relocates the store for tests and CI), else `paths.store`,
+        else `store.parquet` (with pyarrow) or `store.jsonl` (without) in the root."""
         if home := os.environ.get(HOME_ENV):
-            return Path(home).expanduser() / DEFAULT_STORE
-        return self._path(self.section("paths").get("store", DEFAULT_STORE))
+            return _default_store_in(Path(home).expanduser())
+        if configured := self.section("paths").get("store"):
+            return self._path(configured)
+        return _default_store_in(self.root)
 
     @property
     def results_dir(self) -> Path:
         return self._path(self.section("paths").get("results", DEFAULT_RESULTS))
+
+    @property
+    def own_paths(self) -> tuple[Path, ...]:
+        """Everything benchx itself writes that may lie inside a measured tree: the store, the
+        results directory and the log file. The tree's identity leaves them out (snapshot.ignore)."""
+        return (self.store_path, self.results_dir, *([self.log_file] if self.log_file else []))
 
     @property
     def collectors(self) -> list[dict]:
