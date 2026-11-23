@@ -350,7 +350,9 @@ outside the checkout is identified by one file): put it inside the checkout.
   with `run.parquet` and `results.parquet`). With no `--out`, `bx view` builds into a temporary
   directory and serves the bundled static dashboard over local HTTP until Ctrl-C; with `--out DIR`,
   it writes a deployable static site (and optional Parquet marts under `data/` when `pyarrow` is
-  installed, unless `--no-marts`).
+  installed, unless `--no-marts`). Series are keyed by `(suite, case, params, quantity, node)`
+  for per-commit revision history; cross-environment comparisons on the same commit and host are
+  inspected via `bx compare --profile environments`.
 
 **Stopping a run.** Ctrl-C stops the benchmarks `bx` started, within about a second; pyperf gets the Ctrl-C and stops its worker.
 A second Ctrl-C does not wait. Results already stored
