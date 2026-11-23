@@ -1010,6 +1010,7 @@ def cmd_view(args):
         "title": args.title,
         "repo": repo,
         "write_marts": write_marts,
+        "views_format": args.views_format,
         "stamp": args.stamp,
         "config": cfg,
     }
@@ -1307,6 +1308,8 @@ def main(argv=None):
                              help="write derived Parquet tables under data/ (requires benchx[parquet])")
     marts_group.add_argument("--no-marts", action="store_true",
                              help="skip writing derived Parquet tables under data/")
+    p.add_argument("--views-format", choices=("json", "parquet"), default="json",
+                   help="format for frontend view payloads under data/views/ (default %(default)s; parquet requires benchx[parquet])")
     p.add_argument("--stamp", help="cache-busting version stamped onto static asset URLs in index.html")
     p.set_defaults(fn=cmd_view)
 

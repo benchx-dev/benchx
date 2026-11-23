@@ -118,6 +118,7 @@ def build_site(
     title: str | None = None,
     repo: Path | None = None,
     write_marts: bool | None = None,
+    views_format: str = "json",
     stamp: str | None = None,
     config=None,
 ) -> dict:
@@ -125,6 +126,10 @@ def build_site(
     chosen = sum(x is not None for x in (store_path, results_paths, runs_dir))
     if chosen != 1:
         raise inputs.ViewError("give exactly one of store_path, results_paths, or runs_dir")
+    if views_format not in payloads.VIEWS_FORMATS:
+        raise inputs.ViewError(
+            f"unsupported views_format {views_format!r}; expected one of {', '.join(payloads.VIEWS_FORMATS)}"
+        )
 
     # Validate project metadata and optional PyArrow requirements before touching `out`.
     project = resolve_project(project_file=project_file, title=title, config=config)
@@ -134,6 +139,8 @@ def build_site(
         emit_marts = bool(write_marts)
     if emit_marts:
         inputs._require_pyarrow("writing Parquet marts")
+    if views_format == "parquet":
+        inputs._require_pyarrow("writing Parquet views")
 
     outcome = None
     if runs_dir is not None:
@@ -155,6 +162,8 @@ def build_site(
         source=source,
         has_parquet_marts=emit_marts,
     )
+    del raw_points
+    marts["manifest"]["views_format"] = views_format
 
     out = Path(out).resolve()
     data_dir = out / "data"
@@ -171,7 +180,7 @@ def build_site(
     logs_written = _write_logs(runs, data_dir)
     (data_dir / "project.json").write_text(json.dumps(project, indent=1) + "\n", encoding="utf-8")
     (data_dir / "manifest.json").write_text(json.dumps(marts["manifest"], indent=1) + "\n", encoding="utf-8")
-    view_counts = payloads.build_views(marts, data_dir)
+    view_counts = payloads.build_views(marts, data_dir, views_format=views_format)
     _write_static(out, stamp if stamp is not None else marts["manifest"]["built_at"])
 
     return {
@@ -179,15 +188,88 @@ def build_site(
         "source": source,
         "counts": marts["manifest"]["counts"],
         "views": view_counts,
+        "views_format": views_format,
         "marts": emit_marts,
         "logs": logs_written,
         "outcome": outcome,
     }
 
 
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002
         return
+
+    def end_headers(self):
+        self.send_header("Accept-Ranges", "bytes")
+        super().end_headers()
+
+    def send_head(self):
+        range_hdr = self.headers.get("Range")
+        if not range_hdr:
+            self._range = None
+            return super().send_head()
+
+        path = self.translate_path(self.path)
+        if not Path(path).is_file():
+            self._range = None
+            return super().send_head()
+
+        m = _RANGE_RE.match(range_hdr.strip())
+        if not m:
+            self._range = None
+            return super().send_head()
+
+        f = open(path, "rb")
+        try:
+            fs = Path(path).stat()
+            size = fs.st_size
+            s_str, e_str = m.group(1), m.group(2)
+            if s_str == "" and e_str == "":
+                raise ValueError("empty range")
+            if s_str == "":
+                # Suffix byte-range: last N bytes.
+                suffix = int(e_str)
+                start = max(0, size - suffix)
+                end = size - 1
+            else:
+                start = int(s_str)
+                end = int(e_str) if e_str else size - 1
+            if start >= size or end < start:
+                f.close()
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return None
+            end = min(end, size - 1)
+            length = end - start + 1
+            self.send_response(206)
+            self.send_header("Content-type", self.guess_type(path))
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.send_header("Content-Length", str(length))
+            self.send_header("Last-Modified", self.date_time_string(fs.st_mtime))
+            self.end_headers()
+            f.seek(start)
+            self._range = length
+            return f
+        except Exception:
+            f.close()
+            self._range = None
+            return super().send_head()
+
+    def copyfile(self, source, outputfile):
+        remaining = getattr(self, "_range", None)
+        if remaining is None:
+            super().copyfile(source, outputfile)
+            return
+        while remaining > 0:
+            chunk = source.read(min(65536, remaining))
+            if not chunk:
+                break
+            outputfile.write(chunk)
+            remaining -= len(chunk)
 
 
 def create_server(

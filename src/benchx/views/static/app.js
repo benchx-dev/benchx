@@ -1,9 +1,10 @@
-// The benchx dashboard: a static, light-first SPA over the JSON views written by `bx view`.
+// The benchx dashboard: a static, light-first SPA over the JSON or Parquet views written by `bx view`.
 // No query engine runs here; every number shown was computed ahead of time.
 // Routes: #/ overview (no plots: top movers + runs history), #/benchmarks (sortable flat list),
 // #/suites, #/s/<suite>, #/b/<suite>/<case>?params=&q=&node=, #/c/<sha>, #/about.
 
 const DATA = "data/";
+const HYPARQUET_URL = "https://cdn.jsdelivr.net/npm/hyparquet@1.17.1/+esm";
 const SERIES_VARS = [
   "--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6",
   "--series-7", "--series-8", "--series-9", "--series-10", "--series-11", "--series-12",
@@ -14,7 +15,8 @@ const PAGE = 50;
 const MARK = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="10" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 24 L46 52 M46 24 L18 52" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>';
 const MARK_SMALL = '<svg viewBox="0 0 64 64" aria-hidden="true" class="mark"><rect x="8" y="8" width="48" height="8" rx="2" fill="var(--brand)"/><path d="M18 26 L46 52 M46 26 L18 52" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg>';
 function wordmark(small) { return h("span", { class: "benchx" }, h("span", { html: small ? MARK_SMALL : MARK }), h("span", { class: "wm" }, "bench", h("b", {}, "x"))); }
-const state = { v: "", project: null, manifest: null, landing: null, series: null, multiQty: new Set(), histories: new Map(), commits: new Map(), charts: [], cleanup: [], colorSlots: new Map(), routeSeq: 0 };
+const state = { v: "", project: null, manifest: null, landing: null, series: null, multiQty: new Set(), histories: new Map(), commits: new Map(), commitsIndex: null, pqFiles: new Map(), charts: [], cleanup: [], colorSlots: new Map(), routeSeq: 0 };
+let _hyparquet = null;
 
 // ---- utilities ------------------------------------------------------------------
 
@@ -51,12 +53,146 @@ async function getJSON(path, { fresh = false } = {}) {
   return r.json();
 }
 
+function isParquetViews() { return state.manifest?.views_format === "parquet"; }
+
+async function getHyparquet() {
+  if (!_hyparquet) _hyparquet = await import(HYPARQUET_URL);
+  return _hyparquet;
+}
+
+function normalizeParquetRows(rows) {
+  for (const r of rows) {
+    for (const k in r) {
+      const v = r[k];
+      if (v === undefined) r[k] = null;
+      else if (typeof v === "bigint") r[k] = Number(v);
+    }
+  }
+  return rows;
+}
+
+// Fetch a complete Parquet view in one HTTP GET (ideal for files read in full).
+async function readParquetAll(path) {
+  const url = DATA + path + `?v=${encodeURIComponent(state.v)}`;
+  const [hq, r] = await Promise.all([getHyparquet(), fetch(url)]);
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  const file = await r.arrayBuffer();
+  return normalizeParquetRows(await hq.parquetReadObjects({ file }));
+}
+
+// Open a Parquet view for HTTP Range slicing (commits' changes & failures) and cache its footer.
+async function openParquet(path) {
+  let pending = state.pqFiles.get(path);
+  if (!pending) {
+    const url = new URL(DATA + path + `?v=${encodeURIComponent(state.v)}`, location.href).href;
+    pending = getHyparquet()
+      .then(async (hq) => {
+        // Probe uncompressed length via a 1-byte Range GET instead of HEAD: CDNs such as
+        // GitHub Pages / Fastly return gzip-compressed Content-Length on HEAD, which points
+        // past/before the real PAR1 footer on subsequent uncompressed Range requests.
+        const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
+        let file;
+        if (probe.status === 206) {
+          const m = /\/(\d+)$/.exec(probe.headers.get("Content-Range") || "");
+          if (!m) throw new Error(`${path}: missing Content-Range total length`);
+          const byteLength = Number(m[1]);
+          file = {
+            byteLength,
+            async slice(start, end) {
+              const stop = Math.min(end ?? byteLength, byteLength) - 1;
+              if (stop < start) return new ArrayBuffer(0);
+              const r = await fetch(url, { headers: { Range: `bytes=${start}-${stop}` } });
+              if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+              return r.status === 200 ? (await r.arrayBuffer()).slice(start, stop + 1) : r.arrayBuffer();
+            },
+          };
+        } else if (probe.ok) {
+          file = await probe.arrayBuffer();
+        } else {
+          throw new Error(`${path}: HTTP ${probe.status}`);
+        }
+        const metadata = await hq.parquetMetadataAsync(file);
+        return { file, metadata };
+      })
+      .catch((e) => {
+        state.pqFiles.delete(path);
+        throw e;
+      });
+    state.pqFiles.set(path, pending);
+  }
+  return pending;
+}
+
+async function readParquetRange(path, rowStart, rowEnd) {
+  if (rowEnd <= rowStart) return [];
+  const [hq, { file, metadata }] = await Promise.all([getHyparquet(), openParquet(path)]);
+  return normalizeParquetRows(await hq.parquetReadObjects({ file, metadata, rowStart, rowEnd }));
+}
+
+async function loadSeries() {
+  return isParquetViews() ? readParquetAll("views/series.parquet") : getJSON("views/series.json");
+}
+
+async function loadCommitsIndex() {
+  if (!state.commitsIndex) {
+    state.commitsIndex = Promise.all([
+      readParquetAll("views/commits.parquet"),
+      readParquetAll("views/commit_nodes.parquet"),
+    ]).then(([commits, commitNodes]) => {
+      const nodesBySha = new Map();
+      for (const n of commitNodes) {
+        let list = nodesBySha.get(n.sha);
+        if (!list) { list = []; nodesBySha.set(n.sha, list); }
+        list.push(n);
+      }
+      const bySha = new Map();
+      const byOrder = new Map();
+      for (const c of commits) {
+        bySha.set(c.sha, { ...c, nodes: nodesBySha.get(c.sha) || [] });
+        byOrder.set(c.commit_order, {
+          commit_order: c.commit_order,
+          sha: c.sha,
+          short: c.short,
+          date: c.committer_date,
+          subject: c.subject || "",
+        });
+      }
+      return { bySha, byOrder };
+    }).catch((e) => {
+      state.commitsIndex = null;
+      throw e;
+    });
+  }
+  return state.commitsIndex;
+}
+
 async function loadCommit(sha) {
   let c = state.commits.get(sha);
-  if (!c) {
+  if (c) return c;
+  if (!isParquetViews()) {
     c = await getJSON(`views/commits/${encodeURIComponent(safeFile(sha))}.json`);
     state.commits.set(sha, c);
+    return c;
   }
+  const idx = await loadCommitsIndex();
+  const meta = idx.bySha.get(sha);
+  if (!meta) throw new Error(`commit not found: ${sha}`);
+  const [changes, failures] = await Promise.all([
+    readParquetRange("views/changes.parquet", meta.changes_start, meta.changes_end),
+    readParquetRange("views/failures.parquet", meta.failures_start, meta.failures_end),
+  ]);
+  c = {
+    sha: meta.sha,
+    short: meta.short,
+    subject: meta.subject,
+    committer_date: meta.committer_date,
+    parent: meta.parent,
+    commit_order: meta.commit_order,
+    nodes: meta.nodes,
+    failures,
+    changes,
+  };
+  state.commits.set(sha, c);
   return c;
 }
 
@@ -664,10 +800,55 @@ function renderSuites() {
 
 async function loadHistory(suite) {
   let hist = state.histories.get(suite);
-  if (!hist) {
-    hist = await getJSON(`views/history/${encodeURIComponent(safeFile(suite))}.json`);
+  if (hist) return hist;
+  const stem = encodeURIComponent(safeFile(suite));
+  if (!isParquetViews()) {
+    hist = await getJSON(`views/history/${stem}.json`);
     state.histories.set(suite, hist);
+    return hist;
   }
+  const [rows, idx] = await Promise.all([
+    readParquetAll(`views/history/${stem}.parquet`),
+    loadCommitsIndex(),
+  ]);
+  const orderSet = new Set();
+  const series = {};
+  for (const r of rows) {
+    orderSet.add(r.commit_order);
+    const params = r.params ?? "";
+    const key = `${r.case}|${params}|${r.quantity}|${r.node}`;
+    let s = series[key];
+    if (!s) {
+      s = {
+        case: r.case,
+        params,
+        quantity: r.quantity,
+        unit: r.unit,
+        direction: r.direction,
+        node: r.node,
+        orders: [],
+        estimates: [],
+        mins: [],
+        maxs: [],
+        ns: [],
+        statuses: [],
+        reasons: [],
+      };
+      series[key] = s;
+    }
+    s.orders.push(r.commit_order);
+    s.estimates.push(r.estimate);
+    s.mins.push(r.min);
+    s.maxs.push(r.max);
+    s.ns.push(r.n);
+    s.statuses.push(r.status);
+    s.reasons.push(r.reason);
+  }
+  const commits = [...orderSet]
+    .sort((a, b) => a - b)
+    .map((o) => idx.byOrder.get(o) || { commit_order: o, sha: "", short: "", date: null, subject: "" });
+  hist = { suite, commits, series };
+  state.histories.set(suite, hist);
   return hist;
 }
 
@@ -1554,7 +1735,7 @@ function renderAbout() {
           ? h("ol", {},
               h("li", {}, "Commits from ", upstream ? h("a", { href: upstream }, `${upstream.replace(/^https:\/\/github.com\//, "")} ${P.upstream?.branch || ""}`.trim()) : "the upstream repository", " are built and measured with benchx."),
               h("li", {}, "Runs are stored as Parquet under ", h("code", {}, "runs/<sha>/<node>/"), "."),
-              h("li", {}, h("code", {}, "bx view"), " builds the derived tables and static JSON files this page reads — no database or server."))
+              h("li", {}, h("code", {}, "bx view"), " builds the derived tables and static ", isParquetViews() ? "Parquet (read via hyparquet)" : "JSON", " files this page reads — no database or server."))
           : h("ol", {},
               h("li", {}, "Benchmarks are measured with ", h("code", {}, "bx bench"), " or ", h("code", {}, "bx compare"), "."),
               h("li", {}, h("code", {}, "bx view"), " reads the local store (", h("code", {}, "store.parquet"), " or ", h("code", {}, "store.jsonl"), ") or JSON results and emits this static site."))),
@@ -1694,7 +1875,7 @@ async function init() {
     state.manifest = await getJSON("manifest.json", { fresh: true });
     state.v = state.manifest.built_at;
     [state.project, state.landing, state.series] = await Promise.all([
-      getJSON("project.json").catch(() => ({})), getJSON("views/landing.json"), getJSON("views/series.json")]);
+      getJSON("project.json").catch(() => ({})), getJSON("views/landing.json"), loadSeries()]);
     const qByCase = new Map();
     for (const s of state.series) {
       const k = `${s.suite}|${s.case}|${s.params || ""}`;

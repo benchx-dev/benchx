@@ -80,7 +80,8 @@ bx history <series>                      # one series' points (a query); dirty o
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
 bx view [--out DIR] [--serve] [--host 127.0.0.1] [--port 8000] [--open]
         [--store PATH | --results PATH… | --runs DIR]
-        [--project-file PATH] [--title TITLE] [--repo DIR] [--marts | --no-marts] [--stamp STR]
+        [--project-file PATH] [--title TITLE] [--repo DIR]
+        [--views-format json|parquet] [--marts | --no-marts] [--stamp STR]
                                          # build and serve the static benchmark dashboard (no --out: temp dir + serve)
 
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
@@ -342,15 +343,20 @@ outside the checkout is identified by one file): put it inside the checkout.
   regressed, `-` improved), `Noise` the one it compares the effect with (a change is more than *k*
   times it), and `Ratio` is After over Before. A text view: not with `--json`.
 - **Views** (`bx view`, `benchx/views/`) derive flat tables (`commits`, `points`, `changes`,
-  `latest`, `movers`) and static JSON view payloads (`landing`, `series`, `sparks`,
-  `history/<suite>`, `commits/<sha>`) in pure Python from the local Parquet store, JSON result
-  files (`--results`, no PyArrow required), or a CI `runs/<sha>/<node>/` directory (`--runs`,
-  with `run.parquet` and `results.parquet`). With no `--out`, `bx view` builds into a temporary
-  directory and serves the bundled static dashboard over local HTTP until Ctrl-C; with `--out DIR`,
-  it writes a deployable static site (and optional Parquet marts under `data/` when `pyarrow` is
-  installed, unless `--no-marts`). Series are keyed by `(suite, case, params, quantity, node)`
-  for per-commit revision history; cross-environment comparisons on the same commit and host are
-  inspected via `bx compare --profile environments`.
+  `latest`, `movers`) and static view payloads in pure Python from the local store (`store.jsonl`
+  or `store.parquet`), JSON result files (`--results`, no PyArrow required), or a CI `--runs`
+  directory (per-run `runs/<sha>/<node>/{run,results}.parquet` or monthly `runs.parquet` +
+  `results/*.parquet`). By default (`--views-format json`, no PyArrow required) it writes JSON
+  payloads (`landing`, `series`, `sparks`, `history/<suite>`, `commits/<sha>`); with
+  `--views-format parquet` (requires `benchx[parquet]`) it writes `landing.json` plus Snappy
+  Parquet payloads (`series.parquet`, `commits.parquet`, `commit_nodes.parquet`, `changes.parquet`,
+  `failures.parquet`, `history/<suite>.parquet`) that the dashboard reads directly via `hyparquet`
+  and HTTP byte-range requests. With no `--out`, `bx view` builds into a temporary directory and
+  serves the bundled static dashboard over local HTTP (with HTTP `Range` support) until Ctrl-C;
+  with `--out DIR`, it writes a deployable static site (and optional Parquet marts under `data/`
+  when `pyarrow` is installed, unless `--no-marts`). Series are keyed by `(suite, case, params,
+  quantity, node)` for per-commit revision history; cross-environment comparisons on the same
+  commit and host are inspected via `bx compare --profile environments`.
 
 **Stopping a run.** Ctrl-C stops the benchmarks `bx` started, within about a second; pyperf gets the Ctrl-C and stops its worker.
 A second Ctrl-C does not wait. Results already stored
