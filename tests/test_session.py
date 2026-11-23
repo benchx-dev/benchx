@@ -6,6 +6,7 @@ import os
 import pytest
 
 from benchx import cli, runner, session
+from benchx.store import Store
 from conftest import NOISY, QUIET, cases, make_build, requires_pyarrow
 
 
@@ -22,7 +23,6 @@ def verdicts(doc):
 
 @requires_pyarrow
 def test_session_alternates_delivers_and_compares(repo, tmp, builds):
-    from benchx.store import Store
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
                                   adapter="google-benchmark", suite="demo-bench", rounds=6, store=store, run_key="s1", out=tmp / "out")
@@ -41,7 +41,6 @@ def test_session_alternates_delivers_and_compares(repo, tmp, builds):
 
 @requires_pyarrow
 def test_session_environments(repo, tmp):
-    from benchx.store import Store
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3), hardened=True)
     doc = session.compare_targets(f"{plain}:{repo['wt-head']}", f"{hardened}:{repo['wt-head']}",
@@ -53,7 +52,6 @@ def test_session_environments(repo, tmp):
 
 
 def compare_dirty(builds, tmp, **extra):
-    from benchx.store import Store
     said = []
     store = Store(tmp / "store.parquet")
     doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",

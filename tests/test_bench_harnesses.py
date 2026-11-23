@@ -12,6 +12,7 @@ import textwrap
 import pytest
 
 from benchx import bench, cli, core
+from benchx.store import Store
 from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build, requires_pyarrow
 from test_config import write_config
 from test_target import PROVIDER, describe
@@ -31,7 +32,6 @@ def order_of(tmp, run_key):
 
 @requires_pyarrow
 def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys):
-    from benchx.store import Store
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "g1"]) == cli.EXIT_OK
     out = capsys.readouterr()
     assert QUIET in out.out and NOISY in out.out and "success" in out.out
@@ -47,7 +47,6 @@ def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys
 @requires_pyarrow
 def test_google_benchmark_case_name_with_spaces_runs_and_compares(repo, tmp, monkeypatch, capsys):
     """C++ multi-argument BENCHMARK_TEMPLATE names contain spaces (e.g. `Add<Op, Int64Type>/1024`)."""
-    from benchx.store import Store
     monkeypatch.chdir(tmp)
     spaced = "ArrayAdd<Add, Int64Type>/1024"
     base = make_build(tmp / "base", repo["wt-base"], {spaced: {"mean": 1e-3, "rel_sd": 0.002}}, seed=1)
@@ -167,7 +166,6 @@ def test_a_suite_the_adapter_cannot_find_is_refused(build, tmp, capsys):
 
 @requires_pyarrow
 def test_a_provider_target_is_resolved_like_compare_does(repo, build, tmp, monkeypatch, capsys):
-    from benchx.store import Store
     descriptions = tmp / "descriptions.json"
     descriptions.write_text(json.dumps({"plain": describe(build, repo["wt-head"], how_built="cmake plain")}))
     script = tmp / "proj" / "provider.py"
@@ -223,7 +221,6 @@ CONFIG = {"project": "demo",
 
 @requires_pyarrow
 def test_a_bare_command_takes_everything_from_the_file(build, tmp, capsys):
-    from benchx.store import Store
     write_config(tmp, **CONFIG)
     assert cli.main(["bench", str(build), QUIET, "--run-key", "f1"]) == cli.EXIT_OK
     assert QUIET in capsys.readouterr().out
@@ -249,7 +246,6 @@ def test_a_flag_wins_over_the_file(build, tmp):
 
 @requires_pyarrow
 def test_no_project_makes_the_run_ad_hoc(build, tmp):
-    from benchx.store import Store
     write_config(tmp, **CONFIG)
     assert cli.main(["bench", str(build), "--no-project", "--run-key", "f3"]) == cli.EXIT_OK
     assert "project" not in order_of(tmp, "f3")
@@ -303,7 +299,6 @@ def test_a_provider_target_without_a_provider_is_refused(build, tmp, capsys):
 
 @requires_pyarrow
 def test_compare_takes_its_policy_from_the_file(repo, tmp, capsys):
-    from benchx.store import Store
     base = make_build(tmp / "b0", repo["wt-base"], cases())
     head = make_build(tmp / "b1", repo["wt-head"], cases(quiet=1.02e-3))
     write_config(tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 3, "k": 4.0})

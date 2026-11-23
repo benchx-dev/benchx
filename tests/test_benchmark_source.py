@@ -9,6 +9,7 @@ import pytest
 pytest.importorskip("pyperf")
 
 from benchx import adapters, cli, core, runner, snapshot
+from benchx.store import Store
 from conftest import git, requires_pyarrow
 
 SUITE = textwrap.dedent('''
@@ -126,7 +127,6 @@ def test_a_versioned_suite_is_recorded_with_its_own_revision(subject, versioned_
 
 @requires_pyarrow
 def test_editing_the_suite_changes_its_tree_but_not_the_series(subject, loose_suite, tmp):
-    from benchx.store import Store
     bench(subject, loose_suite, "e1")
     before = result("e1")
     loose_suite.write_text(SUITE + "\n# edited\n")
