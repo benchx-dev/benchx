@@ -183,8 +183,8 @@ def test_editing_one_function_leaves_the_others_compared(tmp_path):
     doc = compare(tmp_path, module, "two", names=("f", "g"))
     assert doc["failed_invariants"] == []
     units = {u["workload"]["name"]: u for u in doc["units"]}
-    assert units["f"]["reason"] == "benchmark-changed" and units["f"]["rounds"] == 0
-    assert units["g"]["rounds"] == 2 and units["g"].get("reason") != "benchmark-changed"  # paired, not set aside
+    assert units["f"]["reason"] == "benchmark-changed" and units["f"]["details"]["rounds"] == 0
+    assert units["g"]["details"]["rounds"] == 2 and units["g"].get("reason") != "benchmark-changed"  # paired, not set aside
 
 
 def test_two_revisions_that_differ_outside_the_function_agree(tmp_path):

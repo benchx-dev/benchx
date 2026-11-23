@@ -907,7 +907,7 @@ def _measure(cfg, args, policy, sources):
     except (session.SessionError, compare_mod.CompareError) as e:
         say.error(f"cannot compare: {e}")
         return EXIT_REFUSED
-    _show(doc, args, store.documents(doc["run_key"]) if args.tables else None)
+    _show(doc, args, store.documents(doc["selector"]["params"]["run_key"]) if args.tables else None)
     return EXIT_OK
 
 

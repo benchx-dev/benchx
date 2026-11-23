@@ -73,7 +73,7 @@ def test_pairs_by_round_not_by_arrival():
         d["procedure"]["round"] = r
         d["measurement"]["observations"] = [(r + 1) * 1.1]
     unit = evaluate(docs)["units"][0]
-    assert unit["effect"] == pytest.approx(0.1) and unit["noise"] == pytest.approx(0, abs=1e-12)
+    assert unit["effect"]["value"] == pytest.approx(0.1) and unit["details"]["noise"] == pytest.approx(0, abs=1e-12)
 
 
 def test_equal_attempts():
@@ -120,7 +120,7 @@ def test_exclusions():
     doc = evaluate(docs)
     result = {"producer": "benchx/gbench-adapter", "ingest_key": docs[2]["ingest_key"]}
     assert doc["exclusions"] == [{"result": result, "reason": "error: harness.error"}]
-    assert doc["units"][0]["rounds"] == 3
+    assert doc["units"][0]["details"]["rounds"] == 3
 
 
 def test_min_rounds():
@@ -136,7 +136,7 @@ def test_one_pair_has_no_noise_whatever_min_rounds_says(min_rounds):
     of them: with one pair the unit is indeterminate, not a StatisticsError."""
     unit = evaluate(run(rounds=1), min_rounds=min_rounds)["units"][0]
     assert (unit["verdict"], unit["reason"]) == ("indeterminate", "insufficient-rounds")
-    assert unit["rounds"] == 1 and "noise" not in unit
+    assert unit["details"]["rounds"] == 1 and "noise" not in unit["details"]
 
 
 def test_no_pair_at_all_is_indeterminate_too():
@@ -145,7 +145,7 @@ def test_no_pair_at_all_is_indeterminate_too():
     for d in docs[1::2]:
         d["measurement"] = {"quantity": d["measurement"]["quantity"], "status": "error", "reason": "harness.error"}
     unit = evaluate(docs, min_rounds=0)["units"][0]
-    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
+    assert (unit["verdict"], unit["reason"], unit["details"]["rounds"]) == ("indeterminate", "not-measured", 0)
 
 
 def test_two_pairs_are_enough_when_min_rounds_allows():
@@ -210,7 +210,7 @@ def labeled(docs, configurations=("plain", "hardened")):
 def test_environments_sides_are_named_by_label():
     doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build")
     assert core.check(doc, "comparison-document") == []
-    assert (doc["varying"], doc["baseline"], doc["contender"]) == ("provenance.labels.build", "plain", "hardened")
+    assert (doc["sides"]["varying"], doc["sides"]["baseline"], doc["sides"]["contender"]) == ("provenance.labels.build", "plain", "hardened")
     assert doc["failed_invariants"] == [] and doc["units"][0]["verdict"] == "regressed"
     assert doc["units"][0]["unmatched_differences"] == ["/coordinates/subject/configuration/hardening"]
 
@@ -387,18 +387,18 @@ def vevaluate(docs, parameter="role", baseline="'baseline'", **kwargs):
 
 def test_variants_a_clean_run_has_one_unit_per_benchmark():
     doc = vevaluate(variants_run())
-    assert invariants(doc) == [] and doc["profile"] == "variants"
-    assert doc["varying"] == "coordinates.workload.parameters.role"
-    assert (doc["baseline"], doc["contender"]) == VALUES
+    assert invariants(doc) == [] and doc["selector"]["params"]["profile"] == "variants"
+    assert doc["sides"]["varying"] == "coordinates.workload.parameters.role"
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == VALUES
     [unit] = doc["units"]
     assert unit["workload"] == {"name": "bench_truncate"}  # the varied parameter is not part of the unit
-    assert unit["verdict"] == "regressed" and unit["effect"] == pytest.approx(0.1)
+    assert unit["verdict"] == "regressed" and unit["effect"]["value"] == pytest.approx(0.1)
     assert doc["local_only"] is False
 
 
 def test_variants_the_baseline_can_be_either_value():
     doc = vevaluate(variants_run(), baseline="'variant'")
-    assert invariants(doc) == [] and (doc["baseline"], doc["contender"]) == VALUES[::-1]
+    assert invariants(doc) == [] and (doc["sides"]["baseline"], doc["sides"]["contender"]) == VALUES[::-1]
     assert doc["units"][0]["verdict"] == "improved"
 
 
@@ -415,7 +415,7 @@ def test_variants_another_parameter_makes_one_unit_per_value_of_it():
 
 def test_variants_no_parameter_name_is_special():
     doc = vevaluate(variants_run(name="impl"), parameter="impl")
-    assert invariants(doc) == [] and doc["varying"] == "coordinates.workload.parameters.impl"
+    assert invariants(doc) == [] and doc["sides"]["varying"] == "coordinates.workload.parameters.impl"
 
 
 def test_variants_a_third_value_is_a_third_side():
@@ -472,7 +472,7 @@ def test_variants_a_failed_attempt_on_either_side_fails_the_unit(status, which):
     doc = vevaluate(docs)
     [unit] = doc["units"]
     assert invariants(doc) == [] and unit["verdict"] == "indeterminate" and unit["reason"] == "side-failed"
-    assert "effect" not in unit and "noise" not in unit and unit["rounds"] == 3
+    assert "effect" not in unit and "noise" not in unit["details"] and unit["details"]["rounds"] == 3
     [excluded] = doc["exclusions"]
     assert excluded["result"]["ingest_key"] == failing["ingest_key"] and excluded["reason"].startswith(status)
     assert "(side-failed)" in compare.render(doc)
@@ -490,7 +490,7 @@ def test_variants_a_skipped_attempt_is_an_ordinary_exclusion():
     docs[2]["measurement"] = {"quantity": docs[2]["measurement"]["quantity"], "status": "skipped", "reason": "n/a"}
     doc = vevaluate(docs)
     [unit] = doc["units"]
-    assert unit["verdict"] == "regressed" and unit["rounds"] == 3 and "reason" not in unit
+    assert unit["verdict"] == "regressed" and unit["details"]["rounds"] == 3 and "reason" not in unit
     assert len(doc["exclusions"]) == 1
 
 
@@ -498,7 +498,7 @@ def test_a_failed_attempt_under_revisions_still_gives_a_verdict_from_the_remaini
     docs = run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
     fail(docs[2], "error")
     unit = evaluate(docs)["units"][0]
-    assert unit["verdict"] == "regressed" and unit["rounds"] == 3 and "reason" not in unit
+    assert unit["verdict"] == "regressed" and unit["details"]["rounds"] == 3 and "reason" not in unit
 
 
 def test_variants_the_sides_must_share_the_subject_tree():
@@ -652,7 +652,7 @@ def test_an_edited_benchmark_is_not_comparable_and_the_others_are_compared():
     doc = evaluate(docs)
     assert invariants(doc) == []
     edited = by_name(doc)["BM_B"]
-    assert (edited["verdict"], edited["reason"], edited["rounds"]) == ("indeterminate", "benchmark-changed", 0)
+    assert (edited["verdict"], edited["reason"], edited["details"]["rounds"]) == ("indeterminate", "benchmark-changed", 0)
     assert edited["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
     assert "effect" not in edited
     assert by_name(doc)["BM_A"]["verdict"] == "regressed"
@@ -778,19 +778,24 @@ def test_units_that_failed_an_invariant_alike_are_one_line():
                          "  sides-agree: /coordinates/protocol/harness/version differ  (2 units: BM_A, BM_B)")
 
 
+def rendered_doc():
+    """The least of a comparison document that `render` reads, with nothing in its lists."""
+    return {"selector": {"name": "benchx/run-profile", "version": "v1",
+                         "params": {"run_key": "r", "profile": "revisions", "baseline": BASE}},
+            "sides": {"varying": "provenance.subject_tree", "baseline": BASE, "contender": HEAD},
+            "local_only": False, "units": [], "missing": [], "failed_invariants": [], "exclusions": []}
+
+
 def test_a_failed_invariant_of_the_run_is_in_words_too():
-    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
-           "missing": [], "exclusions": [],
-           "failed_invariants": [{"invariant": "equal-attempts", "detail": "3 against 2: run the same number of rounds"}]}
+    doc = {**rendered_doc(), "failed_invariants": [{"invariant": "equal-attempts",
+                                                     "detail": "3 against 2: run the same number of rounds"}]}
     assert compare.render(doc).endswith("\nfailed invariants (1)\n  equal-attempts: 3 against 2: run the same number of rounds")
 
 
 def test_missing_results_are_one_line_for_each_side_with_a_few_names():
     where = lambda name, side: {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
-    doc = {"run_key": "r", "profile": "revisions", "baseline": BASE, "contender": HEAD, "local_only": False, "units": [],
-           "failed_invariants": [], "exclusions": [],
-           "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"), where("d", "contender"),
-                       where("e", "baseline")]}
+    doc = {**rendered_doc(), "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"),
+                                         where("d", "contender"), where("e", "baseline")]}
     assert compare.render(doc).endswith(
         "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)")
 
@@ -808,9 +813,9 @@ def test_a_side_that_skipped_every_round_was_not_measured_not_short_of_rounds():
     reason is not `insufficient-rounds`; the unit carries how each side's attempts ended."""
     doc = evaluate(skip(run(), [1, 3, 5]))
     unit = doc["units"][0]
-    assert (unit["verdict"], unit["reason"], unit["rounds"]) == ("indeterminate", "not-measured", 0)
+    assert (unit["verdict"], unit["reason"], unit["details"]["rounds"]) == ("indeterminate", "not-measured", 0)
     assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 3}}
-    assert "reference_estimate" not in unit and "effect" not in unit
+    assert "reference_estimate" not in unit["details"] and "effect" not in unit
     assert "rounds=0  (not-measured: contender skipped)" in compare.render(doc)
     assert [e["reason"] for e in doc["exclusions"]] == ["skipped: harness.skipped"] * 3
 
@@ -828,7 +833,7 @@ def test_the_render_names_every_side_that_was_not_measured_and_how_its_attempts_
 def test_some_rounds_measured_on_both_sides_is_still_insufficient_rounds():
     """One skipped round leaves two pairs: the sides were measured, there are too few rounds."""
     unit = evaluate(skip(run(), [5]))["units"][0]
-    assert (unit["reason"], unit["rounds"]) == ("insufficient-rounds", 2)
+    assert (unit["reason"], unit["details"]["rounds"]) == ("insufficient-rounds", 2)
     assert unit["attempts"] == {"baseline": {"success": 3}, "contender": {"skipped": 1, "success": 2}}
     assert "(insufficient-rounds)" in compare.render(evaluate(skip(run(), [5])))
 

@@ -79,7 +79,9 @@ def test_an_edited_benchmark_is_logged_as_not_comparable_and_makes_the_summary_a
     assert summary[0][0] == "WARNING" and "indeterminate: benchmark-changed" in summary[0][1]
 
 
-def test_a_second_success_in_a_round_is_a_warning_naming_what_it_overwrote(caplog):
+def test_a_second_success_in_a_round_is_refused_and_the_warning_names_the_unit(caplog):
+    """The comparator never picks one of two successes of a side in one round (`duplicate-points`):
+    the unit is refused, and the log names it, as for any failed invariant of one unit."""
     docs = run_of(rounds=3)
     parameters = docs[0]["coordinates"]["workload"]["parameters"]
     extras = [case(side, 1, slot, 9.0, parameters) for side, slot in ((BASE, 2), (HEAD, 3))]  # one per side, in
@@ -88,7 +90,7 @@ def test_a_second_success_in_a_round_is_a_warning_naming_what_it_overwrote(caplo
         extra["ingest_key"] += ":again"
     with caplog.at_level(logging.DEBUG, logger="benchx"):
         evaluate([*docs, *extras])
-    assert any(level == "WARNING" and "second success(es) of a side in one round overwrote the first" in m
+    assert any(level == "WARNING" and m.startswith("invariant duplicate-points failed for " + NAME)
                for level, m in records(caplog))
 
 
@@ -392,11 +394,13 @@ def test_a_missing_unit_makes_the_summary_a_warning(caplog):
 def test_the_names_of_the_sides_are_cut_for_revisions_and_whole_for_anything_else(caplog):
     docs = run_of()
     doc = evaluate(docs)
-    doc["baseline"], doc["contender"] = "numpy-2.1.0-openblas", "numpy-2.1.0-mkl"
+    doc["sides"]["baseline"], doc["sides"]["contender"] = "numpy-2.1.0-openblas", "numpy-2.1.0-mkl"
     for profile, baseline, contender in (("revisions", "numpy-2.1.0-", "numpy-2.1.0-"),
                                          ("environments", "numpy-2.1.0-openblas", "numpy-2.1.0-mkl")):
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="benchx"):
-            compare._log_outcome(doc, docs, run_key="run", profile=profile, baseline=BASE, k=3.0, min_rounds=3)
+            doc["selector"]["params"]["profile"] = profile
+            compare._log_outcome(doc, docs, compare.methods.get(compare.methods.DEFAULT), doc["method"]["configuration"],
+                                 asked=BASE)
         summary = next(m for level, m in records(caplog) if m.startswith("compared run"))
         assert f"baseline {baseline}, contender {contender}:" in summary

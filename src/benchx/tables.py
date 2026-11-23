@@ -13,15 +13,17 @@ import logging
 import math
 import statistics
 
-from .compare import WORKLOAD, _c, _estimate, _run_documents, _unit_order, _workload, profile_projection
+from . import identity
+from .projection import estimate, values
 from .results import store_project
+from .run_profile import WORKLOAD, _c, _run_documents, _unit_order, _workload, profile_projection
 from .snapshot import DIRTY_WARNINGS
 
 logger = logging.getLogger(__name__)
 
 ROLES = ("baseline", "contender")
 CHANGED = {"regressed": "+", "improved": "-", "changed": "~"}  # as asv continuous marks them
-MARKS = {**CHANGED, "no-change-detected": " ", "indeterminate": "?"}
+MARKS = {**CHANGED, "no-change-detected": " ", "equivalent": " ", "indeterminate": "?"}
 SHA = 8  # asv's width
 # asv_runner.util._human_time_units: the unit is the largest one the value does not reach.
 TIME_UNITS = (("ns", 1e-9), ("μs", 1e-6), ("ms", 1e-3), ("s", 1), ("m", 60), ("h", 3600), ("d", 86400),
@@ -73,18 +75,16 @@ def human(value, spread, unit) -> str:
 
 
 def _projection(doc):
-    """The projection that made `doc`: its `varying` names the label or parameter that names the sides."""
-    varying = doc["varying"]
-    label = varying.removeprefix("provenance.labels.") if varying.startswith("provenance.labels.") else None
-    parameter = (varying.removeprefix("coordinates.workload.parameters.")
-                 if varying.startswith("coordinates.workload.parameters.") else None)
-    return profile_projection(doc["profile"], label, parameter)
+    """The projection that made `doc`, from the parameters its selector recorded."""
+    params = doc["selector"]["params"]
+    return profile_projection(params["profile"], params.get("label"), params.get("parameter"))
 
 
 def _side(docs) -> dict:
     """One side of one unit: the median of its per-round medians, their sd, and what went wrong if
     no round succeeded."""
-    medians = [m for d in docs if d["measurement"]["status"] == "success" and (m := _estimate(d)) is not None]
+    medians = [m for d in docs if d["measurement"]["status"] == "success"
+               and (m := estimate(identity.MEDIAN, values(d))) is not None]
     failed = sorted({d["measurement"]["status"] for d in docs if d["measurement"]["status"] != "success"})
     return {"value": statistics.median(medians) if medians else None,
             "spread": statistics.stdev(medians) if len(medians) > 1 else None,
@@ -94,11 +94,11 @@ def _side(docs) -> dict:
 def summarize(doc, documents) -> tuple[list[dict], dict]:
     """The comparison's units, sorted as the document lists them, each with its workload, quantity and
     the two sides' numbers; and what each side is (commit, project, rounds, dirty)."""
-    projection = _projection(doc)
-    names = {_c(doc["baseline"]): "baseline", _c(doc["contender"]): "contender"}
+    projection, params, named = _projection(doc), doc["selector"]["params"], doc["sides"]
+    names = {_c(named["baseline"]): "baseline", _c(named["contender"]): "contender"}
     grouped, sides = {}, {role: [] for role in ROLES}
     skipped = 0
-    for d in _run_documents(documents, doc["run_key"]):
+    for d in _run_documents(documents, params["run_key"]):
         projected = projection.apply(d, store_project(d))
         role = names.get(_c(projected.axis[0]))
         if role is None:
@@ -120,8 +120,8 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
         units.append({"workload": _workload(unit["docs"], projection.axis), "quantity": unit["quantity"],
                       **{role: _side(unit["docs"][role]) for role in ROLES}})
     units.sort(key=lambda u: _unit_order(u["workload"], u["quantity"]["name"]))
-    varying = doc["varying"].rsplit(".", 1)[-1]  # the label or parameter that names the sides
-    revisions = doc["profile"] == "revisions"  # its sides are two commits; the others', two values
+    varying = named["varying"].rsplit(".", 1)[-1]  # the label or parameter that names the sides
+    revisions = params["profile"] == "revisions"  # its sides are two commits; the others', two values
     info = {}
     for role, docs in sides.items():
         info[role] = {"project": store_project(docs[0]) if docs else "",
@@ -131,12 +131,12 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
     if revisions and len({(side["commit"], side["dirty"]) for side in info.values()}) == 1:
         # The same commit on both sides, each with uncommitted changes: the tree id tells them apart.
         for role, side in info.items():
-            side["commit"] += f" tree {str(doc[role])[:SHA]}"
+            side["commit"] += f" tree {str(named[role])[:SHA]}"
     for role, side in info.items():
         # Uncommitted changes against HEAD share HEAD's commit, so a side that is not clean says so.
-        side["tag"] = side["commit"] + (" (dirty)" if side["dirty"] else "") if revisions else str(doc[role])
+        side["tag"] = side["commit"] + (" (dirty)" if side["dirty"] else "") if revisions else str(named[role])
         side["heading"] = (f"{side['project']} commit {side['commit']}" if revisions
-                           else f"{side['project']} {varying}={doc[role]}")
+                           else f"{side['project']} {varying}={named[role]}")
     return units, info
 
 
@@ -214,7 +214,7 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
         unit = by_workload[(_c(verdict_unit["workload"]), verdict_unit["quantity"])]
         before, after = unit["baseline"], unit["contender"]
         ratio = f"{after['value'] / before['value']:.2f}" if before["value"] and after["value"] is not None else "n/a"
-        noise = f"{verdict_unit['noise']:.2%}" if "noise" in verdict_unit else "n/a"
+        noise = f"{verdict_unit['details']['noise']:.2%}" if "noise" in verdict_unit["details"] else "n/a"
         rows.append([mark, *(_cell(unit, role) for role in ROLES), ratio, noise, _verdict(verdict_unit),
                      _label(unit["workload"])])
     logger.info("--tables: %d row(s) shown; hidden by verdict: %s", len(rows),
@@ -228,7 +228,7 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
 
 def render(doc, documents, *, all_rows=False) -> str:
     """The tables of a comparison, or nothing when the document has no units (its invariants failed)."""
-    if not doc.get("units") or "contender" not in doc:
+    if not doc.get("units") or "contender" not in doc.get("sides", {}):
         return ""
     units, info = summarize(doc, documents)
     return "\n" + "\n\n".join([*(side_tables(units, role, info) for role in ROLES),

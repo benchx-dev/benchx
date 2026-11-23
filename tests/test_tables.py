@@ -95,7 +95,7 @@ def test_the_noise_of_a_row_is_the_comparators():
             docs.append(result(side, r, slot, 2.0e-3 * ratio, workload=PLAIN))
             slot += 1
     doc = evaluate(docs)
-    assert doc["units"][0]["noise"] == pytest.approx(0.0024494897, rel=1e-6)
+    assert doc["units"][0]["details"]["noise"] == pytest.approx(0.0024494897, rel=1e-6)
     row = next(line for line in tables.render(doc, docs).splitlines() if line.startswith("| +"))
     assert "|   0.24% | regressed |" in row
 
@@ -187,13 +187,15 @@ def test_a_comparison_without_units_has_no_tables():
     assert doc["failed_invariants"] and tables.render(doc, docs) == ""
 
 
-@pytest.mark.parametrize("profile, varying, axis", [
-    ("environments", "provenance.labels.env", "/provenance/labels/env"),
-    ("variants", "coordinates.workload.parameters.role", "/coordinates/workload/parameters/role"),
-    ("revisions", "provenance.subject_tree", "/provenance/subject_tree"),
+@pytest.mark.parametrize("profile, named, axis", [
+    ("environments", {"label": "env"}, "/provenance/labels/env"),
+    ("variants", {"parameter": "role"}, "/coordinates/workload/parameters/role"),
+    ("revisions", {}, "/provenance/subject_tree"),
 ])
-def test_the_projection_is_rebuilt_from_the_document(profile, varying, axis):
-    assert tables._projection({"profile": profile, "varying": varying}).axis[0] == axis
+def test_the_projection_is_rebuilt_from_the_document(profile, named, axis):
+    doc = {"selector": {"name": "benchx/run-profile", "version": "v1",
+                        "params": {"run_key": "r", "profile": profile, "baseline": "a", **named}}}
+    assert tables._projection(doc).axis[0] == axis
 
 
 # Through the CLI, on the fake Google Benchmark of the session tests.
