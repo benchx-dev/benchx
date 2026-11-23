@@ -238,17 +238,21 @@ enforce three boundaries:
 To keep the core `benchx` package small, cloud-free, and CI-vendor-neutral,
 responsibilities split across three layers:
 
-1. **Core `benchx` repository:** schemas, runner, adapters, local workbench
-   (`bx`), store, comparator, and this design contract. Contains no cloud
-   templates (CloudFormation/Terraform) or CI-platform workflows.
-2. **Reusable CI workbench repository (companion repo, once shared across
-   projects):** generic CI workflows, infrastructure templates (e.g. AWS
+1. **Core `benchx` repository ([`benchx-dev/benchx`](https://github.com/benchx-dev/benchx)):**
+   schemas, runner, adapters, local workbench (`bx`), store, comparator, and
+   this design contract. Contains no cloud templates (CloudFormation/Terraform)
+   or CI-platform workflows.
+2. **Reusable CI workbench repository (reference implementation:
+   [`benchx-dev/benchx-ci`](https://github.com/benchx-dev/benchx-ci)):**
+   generic CI workflows, infrastructure templates (e.g. AWS CloudFormation
    setup), unit-budget ratchet, and staging compaction scripts parameterized by
    project configuration.
-3. **Project benchmark repository (e.g. per-project tracking repo):**
+3. **Project benchmark repository (reference implementation:
+   [`benchx-dev/benchx-arrow`](https://github.com/benchx-dev/benchx-arrow),
+   live dashboard at <https://arrow.benchx.dev/>):**
    project-specific files only — `benchx.conf.json`, the project's target
-   provider (`provider/`), machine catalog (`machines.json`), and project
-   metadata.
+   provider (`provider/`), machine catalog (`machines.json`), thin caller
+   workflows, and project metadata.
 
 ## 8. Reference deployment mappings
 
