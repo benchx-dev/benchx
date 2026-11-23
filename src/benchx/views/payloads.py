@@ -19,8 +19,12 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from .inputs import UTC, ViewError, safe_path_segment, short_sha
+from .inputs import UTC, ViewError, _require_pyarrow, safe_path_segment, short_sha
 from .marts import is_failed_status, is_measured
+
+VIEWS_FORMATS = ("json", "parquet")
+PARQUET_VIEW_FILES = ("series.parquet", "commits.parquet", "commit_nodes.parquet", "changes.parquet", "failures.parquet")
+PARQUET_VIEW_ROW_GROUP_SIZE = 10_000
 
 NOTABLE = 0.05
 RECENT_COMMITS = 30
@@ -138,14 +142,167 @@ def _write_commit_pages(
     return len(by_sha)
 
 
-def _build_empty(out: Path, commits: list[dict]) -> dict:
+def _write_pq(rows: list[dict], schema, path: Path, *, row_group_size: int | None = None) -> None:
+    pa, pq = _require_pyarrow("writing Parquet views")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(rows, schema=schema)
+    kwargs: dict = {"compression": "snappy"}
+    if row_group_size is not None:
+        kwargs["row_group_size"] = row_group_size
+    pq.write_table(table, path, **kwargs)
+
+
+def _parquet_view_schemas():
+    pa, _ = _require_pyarrow("writing Parquet views")
+    i32, f64, s, b = pa.int32(), pa.float64(), pa.string(), pa.bool_()
+    return {
+        "series": pa.schema([
+            ("suite", s), ("case", s), ("params", s), ("quantity", s),
+            ("unit", s), ("direction", s), ("node", s), ("sha", s),
+            ("commit_order", i32), ("first_order", i32), ("committer_date", s),
+            ("points", i32), ("estimate", f64), ("vs_prev", f64),
+            ("vs_10", f64), ("vs_100", f64), ("noise", f64), ("cv", f64),
+            ("noise_rank", f64), ("status", s), ("reason", s),
+            ("attempt_order", i32), ("attempt_sha", s),
+        ]),
+        "history": pa.schema([
+            ("case", s), ("params", s), ("quantity", s), ("unit", s),
+            ("direction", s), ("node", s), ("commit_order", i32),
+            ("estimate", f64), ("min", f64), ("max", f64), ("n", i32),
+            ("status", s), ("reason", s),
+        ]),
+        "commits": pa.schema([
+            ("sha", s), ("short", s), ("subject", s), ("committer_date", s),
+            ("parent", s), ("commit_order", i32),
+            ("changes_start", i32), ("changes_end", i32),
+            ("failures_start", i32), ("failures_end", i32),
+        ]),
+        "commit_nodes": pa.schema([
+            ("sha", s), ("short", s), ("parent", s), ("subject", s),
+            ("committer_date", s), ("node", s), ("state", s), ("reason", s),
+            ("started_at", s), ("finished_at", s), ("suites_ok", i32),
+            ("suites_failed", i32), ("results", i32), ("commit_order", i32),
+            ("has_log", b), ("regressed", i32), ("improved", i32),
+            ("compared", i32), ("failed_results", i32),
+        ]),
+        "changes": pa.schema([
+            ("sha", s), ("suite", s), ("case", s), ("params", s),
+            ("quantity", s), ("unit", s), ("direction", s), ("node", s),
+            ("estimate", f64), ("prev_estimate", f64), ("rel_change", f64),
+            ("prev_sha", s), ("prev_is_parent", b), ("gap", i32), ("noise", f64),
+        ]),
+        "failures": pa.schema([
+            ("sha", s), ("suite", s), ("case", s), ("params", s),
+            ("quantity", s), ("node", s), ("status", s), ("reason", s),
+        ]),
+    }
+
+
+def _clean_stale_views(out: Path, views_format: str) -> None:
     history_dir = out / "history"
+    commits_dir = out / "commits"
     if history_dir.is_dir():
-        for stale in history_dir.glob("*.json"):
+        for stale in list(history_dir.glob("*.json")) + list(history_dir.glob("*.parquet")):
             stale.unlink()
+    if commits_dir.is_dir():
+        for stale in commits_dir.glob("*.json"):
+            stale.unlink()
+    if views_format == "parquet":
+        for name in ("series.json", "sparks.json"):
+            p = out / name
+            if p.exists():
+                p.unlink()
+    else:
+        for name in PARQUET_VIEW_FILES:
+            p = out / name
+            if p.exists():
+                p.unlink()
+
+
+def _write_commit_parquet(
+    out: Path,
+    commits: list[dict],
+    changes_by_sha: dict[str, list[dict]],
+    failures_by_sha: dict[str, list[dict]],
+    *,
+    format_change=None,
+) -> int:
+    pa, pq = _require_pyarrow("writing Parquet views")
+    schemas = _parquet_view_schemas()
+    by_sha: dict[str, list[dict]] = {}
+    for c in commits:
+        by_sha.setdefault(c["sha"], []).append(c)
+
+    out.mkdir(parents=True, exist_ok=True)
+    commit_rows: list[dict] = []
+    c_total = 0
+    f_total = 0
+    c_buf: list[dict] = []
+    f_buf: list[dict] = []
+    chunk = PARQUET_VIEW_ROW_GROUP_SIZE
+
+    def _flush(writer, buf: list[dict], schema) -> None:
+        if buf:
+            writer.write_table(pa.Table.from_pylist(buf, schema=schema))
+            buf.clear()
+
+    with (
+        pq.ParquetWriter(out / "changes.parquet", schemas["changes"], compression="snappy") as c_writer,
+        pq.ParquetWriter(out / "failures.parquet", schemas["failures"], compression="snappy") as f_writer,
+    ):
+        for sha, nodes_of in by_sha.items():
+            head = nodes_of[0]
+            sha_changes = changes_by_sha.pop(sha, ())
+            c_start = c_total
+            for ch in sha_changes:
+                row = format_change(ch) if format_change is not None else ch
+                c_buf.append({"sha": sha, **row})
+                if len(c_buf) >= chunk:
+                    _flush(c_writer, c_buf, schemas["changes"])
+            c_total += len(sha_changes)
+            c_end = c_total
+
+            sha_failures = failures_by_sha.pop(sha, ())
+            f_start = f_total
+            for f in sha_failures:
+                f_buf.append({"sha": sha, **f})
+                if len(f_buf) >= chunk:
+                    _flush(f_writer, f_buf, schemas["failures"])
+            f_total += len(sha_failures)
+            f_end = f_total
+
+            commit_rows.append({
+                "sha": sha,
+                "short": head["short"],
+                "subject": head["subject"],
+                "committer_date": head["committer_date"],
+                "parent": head["parent"],
+                "commit_order": head["commit_order"],
+                "changes_start": c_start,
+                "changes_end": c_end,
+                "failures_start": f_start,
+                "failures_end": f_end,
+            })
+
+        _flush(c_writer, c_buf, schemas["changes"])
+        _flush(f_writer, f_buf, schemas["failures"])
+
+    _write_pq(commit_rows, schemas["commits"], out / "commits.parquet")
+    _write_pq(commits, schemas["commit_nodes"], out / "commit_nodes.parquet")
+    return len(by_sha)
+
+
+def _build_empty(out: Path, commits: list[dict], *, views_format: str = "json") -> dict:
+    _clean_stale_views(out, views_format)
     newest_by_node = newest_commits(commits)
-    _dump([], out / "series.json")
-    _dump({"axis": [], "series": []}, out / "sparks.json")
+    if views_format == "parquet":
+        schemas = _parquet_view_schemas()
+        _write_pq([], schemas["series"], out / "series.parquet")
+        commit_pages = _write_commit_parquet(out, commits, {}, {})
+    else:
+        _dump([], out / "series.json")
+        _dump({"axis": [], "series": []}, out / "sparks.json")
+        commit_pages = _write_commit_pages(out, commits, {}, {})
     _dump(
         {
             "built_at": dt.datetime.now(UTC).isoformat(timespec="seconds"),
@@ -172,12 +329,16 @@ def _build_empty(out: Path, commits: list[dict]) -> dict:
         "recent_commits": min(len(commits), RECENT_COMMITS),
         "sparks": 0,
         "history_suites": 0,
-        "commit_pages": _write_commit_pages(out, commits, {}, {}),
+        "commit_pages": commit_pages,
     }
 
 
-def build_views(marts: dict, data_dir: Path) -> dict:
-    """Write every JSON view payload under `data_dir / 'views'` and return counts."""
+def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> dict:
+    """Write every JSON or Parquet view payload under `data_dir / 'views'` and return counts."""
+    if views_format not in VIEWS_FORMATS:
+        raise ViewError(f"unsupported views_format {views_format!r}; expected one of {', '.join(VIEWS_FORMATS)}")
+    if views_format == "parquet":
+        _require_pyarrow("writing Parquet views")
     out = Path(data_dir).resolve() / "views"
     commits_raw = marts["commits"]
     points = marts["points"]
@@ -212,8 +373,9 @@ def build_views(marts: dict, data_dir: Path) -> dict:
         for c in commits_raw
     ]
     if not has_points:
-        return _build_empty(out, commits)
+        return _build_empty(out, commits, views_format=views_format)
 
+    _clean_stale_views(out, views_format)
     counts: dict[str, int] = {}
 
     # Latest attempt of every series (measured, skipped, or failed).
@@ -291,7 +453,11 @@ def build_views(marts: dict, data_dir: Path) -> dict:
 
     series_list.sort(key=series_key)
     counts["series"] = len(series_list)
-    _dump(series_list, out / "series.json")
+    if views_format == "parquet":
+        schemas = _parquet_view_schemas()
+        _write_pq(series_list, schemas["series"], out / "series.parquet")
+    else:
+        _dump(series_list, out / "series.json")
 
     # Movers on each node's latest commit with changes.
     top_change_order: dict[str, int] = {}
@@ -423,106 +589,140 @@ def build_views(marts: dict, data_dir: Path) -> dict:
     _dump(landing, out / "landing.json")
     counts["recent_commits"] = len(landing["recent_commits"])
 
-    # Sparks: last SPARK_POINTS commits and per-series measured points.
-    axis_by_order: dict[int, dict] = {}
-    for pt in points:
-        order = pt["commit_order"]
-        if order not in axis_by_order:
-            axis_by_order[order] = {
-                "commit_order": order,
-                "sha": pt["sha"],
-                "short": short_sha(pt["sha"]),
-                "date": _iso(pt["committer_date"]),
-            }
-    spark_axis = [axis_by_order[o] for o in sorted(axis_by_order)[-SPARK_POINTS:]]
-
-    ok_by_series: dict[tuple, list[dict]] = defaultdict(list)
-    for pt in points:
-        if is_measured(pt):
-            ok_by_series[series_key(pt)].append(pt)
-
-    spark_series = []
-    for key in sorted(ok_by_series):
-        pts = sorted(ok_by_series[key], key=lambda p: p["commit_order"])[-SPARK_POINTS:]
-        lt = latest_by_key.get(key, {})
-        a = attempts[key]
-        head = pts[-1]
-        spark_series.append({
-            "suite": head["suite"],
-            "case": head["case"],
-            "params": head["params"],
-            "quantity": head["quantity"],
-            "unit": head["unit"],
-            "direction": head["direction"],
-            "node": head["node"],
-            "latest": lt.get("estimate"),
-            "vs_prev": lt.get("vs_prev"),
-            "noise": lt.get("noise"),
-            "points": lt.get("points"),
-            "sha": lt.get("sha"),
-            "orders": [p["commit_order"] for p in pts],
-            "estimates": [p["estimate"] for p in pts],
-            "status": a["status"],
-            "reason": a["reason"],
-        })
-    _dump({"axis": spark_axis, "series": spark_series}, out / "sparks.json")
-    counts["sparks"] = len(spark_series)
-
-    # History per suite: parallel arrays per series + commit axis.
-    history_dir = out / "history"
-    if history_dir.is_dir():
-        for stale in history_dir.glob("*.json"):
-            stale.unlink()
-
-    subject_by_pair = {(c["sha"], c["node"]): c["subject"] for c in commits}
-    points_by_suite: dict[str, list[dict]] = defaultdict(list)
-    for pt in points:
-        points_by_suite[pt["suite"]].append(pt)
-
-    for suite in sorted(points_by_suite):
-        suite_pts = points_by_suite[suite]
-        axis_map: dict[tuple[int, str], dict] = {}
-        series_groups: dict[tuple, list[dict]] = defaultdict(list)
-        for pt in suite_pts:
-            axis_key = (pt["commit_order"], pt["sha"])
-            if axis_key not in axis_map:
-                axis_map[axis_key] = {
-                    "commit_order": pt["commit_order"],
+    if views_format == "json":
+        # Sparks: last SPARK_POINTS commits and per-series measured points.
+        axis_by_order: dict[int, dict] = {}
+        for pt in points:
+            order = pt["commit_order"]
+            if order not in axis_by_order:
+                axis_by_order[order] = {
+                    "commit_order": order,
                     "sha": pt["sha"],
                     "short": short_sha(pt["sha"]),
                     "date": _iso(pt["committer_date"]),
-                    "subject": subject_by_pair.get((pt["sha"], pt["node"]), ""),
                 }
-            series_groups[(pt["case"], pt["params"], pt["quantity"], pt["node"])].append(pt)
+        spark_axis = [axis_by_order[o] for o in sorted(axis_by_order)[-SPARK_POINTS:]]
 
-        axis = [axis_map[k] for k in sorted(axis_map)]
-        series_map: dict[str, dict] = {}
-        for skey in sorted(series_groups):
-            pts = sorted(series_groups[skey], key=lambda p: p["commit_order"])
-            head = pts[0]
-            series_map["|".join(skey)] = {
+        ok_by_series: dict[tuple, list[dict]] = defaultdict(list)
+        for pt in points:
+            if is_measured(pt):
+                ok_by_series[series_key(pt)].append(pt)
+
+        spark_series = []
+        for key in sorted(ok_by_series):
+            pts = sorted(ok_by_series[key], key=lambda p: p["commit_order"])[-SPARK_POINTS:]
+            lt = latest_by_key.get(key, {})
+            a = attempts[key]
+            head = pts[-1]
+            spark_series.append({
+                "suite": head["suite"],
                 "case": head["case"],
                 "params": head["params"],
                 "quantity": head["quantity"],
                 "unit": head["unit"],
                 "direction": head["direction"],
                 "node": head["node"],
+                "latest": lt.get("estimate"),
+                "vs_prev": lt.get("vs_prev"),
+                "noise": lt.get("noise"),
+                "points": lt.get("points"),
+                "sha": lt.get("sha"),
                 "orders": [p["commit_order"] for p in pts],
                 "estimates": [p["estimate"] for p in pts],
-                "mins": [p["min"] for p in pts],
-                "maxs": [p["max"] for p in pts],
-                "ns": [p["n"] for p in pts],
-                "statuses": [p["status"] for p in pts],
-                "reasons": [p["reason"] for p in pts],
-            }
-        _dump({"suite": suite, "commits": axis, "series": series_map}, _safe_child(history_dir, suite))
+                "status": a["status"],
+                "reason": a["reason"],
+            })
+        _dump({"axis": spark_axis, "series": spark_series}, out / "sparks.json")
+        counts["sparks"] = len(spark_series)
+    else:
+        counts["sparks"] = 0
+
+    # History per suite.
+    history_dir = out / "history"
+    subject_by_pair = {(c["sha"], c["node"]): c["subject"] for c in commits}
+    points_by_suite: dict[str, list[dict]] = defaultdict(list)
+    for pt in points:
+        points_by_suite[pt["suite"]].append(pt)
     counts["history_suites"] = len(points_by_suite)
 
+    if views_format == "parquet":
+        schemas = _parquet_view_schemas()
+        for suite in sorted(points_by_suite):
+            suite_pts = points_by_suite.pop(suite)
+            suite_pts.sort(
+                key=lambda p: (p["case"], p["params"], p["quantity"], p["node"], p["commit_order"]),
+            )
+            hist_rows = [
+                {
+                    "case": p["case"],
+                    "params": p["params"],
+                    "quantity": p["quantity"],
+                    "unit": p["unit"],
+                    "direction": p["direction"],
+                    "node": p["node"],
+                    "commit_order": p["commit_order"],
+                    "estimate": p["estimate"],
+                    "min": p["min"],
+                    "max": p["max"],
+                    "n": p["n"],
+                    "status": p["status"],
+                    "reason": p["reason"],
+                }
+                for p in suite_pts
+            ]
+            _write_pq(hist_rows, schemas["history"], _safe_child(history_dir, suite, suffix=".parquet"))
+            del suite_pts, hist_rows
+    else:
+        for suite in sorted(points_by_suite):
+            suite_pts = points_by_suite.pop(suite)
+            axis_map: dict[tuple[int, str], dict] = {}
+            series_groups: dict[tuple, list[dict]] = defaultdict(list)
+            for pt in suite_pts:
+                axis_key = (pt["commit_order"], pt["sha"])
+                if axis_key not in axis_map:
+                    axis_map[axis_key] = {
+                        "commit_order": pt["commit_order"],
+                        "sha": pt["sha"],
+                        "short": short_sha(pt["sha"]),
+                        "date": _iso(pt["committer_date"]),
+                        "subject": subject_by_pair.get((pt["sha"], pt["node"]), ""),
+                    }
+                series_groups[(pt["case"], pt["params"], pt["quantity"], pt["node"])].append(pt)
+
+            axis = [axis_map[k] for k in sorted(axis_map)]
+            series_map: dict[str, dict] = {}
+            for skey in sorted(series_groups):
+                pts = sorted(series_groups[skey], key=lambda p: p["commit_order"])
+                head = pts[0]
+                series_map["|".join(skey)] = {
+                    "case": head["case"],
+                    "params": head["params"],
+                    "quantity": head["quantity"],
+                    "unit": head["unit"],
+                    "direction": head["direction"],
+                    "node": head["node"],
+                    "orders": [p["commit_order"] for p in pts],
+                    "estimates": [p["estimate"] for p in pts],
+                    "mins": [p["min"] for p in pts],
+                    "maxs": [p["max"] for p in pts],
+                    "ns": [p["n"] for p in pts],
+                    "statuses": [p["status"] for p in pts],
+                    "reasons": [p["reason"] for p in pts],
+                }
+            _dump({"suite": suite, "commits": axis, "series": series_map}, _safe_child(history_dir, suite))
+
     # Per-commit pages: nodes, failures, and every change (largest first).
+    # Group references to `changes` rather than copying every row up front so
+    # multi-million-row builds stream to Parquet without doubling peak RAM.
     changes_by_sha: dict[str, list[dict]] = defaultdict(list)
     for ch in changes:
+        changes_by_sha[ch["sha"]].append(ch)
+    for sha_changes in changes_by_sha.values():
+        sha_changes.sort(key=lambda ch: abs(ch["rel_change"]) if ch["rel_change"] is not None else -1.0, reverse=True)
+
+    def _view_change(ch: dict) -> dict:
         lt = latest_by_key.get(series_key(ch))
-        changes_by_sha[ch["sha"]].append({
+        return {
             "suite": ch["suite"],
             "case": ch["case"],
             "params": ch["params"],
@@ -537,9 +737,7 @@ def build_views(marts: dict, data_dir: Path) -> dict:
             "prev_is_parent": ch["prev_is_parent"],
             "gap": ch["gap"],
             "noise": lt["noise"] if lt else None,
-        })
-    for sha_changes in changes_by_sha.values():
-        sha_changes.sort(key=lambda ch: abs(ch["rel_change"]) if ch["rel_change"] is not None else -1.0, reverse=True)
+        }
 
     failures_by_sha: dict[str, list[dict]] = defaultdict(list)
     for pt in points:
@@ -554,5 +752,11 @@ def build_views(marts: dict, data_dir: Path) -> dict:
                 "reason": pt["reason"],
             })
 
-    counts["commit_pages"] = _write_commit_pages(out, commits, changes_by_sha, failures_by_sha)
+    if views_format == "parquet":
+        counts["commit_pages"] = _write_commit_parquet(
+            out, commits, changes_by_sha, failures_by_sha, format_change=_view_change
+        )
+    else:
+        formatted = {sha: [_view_change(ch) for ch in rows] for sha, rows in changes_by_sha.items()}
+        counts["commit_pages"] = _write_commit_pages(out, commits, formatted, failures_by_sha)
     return counts

@@ -691,3 +691,199 @@ def test_nested_python_suites_do_not_collide_while_binaries_use_basename(adhoc, 
     assert {s["suite"] for s in series} == {"benchmarks/a/bench.py", "benchmarks/b/bench.py"}
     assert (site_dir / "data" / "views" / "history" / "benchmarks_a_bench.py.json").is_file()
     assert (site_dir / "data" / "views" / "history" / "benchmarks_b_bench.py.json").is_file()
+# --- Parquet view payloads (`--views-format parquet`), monthly layout & HTTP Range -----
+
+@requires_pyarrow
+def test_parquet_views_emit_snappy_tables_and_slice_offsets(tmp_path):
+    import pyarrow.parquet as pq
+
+    pts = [
+        _point(SHAS[0], 1, "0" * 40, "flaky", None, "error"),
+        _point(SHAS[1], 2, SHAS[0], "flaky", 1.0),
+        _point(SHAS[2], 3, SHAS[1], "flaky", None, "error"),
+        _point(SHAS[3], 4, SHAS[2], "flaky", 1.1),
+        *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "broken", None, "error") for i in range(1, 5)],
+        *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "fast", v,
+                 quantity="items-per-second", direction="higher-is-better")
+          for i, v in [(1, 100), (2, 101), (3, 100), (4, 80)]],
+    ]
+    runs = [
+        {
+            "sha": SHAS[i - 1],
+            "parents": [SHAS[i - 2] if i > 1 else "0" * 40],
+            "committer_date": dt.datetime(2026, 1, i, tzinfo=UTC),
+            "author_date": dt.datetime(2026, 1, i, tzinfo=UTC),
+            "subject": f"commit {i}",
+            "branch": "main",
+            "node": "n1",
+            "state": "finished",
+            "reason": None,
+            "started_at": dt.datetime(2026, 1, i, tzinfo=UTC),
+            "finished_at": dt.datetime(2026, 1, i, tzinfo=UTC),
+            "suites_ok": 1,
+            "suites_failed": 0,
+            "results": 3,
+            "ingest_problems": 0,
+            "log": "",
+        }
+        for i in range(1, 5)
+    ]
+    marts = marts_mod.build_marts(runs, pts, source="runs")
+    data = tmp_path / "data"
+    data.mkdir()
+
+    # Build JSON first so we can verify switching to parquet cleans stale JSON views.
+    payloads.build_views(marts, data, views_format="json")
+    views_dir = data / "views"
+    json_commits = {sha: _load(views_dir / "commits" / f"{sha}.json") for sha in SHAS}
+
+    counts = payloads.build_views(marts, data, views_format="parquet")
+    assert counts["series"] == 3
+    assert counts["history_suites"] == 1
+    assert counts["commit_pages"] == 4
+    assert counts["sparks"] == 0
+
+    # Stale JSON views removed; landing.json + Parquet views present.
+    assert (views_dir / "landing.json").is_file()
+    assert not (views_dir / "series.json").exists()
+    assert not (views_dir / "sparks.json").exists()
+    assert not list((views_dir / "commits").glob("*.json"))
+    assert not list((views_dir / "history").glob("*.json"))
+    for name in payloads.PARQUET_VIEW_FILES:
+        p = views_dir / name
+        assert p.is_file()
+        pf = pq.ParquetFile(p)
+        if pf.metadata.num_row_groups:
+            assert pf.metadata.row_group(0).column(0).compression == "SNAPPY"
+
+    # Verify history parquet matches series points.
+    hist_rows = pq.read_table(views_dir / "history" / "s.parquet").to_pylist()
+    flaky_rows = [r for r in hist_rows if r["case"] == "flaky"]
+    assert [r["commit_order"] for r in flaky_rows] == [1, 2, 3, 4]
+    assert [r["estimate"] for r in flaky_rows] == [None, 1.0, None, 1.1]
+    assert [r["status"] for r in flaky_rows] == ["error", "success", "error", "success"]
+
+    # Verify commits.parquet row-range slices align with changes.parquet & failures.parquet.
+    commits_pq = pq.read_table(views_dir / "commits.parquet").to_pylist()
+    changes_pq = pq.read_table(views_dir / "changes.parquet").to_pylist()
+    failures_pq = pq.read_table(views_dir / "failures.parquet").to_pylist()
+    for c in commits_pq:
+        sha = c["sha"]
+        ch_slice = changes_pq[c["changes_start"]:c["changes_end"]]
+        f_slice = failures_pq[c["failures_start"]:c["failures_end"]]
+        assert all(r["sha"] == sha for r in ch_slice)
+        assert all(r["sha"] == sha for r in f_slice)
+        assert [r["case"] for r in ch_slice] == [r["case"] for r in json_commits[sha]["changes"]]
+        assert [r["case"] for r in f_slice] == [r["case"] for r in json_commits[sha]["failures"]]
+
+    # Empty points also build cleanly in parquet mode.
+    empty_data = tmp_path / "empty-data"
+    empty_data.mkdir()
+    empty_marts = marts_mod.build_marts(runs[:2], [], source="runs")
+    payloads.build_views(empty_marts, empty_data, views_format="parquet")
+    assert pq.read_table(empty_data / "views" / "series.parquet").num_rows == 0
+    assert pq.read_table(empty_data / "views" / "commits.parquet").num_rows == 2
+
+    # Switching back to json cleans stale parquet views.
+    payloads.build_views(marts, data, views_format="json")
+    for name in payloads.PARQUET_VIEW_FILES:
+        assert not (views_dir / name).exists()
+    assert not list((views_dir / "history").glob("*.parquet"))
+    assert (views_dir / "series.json").is_file()
+
+
+def test_views_format_parquet_refused_without_pyarrow(tmp, monkeypatch, capsys):
+    _block_pyarrow(monkeypatch)
+    res_dir = tmp / "res"
+    res_dir.mkdir()
+    out_dir = tmp / "pq-site"
+    assert cli.main([
+        "view", "--results", str(res_dir), "--views-format", "parquet", "--out", str(out_dir),
+    ]) == cli.EXIT_REFUSED
+    assert "benchx[parquet]" in capsys.readouterr().err
+    assert not out_dir.exists()
+
+
+@requires_pyarrow
+def test_monthly_runs_layout_and_parquet_views_cli(repo, tmp):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    monthly_dir = tmp / "monthly"
+    base = make_build(tmp / "b-base", repo["wt-base"], cases())
+    head = make_build(tmp / "b-head", repo["wt-head"], cases(quiet=1.15e-3, noisy=2.00e-3))
+
+    monthly_results = monthly_dir / "results" / "2026-11.parquet"
+    store = Store(monthly_results)
+    run_tables = []
+    for sha, parent, date, build_dir, wt in (
+        (repo["base"], "0" * 40, "2026-11-01T10:00:00+00:00", base, repo["wt-base"]),
+        (repo["head"], repo["base"], "2026-11-02T10:00:00+00:00", head, repo["wt-head"]),
+    ):
+        res_out = tmp / f"raw-{sha[:8]}"
+        assert cli.main([
+            "bench", f"{build_dir}:{wt}", "--adapter", "google-benchmark", "--suite", "demo-bench",
+            "--run-key", f"main/{sha}/m5", "--out", str(res_out), "--no-ingest",
+        ]) == cli.EXIT_OK
+        store.ingest_paths([res_out])
+        staging = tmp / f"run-{sha[:8]}"
+        run_pq = views.write_run(
+            staging,
+            {"sha": sha, "parents": [parent], "committer_date": date, "author_date": date, "subject": f"msg {sha[:6]}"},
+            {"state": "finished", "node": "m5", "suites_ok": 1, "suites_failed": 0, "suites": {"demo-bench": {"results": 2}}},
+        )
+        run_tables.append(pq.read_table(run_pq))
+
+    pq.write_table(pa.concat_tables(run_tables), monthly_dir / "runs.parquet")
+
+    site_dir = tmp / "site-pq"
+    assert cli.main([
+        "view", "--runs", str(monthly_dir), "--views-format", "parquet", "--no-marts", "--out", str(site_dir),
+    ]) == cli.EXIT_OK
+
+    manifest = _load(site_dir / "data" / "manifest.json")
+    assert manifest["source"] == "runs"
+    assert manifest["views_format"] == "parquet"
+    assert manifest["counts"]["distinct_commits"] == 2
+    assert manifest["counts"]["points"] == 4
+    assert pq.read_table(site_dir / "data" / "views" / "series.parquet").num_rows == 2
+    assert pq.read_table(site_dir / "data" / "views" / "changes.parquet").num_rows == 2
+    assert (site_dir / "data" / "views" / "history" / "demo-bench.parquet").is_file()
+
+
+def test_http_server_supports_byte_ranges(tmp):
+    site_dir = tmp / "range-site"
+    site_dir.mkdir()
+    payload = bytes(range(256))
+    (site_dir / "blob.bin").write_bytes(payload)
+
+    server, url = site.create_server(site_dir, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        head_req = urllib.request.Request(url + "blob.bin", method="HEAD")
+        with urllib.request.urlopen(head_req) as resp:
+            assert resp.status == 200
+            assert resp.headers.get("Accept-Ranges") == "bytes"
+            assert resp.headers.get("Content-Length") == "256"
+
+        req = urllib.request.Request(url + "blob.bin", headers={"Range": "bytes=10-25"})
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 206
+            assert resp.headers.get("Content-Range") == "bytes 10-25/256"
+            assert resp.read() == payload[10:26]
+
+        suffix_req = urllib.request.Request(url + "blob.bin", headers={"Range": "bytes=-16"})
+        with urllib.request.urlopen(suffix_req) as resp:
+            assert resp.status == 206
+            assert resp.headers.get("Content-Range") == "bytes 240-255/256"
+            assert resp.read() == payload[-16:]
+
+        bad_req = urllib.request.Request(url + "blob.bin", headers={"Range": "bytes=500-600"})
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(bad_req)
+        assert exc_info.value.code == 416
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

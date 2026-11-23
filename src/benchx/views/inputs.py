@@ -151,20 +151,29 @@ def write_run(
 
 
 def read_runs_metadata(runs_dir: Path) -> list[dict]:
-    """Read every `<sha>/<node>/run.parquet` row under `runs_dir`."""
+    """Read run metadata from `runs.parquet` (monthly layout) and `<sha>/<node>/run.parquet`.
+
+    When the same `(sha, node)` appears in both `runs.parquet` and a per-run
+    `<sha>/<node>/run.parquet`, the per-run file takes precedence.
+    """
     _, pq = _require_pyarrow("reading run.parquet")
-    rows = []
-    for path in sorted(Path(runs_dir).glob("*/*/run.parquet")):
+    root = Path(runs_dir)
+    paths: list[Path] = []
+    root_runs = root / "runs.parquet"
+    if root_runs.is_file():
+        paths.append(root_runs)
+    paths.extend(sorted(root.glob("*/*/run.parquet")))
+    by_key: dict[tuple[str, str], dict] = {}
+    for path in paths:
         table = pq.ParquetFile(path).read()
-        if table.num_rows:
-            row = table.to_pylist()[0]
+        for row in table.to_pylist():
             for key in ("author_date", "committer_date", "started_at", "finished_at"):
                 row[key] = parse_time(row.get(key))
             row["parents"] = list(row.get("parents") or [])
             row["log"] = row.get("log") or ""
             row["ingest_problems"] = int(row.get("ingest_problems") or 0)
-            rows.append(row)
-    return rows
+            by_key[(row["sha"], row["node"])] = row
+    return list(by_key.values())
 
 
 def _parse_json_obj(value) -> dict:
@@ -270,7 +279,7 @@ def _extract_estimate(measurement: dict) -> tuple[list[float], float | None, flo
     return [], est, mean, lo, hi
 
 
-def _point_from_row(row: dict, *, distinguish_dirty: bool) -> dict | None:
+def _point_from_row(row: dict, *, distinguish_dirty: bool, intern=None) -> dict | None:
     measurement = row.get("measurement") or {}
     kind = measurement.get("kind")
     if kind is not None and kind != "measurand":
@@ -298,24 +307,25 @@ def _point_from_row(row: dict, *, distinguish_dirty: bool) -> dict | None:
     quantity = measurement.get("quantity") or {}
     vals, estimate, mean, lo, hi = _extract_estimate(measurement)
 
+    s = intern if intern is not None else (lambda v: v)
     return {
-        "sha": sha,
-        "node": _extract_node(run_key, env_identity),
-        "suite": _extract_suite(work_order, row),
-        "case": str(workload.get("name") or ""),
-        "params": _canonical_params(workload.get("parameters")),
-        "quantity": str(quantity.get("name") or ""),
-        "unit": str(quantity.get("unit") or ""),
-        "direction": str(quantity.get("direction") or ""),
-        "status": str(measurement.get("status") or "unknown"),
-        "reason": str(measurement.get("reason") or ""),
+        "sha": s(sha),
+        "node": s(_extract_node(run_key, env_identity)),
+        "suite": s(_extract_suite(work_order, row)),
+        "case": s(str(workload.get("name") or "")),
+        "params": s(_canonical_params(workload.get("parameters"))),
+        "quantity": s(str(quantity.get("name") or "")),
+        "unit": s(str(quantity.get("unit") or "")),
+        "direction": s(str(quantity.get("direction") or "")),
+        "status": s(str(measurement.get("status") or "unknown")),
+        "reason": s(str(measurement.get("reason") or "")),
         "estimate": estimate,
         "mean": mean,
         "min": lo,
         "max": hi,
         "n": len(vals),
         "started_at": parse_time(provenance.get("started_at")),
-        "run_key": run_key,
+        "run_key": s(run_key),
         "ingest_key": str(row.get("ingest_key") or ""),
         "_vals": vals,
         "_dirty_parent": dirty_parent,
@@ -332,19 +342,22 @@ _PARQUET_POINT_COLUMNS = [
 ]
 
 
-def _read_parquet_points(path: Path, *, distinguish_dirty: bool) -> list[dict]:
+def _read_parquet_points(path: Path, *, distinguish_dirty: bool, intern=None) -> list[dict]:
     _, pq = _require_pyarrow("reading Parquet results")
     pf = pq.ParquetFile(path)
     available = set(pf.schema_arrow.names)
     cols = [c for c in _PARQUET_POINT_COLUMNS if c in available]
     if not cols:
         return []
-    table = pf.read(columns=cols)
+    if intern is None:
+        cache: dict[str, str] = {}
+        intern = lambda v: cache.setdefault(v, v)  # noqa: E731
     points = []
-    for row in table.to_pylist():
-        pt = _point_from_row(row, distinguish_dirty=distinguish_dirty)
-        if pt is not None:
-            points.append(pt)
+    for batch in pf.iter_batches(batch_size=100_000, columns=cols):
+        for row in batch.to_pylist():
+            pt = _point_from_row(row, distinguish_dirty=distinguish_dirty, intern=intern)
+            if pt is not None:
+                points.append(pt)
     return points
 
 
@@ -549,7 +562,7 @@ def synthesize_runs(
 
 
 def read_runs_dir(runs_dir: str | Path) -> tuple[list[dict], list[dict], int]:
-    """Read a CI/node `runs/<sha>/<node>/{run.parquet, results.parquet}` tree."""
+    """Read a CI/node `runs/<sha>/<node>/{run.parquet, results.parquet}` or monthly `results/*.parquet` tree."""
     runs_path = check_local_path(runs_dir)
     _require_pyarrow("reading runs/ Parquet files")
     if not runs_path.is_dir():
@@ -560,9 +573,16 @@ def read_runs_dir(runs_dir: str | Path) -> tuple[list[dict], list[dict], int]:
         dedup_runs[(run["sha"], run["node"])] = run
     runs = list(dedup_runs.values())
     ingest_problems = sum(r["ingest_problems"] for r in runs)
+    result_files: list[Path] = []
+    monthly_dir = runs_path / "results"
+    if monthly_dir.is_dir():
+        result_files.extend(sorted(monthly_dir.glob("*.parquet")))
+    result_files.extend(sorted(runs_path.glob("*/*/results.parquet")))
+    cache: dict[str, str] = {}
+    intern = lambda v: cache.setdefault(v, v)  # noqa: E731
     raw_points: list[dict] = []
-    for path in sorted(runs_path.glob("*/*/results.parquet")):
-        raw_points.extend(_read_parquet_points(path, distinguish_dirty=False))
+    for path in result_files:
+        raw_points.extend(_read_parquet_points(path, distinguish_dirty=False, intern=intern))
     return runs, _collapse_duplicate_points(raw_points), ingest_problems
 
 
