@@ -8,7 +8,7 @@ and comparator).
 
 import logging
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # A library caller sees no log output unless it configures logging itself; `bx` (cli.main)
 # installs its own handlers (log.py).
