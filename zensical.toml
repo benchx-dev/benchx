@@ -9,7 +9,7 @@
 
 [project]
 site_name = "benchx"
-site_description = "A schema-first design for continuous benchmarking"
+site_description = "A schema-first benchmarking workbench for local comparisons, history tracking, and static dashboards"
 site_url = "https://benchx.dev/"
 repo_url = "https://github.com/benchx-dev/benchx"
 repo_name = "benchx-dev/benchx"
@@ -28,6 +28,20 @@ requirements.txt
 
 nav = [
   { "Home" = "index.md" },
+  { "Guide" = "benchx.md" },
+  { "Examples" = "examples.md" },
+  { "Schemas" = [
+    { "Overview" = "schemas/index.md" },
+    { "Measurement result" = "schemas/measurement-result.md" },
+    { "Work order" = "schemas/work-order.md" },
+    { "Target description" = "schemas/target-description.md" },
+    { "Target provider request" = "schemas/target-provider-request.md" },
+    { "Environment policy" = "schemas/environment-policy.md" },
+    { "Environment identity" = "schemas/env-identity.md" },
+    { "Identity policy" = "schemas/identity-policy.md" },
+    { "Comparison document" = "schemas/comparison-document.md" },
+    { "Project configuration" = "schemas/config.md" },
+  ] },
   { "Design" = [
     { "Overview" = "design/README.md" },
     { "Benchmark result schema" = "design/benchmark-result-schema.md" },
@@ -41,18 +55,6 @@ nav = [
     { "Prototype scope" = "design/prototype-scope.md" },
     { "Prototype design" = "design/prototype-design.md" },
     { "Result in Parquet" = "design/measurement-result-parquet.md" },
-  ] },
-  { "Schemas" = [
-    { "Overview" = "schemas/index.md" },
-    { "Measurement result" = "schemas/measurement-result.md" },
-    { "Work order" = "schemas/work-order.md" },
-    { "Target description" = "schemas/target-description.md" },
-    { "Target provider request" = "schemas/target-provider-request.md" },
-    { "Environment policy" = "schemas/environment-policy.md" },
-    { "Environment identity" = "schemas/env-identity.md" },
-    { "Identity policy" = "schemas/identity-policy.md" },
-    { "Comparison document" = "schemas/comparison-document.md" },
-    { "Project configuration" = "schemas/config.md" },
   ] },
   { "Use cases" = [
     { "Overview" = "use-cases/README.md" },
@@ -74,8 +76,6 @@ nav = [
     { "Array API and accelerators" = "user_stories/array-api-and-accelerators.md" },
     { "One-off benchmarking" = "user_stories/one-off.md" },
   ] },
-  { "benchx" = "benchx.md" },
-  { "Examples" = "examples.md" },
   { "Releasing" = "releasing.md" },
 ]
 

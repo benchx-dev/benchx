@@ -1,51 +1,63 @@
 # benchx
 
-A design for a continuous benchmarking system — not one monolithic tool, but a
-cluster of cooperating components (benchmark runners on compute nodes,
-schedulers, ingestion adapters, result storage, views, comparison and alerting
-services) that together let a project measure its performance on every change
-and trust what it sees.
+A schema-first benchmarking workbench for running local A/B comparisons,
+tracking performance over commit history, and publishing static benchmark
+dashboards. Works with `pyperf`, `asv`, and Google Benchmark.
+
+## Quickstart
+
+Install from [PyPI](https://pypi.org/project/benchx/):
+
+```console
+pip install benchx                  # JSONL store, compare, validate, and bx view
+# or: pip install 'benchx[parquet]' # adds PyArrow for Parquet stores and CI --runs
+```
+
+Run benchmarks locally, compare two checkouts, and inspect history in a browser:
+
+```console
+# Measure a Python benchmark module (or an ASV suite with: bx bench . --adapter asv)
+bx bench benchmarks.py
+
+# Paired A/B comparison across two checkouts
+bx compare ../wt-base ../wt-head --profile revisions --suite benchmarks.py --rounds 5
+
+# Build and serve the interactive static dashboard locally
+bx view
+```
+
+## Where to go next
+
+- **Use it locally:** [CLI & technical guide](docs/benchx.md) and
+  [worked examples](docs/examples.md) (NumPy, pandas/ASV, Apache Arrow, pyperf,
+  parametrized benchmarks).
+- **See it live:** [Apache Arrow C++ dashboard](https://arrow.benchx.dev/),
+  powered by [benchx-ci](https://github.com/benchx-dev/benchx-ci) and
+  [benchx-arrow](https://github.com/benchx-dev/benchx-arrow).
+- **Explore the architecture:** [Design overview](docs/design/README.md),
+  [benchmark result schema](docs/design/benchmark-result-schema.md),
+  [schema reference](https://benchx.dev/schemas/), and
+  [user stories](docs/user_stories/README.md).
 
 ## Approach: schema first
 
-Everything here flows out of one artifact: the **benchmark result schema**. It
-defines what a measurement result is, what makes two results comparable, and
-how histories of results are identified and preserved. Every other component —
-runner, scheduler, dashboard, alerter, migration tool — is designed *around*
-the schema, producing or consuming it, rather than the schema being shaped by
-any single tool's needs.
+BenchX is designed as a cluster of cooperating components (benchmark runners on
+compute nodes, schedulers, harness adapters, result storage, static views, and
+comparators) rather than one monolithic tool.
 
-For this to work, the schema must be designed correctly up front: rigorous
-about measurement semantics (units, estimators, uncertainty), neutral toward
-harnesses and languages, and rich enough that future use cases can sit on top
-of it without schema changes. The current draft is grounded in a review of
-metrology standards (VIM/GUM) and of existing benchmarking systems and
-harnesses, with a migration contract so that history from today's tools is not
-lost.
+Everything flows out of one artifact: the **benchmark result schema**. It
+defines what a measurement result is, what makes two results comparable, and
+how histories of results are identified and preserved. Every component produces
+or consumes the schema, rather than the schema being shaped by any single tool's
+needs. The schema is grounded in metrology standards (VIM/GUM) and includes a
+migration contract so history from existing tools is preserved.
 
 ## Grounded in user stories
 
-To make sure the schema and the components serve real needs, started by collecting
-[user stories](https://benchx.dev/user_stories/) from multiple projects
--- who benchmarks, what they do today, where it hurts, what must not break.
-We surveyed Apache Arrow's
-continuous benchmarking setup, NumPy, SciPy, Pandas, and several related projects from
-the data science/numerical computing ecosystem.
-The stories drive which components exist and what each must do; the schema must
-allow all of them.
-
-## BenchX usage and development
-
-Install with `pip install benchx` (or `pip install 'benchx[parquet]'` for the local Parquet store) ([PyPI](https://pypi.org/project/benchx/)).
-
-We welcome contributions of all sorts: add a user story, tell us about your use case, try
-`benchx` on your workflow/project, open an issue if you found a rough edge,
-implement a missing feature.
-
-- Documentation: <https://benchx.dev/>
-- Live deployment (Apache Arrow C++): <https://arrow.benchx.dev/>
-- Issue tracker: <https://github.com/benchx-dev/benchx/issues/>
-- Worked examples: <https://github.com/benchx-dev/benchx_examples>
+To make sure the schema and components serve real needs, we started by
+collecting [user stories](docs/user_stories/README.md) from Apache Arrow,
+NumPy, SciPy, pandas, Narwhals, and OpenBLAS — who benchmarks, what they do
+today, where it hurts, and what must not break.
 
 ## Live deployment and companion repositories
 
@@ -65,7 +77,7 @@ repositories so that `benchx` itself stays cloud-free and CI-vendor-neutral:
   workflows and AWS EC2/S3 infrastructure templates for ephemeral continuous
   benchmarking.
 - [benchx_examples](https://github.com/benchx-dev/benchx_examples) — local
-  end-to-end examples (NumPy, Arrow, pyperf, Google Benchmark, ASV).
+  end-to-end examples (NumPy, pandas/ASV, Arrow, pyperf, Google Benchmark).
 
 ## Contents
 
@@ -74,39 +86,41 @@ repositories so that `benchx` itself stays cloud-free and CI-vendor-neutral:
 - [`docs/examples.md`](docs/examples.md) — live deployments, CI setup, and local
   worked examples.
 - [`docs/design/benchmark-result-schema.md`](docs/design/benchmark-result-schema.md)
-  — the benchmark result schema and migration contract (the core design
-  document).
+  — the benchmark result schema and migration contract.
 - [`docs/design/ci-workbench.md`](docs/design/ci-workbench.md) — unattended CI
   workbench lifecycle, staging, and repository boundaries.
 - [`docs/design/measurement-result-parquet.md`](docs/design/measurement-result-parquet.md)
-  — how a result is stored in Parquet (`src/benchx/parquet.py`), with a small
-  converter in `tools/json_to_parquet.py`.
+  — how a result is stored in Parquet (`src/benchx/parquet.py`).
 - [`docs/user_stories/README.md`](docs/user_stories/README.md) — user story
   template and collected stories.
 - `src/benchx/` — the implementation, with its tests in `tests/`.
 - `src/benchx/schemas/` — JSON schemas for the benchmark result and other
   components (shipped with the package).
 
-## Documentation site
+## Contributing & documentation site
 
-The design documents, use cases, user stories, and a reference page per JSON
-schema are published as a site built with [Zensical](https://zensical.org).
-To preview it locally:
+We welcome contributions of all sorts: add a user story, try `benchx` on your
+project, open an issue on the
+[issue tracker](https://github.com/benchx-dev/benchx/issues/), or implement a
+feature.
 
-```
+The documentation site (<https://benchx.dev/>) is built with
+[Zensical](https://zensical.org). To preview it locally:
+
+```console
 uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
 uv run --with-requirements docs/requirements.txt zensical serve
 ```
 
-`tools/gen_docs.py` generates the landing page and the
-schema reference pages into `docs/` (those paths are gitignored); `zensical.toml`
-configures the site, and `.github/workflows/docs.yml` builds and deploys it.
+`tools/gen_docs.py` generates `docs/index.md` and `docs/schemas/` (gitignored);
+`zensical.toml` configures the site, and `.github/workflows/docs.yml` builds and
+deploys it.
 
 ## Status
 
-Beta status: the main features are available and ready for user testing;
-the project is under active development, and we expect to be able to
-start offering API stability guarantees in the near future.
+Beta status: the main features are available and ready for user testing; the
+project is under active development, and we expect to start offering API
+stability guarantees in the near future.
 
 ## License
 
