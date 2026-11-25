@@ -48,7 +48,7 @@ def test_the_document_is_what_it_was_without_the_log(caplog):
 
 
 def test_a_failed_invariant_and_an_indeterminate_unit_make_the_summary_a_warning(caplog):
-    docs = run_of(rounds=2)  # two rounds are the fewest, and min_rounds is 3
+    docs = run_of(rounds=2)  # two rounds are the fewest, and min_rounds is 4
     for d in docs:
         if d["coordinates"]["workload"]["parameters"]["dtype"] == "'int16'":  # the sides disagree about a fact
             d["coordinates"]["environment"]["system"]["runtime"] = {"python": "3.13" if d["revision"]["key"] == HEAD
@@ -59,7 +59,7 @@ def test_a_failed_invariant_and_an_indeterminate_unit_make_the_summary_a_warning
     assert any(level == "WARNING" and m.startswith("invariant sides-agree failed for " + NAME) and "differ" in m
                for level, m in messages)
     assert any(level == "INFO" and "indeterminate, reason insufficient-rounds, rounds 2" in m and
-               "3 paired rounds required" in m for level, m in messages)
+               "4 paired rounds required" in m for level, m in messages)
     summary = [(level, m) for level, m in messages if m.startswith("compared run")]
     assert summary[0][0] == "WARNING" and "indeterminate: insufficient-rounds 2" in summary[0][1]
 
@@ -105,11 +105,11 @@ def test_a_min_rounds_below_two_is_said_once(caplog):
 
 @pytest.fixture
 def session(repo, tmp, monkeypatch):
-    """Three rounds of two builds in one run key, as a loop of `bx bench` calls leaves them."""
+    """Four rounds of two builds in one run key, as a loop of `bx bench` calls leaves them."""
     builds = [make_build(tmp / name, repo[tree], cases(), **extra)
               for name, tree, extra in (("b-base", "wt-base", {}), ("b-head", "wt-head", {}))]
     slot = 0
-    for round_ in range(3):
+    for round_ in range(4):
         for build in builds:
             assert cli.main(["bench", str(build), *GBENCH, "--run-key", "S", "--round", str(round_),
                              "--slot", str(slot)]) == cli.EXIT_OK

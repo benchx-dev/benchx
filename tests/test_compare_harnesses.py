@@ -26,7 +26,6 @@ MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", 
     (MEASURE + ["--repetitions", "3"], "pyperf takes no --repetitions"),
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"], "--adapter is required"),
     (["A", "B", "--profile", "revisions", "--rounds", "1", "--adapter", "pyperf"], "--suite is required"),
-    (["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf"], "--rounds is required"),
     (["A", "B", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"], "--profile is required"),
     (MEASURE + ["--project", "p", "--no-project"], "--project or --no-project"),
     (MEASURE + ["--quantity", "wall-time,wall-time"], "twice"),
@@ -37,6 +36,23 @@ MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", 
 def test_flags_that_do_not_fit_are_refused(argv, message, capsys):
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv, rounds", [([], session.ROUNDS), (["--rounds", "2"], 2)])
+def test_rounds_default_when_neither_the_flag_nor_the_file_says(argv, rounds, tmp, monkeypatch, capsys):
+    """#126: an even default, so an alternating order balances, and enough that k = 3 rarely flags a no-op."""
+    seen = {}
+
+    def stop(*_, rounds, **__):
+        seen["rounds"] = rounds
+        raise session.SessionError("stopped by the test")
+    monkeypatch.setattr(session, "compare_targets", stop)
+    monkeypatch.chdir(tmp)
+    argv = ["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf", "--no-ingest", "--no-project",
+            "--out", str(tmp / "out"), *argv]
+    assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
+    assert seen == {"rounds": rounds} and "stopped by the test" in capsys.readouterr().err
+    assert session.ROUNDS % 2 == 0
 
 
 def test_a_harness_refusal_comes_before_any_side_is_resolved(tmp):

@@ -58,12 +58,12 @@ bx bench PATH --adapter asv [CASE …] [--filter REGEX] [--tree DIR] [...]
 bx compare BASELINE CONTENDER --profile revisions|environments
            [--adapter pyperf|google-benchmark]                  # default pyperf
            --suite NAME [--filter REGEX] [--quantity wall-time]
-           --rounds R [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
+           [--rounds 6] [-e NAME=VALUE ...] [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--no-build] [--no-ingest] [--k 3] [--json | --tables [--all]]
+           [--run-key KEY] [--out DIR] [--no-build] [--no-ingest] [--k 3] [--min-rounds 4] [--json | --tables [--all]]
 
 # measure mode, one target: alternate the two values of a benchmark parameter
-bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME --rounds R
+bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME [--rounds 6]
            [--vary NAME] [--baseline VALUE] [--filter REGEX] [...]  # the options above, except --label
 
 # read mode: compare results already measured
@@ -103,8 +103,9 @@ working directory; its directory is the root) says how the project is measured: 
 and the results (by default `store.parquet` and `results/` in the root), the
 comparator's `compare` policy, and the log (`logging`, `log_level`: see "The log" below). Every value is the command line's, else the file's, else a
 built-in default; a required one (`adapter.name`, `adapter.suite`, the target, and for
-`bx compare` the profile and `--rounds`) that has none is a hard failure that names the
-flag and the key. `--no-project` makes one run ad hoc whatever the file's `project` says.
+`bx compare` the profile) that has none is a hard failure that names the
+flag and the key. `--rounds` defaults to 6 and `--min-rounds` to 4: with fewer paired rounds the
+k = 3 threshold flags too many no-op changes (#126). `--no-project` makes one run ad hoc whatever the file's `project` says.
 The schema is `schemas/config/0.1.0`, whose `examples/` hold recommended settings for
 pyperf and for Google Benchmark. The store and the results directory are left out of a
 measured tree's identity when they sit inside it. A tree is dirty when a tracked file differs
@@ -223,7 +224,7 @@ One command alternates the two values over the rounds and compares them (`adapte
 `benchx.conf.json` makes `--adapter` optional):
 
 ```console
-$ bx compare . --profile variants --adapter pyperf --suite bench_suite.py --rounds 5
+$ bx compare . --profile variants --adapter pyperf --suite bench_suite.py
 ```
 
 The values are recorded as `repr()` strings. The baseline is the first declared value, and

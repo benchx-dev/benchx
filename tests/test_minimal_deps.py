@@ -185,11 +185,11 @@ def test_bench_run_and_compare_results_without_pyarrow(repo, tmp, monkeypatch, c
     assert not (tmp / "store.parquet").exists()
     capsys.readouterr()
 
-    # 2. bx bench --no-ingest across 3 alternating rounds of two sides (split into two dirs)
+    # 2. bx bench --no-ingest across 4 alternating rounds of two sides (split into two dirs)
     out_base = tmp / "out-base"
     out_head = tmp / "out-head"
     slot = 0
-    for r in range(3):
+    for r in range(4):
         for target, out_dir in (
             (f"{base}:{repo['wt-base']}", out_base),
             (f"{head}:{repo['wt-head']}", out_head),

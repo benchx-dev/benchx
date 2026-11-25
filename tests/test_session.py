@@ -150,7 +150,6 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     (["A", "B", "--run", "k", "--profile", "revisions"], "not both"),
     (["A", "--profile", "revisions"], "exactly two targets"),
     (["A", "B", "--profile", "revisions", "--rounds", "3", "--adapter", "pyperf"], "--suite is required"),
-    (["A", "B", "--profile", "revisions", "--suite", "s", "--adapter", "pyperf"], "--rounds is required"),
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3", "--baseline", "x"], "read mode"),
     (["--run", "k", "--profile", "revisions"], "needs --baseline"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--rounds", "3"], "measure mode"),
