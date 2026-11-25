@@ -25,7 +25,7 @@ Repository = "https://github.com/benchx-dev/benchx"
 
 [project.optional-dependencies]
 parquet = ["pyarrow>=19"]
-test = ["pytest", "pyperf", "asv_runner"]
+test = ["pytest", "pyperf", "asv_runner", "markdown-it-py"]
 
 [project.scripts]
 bx = "benchx.cli:main"

@@ -7,7 +7,12 @@ It writes, into docs/, files that are gitignored and never committed:
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
 - schemas/<name>/<version>/schema.json and examples/*.json, so the raw
-  documents are downloadable from the site.
+  documents are downloadable from the site;
+- examples/<name>.md, the page of each example (a directory of the top-level examples/ with
+  a README.md). With `--executed DIR` it is DIR/<name>.md, the README as tools/execute_markdown.py
+  rendered it, which the docs workflow downloads from the jobs that ran the examples (a missing
+  page is an error). Without the option it is the committed README, under a notice that it was
+  not executed, so that a local build needs no setup.
 
 A schema page shows the top-level property table, one subsection per nested
 object, the conditional rules (allOf/if/then) in prose, the $defs once each,
@@ -489,13 +494,62 @@ def rewrite_readme(text: str, strip_prefix: str) -> str:
     return text
 
 
+# --------------------------------------------------------------------------- examples
+
+EXAMPLES = ROOT / "examples"
+
+NOT_EXECUTED = (
+    '!!! warning "Not executed"\n'
+    "    This is the committed README of the example, with the output that was committed with it.\n"
+    "    The documentation site shows the output of a CI run instead.\n"
+)
+
+
+def example_names() -> list[str]:
+    """The examples: the directories of examples/ that have a README.md."""
+    if not EXAMPLES.is_dir():
+        return []
+    return sorted(d.name for d in EXAMPLES.iterdir() if (d / "README.md").is_file())
+
+
+def unexecuted_page(readme: str) -> str:
+    """The README with a notice under its title (at the top, when the first line is not one)."""
+    lines = readme.splitlines(keepends=True)
+    at = 1 if lines and lines[0].startswith("# ") else 0
+    return "".join(lines[:at]) + "\n" + NOT_EXECUTED + "\n" + "".join(lines[at:])
+
+
+def example_pages(executed: Path | None) -> dict[str, str]:
+    """The page of each example, by name (see the top of this file)."""
+    pages = {}
+    for name in example_names():
+        if executed is None:
+            pages[name] = unexecuted_page((EXAMPLES / name / "README.md").read_text())
+            continue
+        page = executed / f"{name}.md"
+        if not page.is_file():
+            raise SystemExit(
+                f"no executed page for examples/{name}: {page} is missing. An example needs a "
+                "leg in the matrix of the `examples` job of .github/workflows/docs.yml, or the "
+                "site would show it unexecuted.")
+        pages[name] = page.read_text()
+    return pages
+
+
 # --------------------------------------------------------------------------- main
 
-GENERATED = ["index.md", "schemas"]  # paths under docs/, all gitignored
+GENERATED = ["index.md", "schemas", "examples"]  # paths under docs/, all gitignored
 
 
 def main() -> None:
+    import argparse
     import shutil
+
+    parser = argparse.ArgumentParser(description="Generate the documentation pages derived from other files.")
+    parser.add_argument("--executed", type=Path, metavar="DIR",
+                        help="a directory with <name>.md for each example, as tools/execute_markdown.py "
+                             "made them; without it the examples' pages are their committed READMEs")
+    args = parser.parse_args()
 
     for rel in GENERATED:
         path = DOCS / rel
@@ -525,7 +579,12 @@ def main() -> None:
             write(f"schemas/{p.name}/{v}/schema.json", (vdir / "schema.json").read_bytes())
             for ex in sorted((vdir / "examples").glob("*.json")) if (vdir / "examples").is_dir() else []:
                 write(f"schemas/{p.name}/{v}/examples/{ex.name}", ex.read_bytes())
-    print(f"generated {len(pages)} schema pages under {DOCS.relative_to(ROOT)}/")
+    # The pages of the examples, which docs/examples.md links to.
+    examples = example_pages(args.executed)
+    for name, page in examples.items():
+        write(f"examples/{name}.md", page)
+    print(f"generated {len(pages)} schema pages and {len(examples)} example pages "
+          f"({'executed' if args.executed else 'not executed'}) under {DOCS.relative_to(ROOT)}/")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,15 @@ so that core `benchx` remains cloud-free and CI-vendor-neutral:
    machine catalog, and thin caller workflows. Use `benchx-arrow` as a minimal
    template when setting up continuous benchmarking for another project.
 
+## Executed examples
+
+These examples live in [`examples/`](https://github.com/benchx-dev/benchx/tree/main/examples)
+in this repository. CI runs the code blocks of each README on every pull request, against the
+benchx of that pull request, and the page shows the output of that run.
+
+- [`pyperf-suite`](examples/pyperf-suite.md) — timing a suite of Python functions with
+  `bx bench`, the local store, and `bx series` / `bx history`.
+
 ## Local worked examples
 
 Standalone, runnable local examples live in
