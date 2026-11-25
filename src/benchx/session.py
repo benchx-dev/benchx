@@ -335,6 +335,14 @@ def _note_local_only(progress, sides) -> None:
                 progress(f"{f'{name} ' if name else ''}{what}{where} is {state}: the comparison will be local-only")
 
 
+def counterbalanced(round_, sides):
+    """The two sides in the order they run in round `round_` (from 0): baseline first in even
+    rounds, contender first in odd ones. A drift that slows whichever side runs second then
+    pushes half the rounds each way, so it widens the noise instead of biasing the effect (#126)."""
+    sides = list(sides)
+    return sides if round_ % 2 == 0 else sides[::-1]
+
+
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
                     adapter, flags=None, file_precision=None, environment_variables=None, filter=None,
                     quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
@@ -388,13 +396,14 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     out = Path(out) if out else run_directory(results_dir, run_key)
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
     logger.info("run key %s, output %s, %d round(s)", run_key, out, rounds)
-    logger.debug("the baseline value for the comparison is %s: %s, and the baseline runs first in every round",
+    logger.debug("the baseline value for the comparison is %s: %s; the baseline runs first in rounds 1, 3, ... "
+                 "and the contender in rounds 2, 4, ...",
                  label[1] if profile == "environments" else sides[0]["identity"].get("tree"),
                  "the first label value" if profile == "environments" else "the first target's tree id")
 
     slot = 0
     for round_ in range(rounds):
-        for name, side, side_labels in zip(("baseline", "contender"), sides, labels):
+        for name, side, side_labels in counterbalanced(round_, zip(("baseline", "contender"), sides, labels)):
             title = f"slot {slot + 1}/{rounds * 2}, round {round_ + 1}/{rounds}, {name}"
             with _stopped(slot, run_key, store, title):
                 summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store, title=title,
@@ -558,7 +567,7 @@ def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, pa
 
     slot = 0
     for round_ in range(rounds):
-        for value in (baseline, contender):
+        for value in counterbalanced(round_, (baseline, contender)):
             title = f"slot {slot + 1}/{rounds * 2}, round {round_ + 1}/{rounds}, {parameter}={value}"
             with _stopped(slot, run_key, store, title):
                 summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store, title=title,

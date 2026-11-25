@@ -145,8 +145,8 @@ def _alternation(slots: str | None, advice: str) -> list[dict]:
     if slots == "absent":
         detail = "a result has no slot: give every bx bench call --slot"
     elif slots == "not-alternating":
-        detail = ("sides do not alternate by procedure.slot: run the sides in the same order every round "
-                  "(a, b, a, b, ...)")
+        detail = ("sides do not alternate by procedure.slot: run both sides once in every round, one after "
+                  "the other (a, b, b, a, ... or a, b, a, b, ...)")
     else:
         return []
     return [{"invariant": "alternating-slots", "detail": detail + advice}]

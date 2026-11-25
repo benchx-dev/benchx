@@ -106,7 +106,7 @@ def test_sides_that_do_not_alternate_are_refused_with_advice(tree, monkeypatch, 
         call(side, round_, slot, dep=dep, monkeypatch=monkeypatch)
     capsys.readouterr()
     _, out = compare(capsys)
-    assert "alternating-slots" in out and "same order every round" in out
+    assert "alternating-slots" in out and "run both sides once in every round" in out
 
 
 def test_a_label_missing_on_a_call_is_refused_with_advice(tree, monkeypatch, capsys):

@@ -315,7 +315,9 @@ outside the checkout is identified by one file): put it inside the checkout.
   the workbench's part: it checks both targets (and, for `revisions`, that both
   trees have a working-tree id, before running anything; it says which sides
   are not clean), writes one order per side and
-  round, alternates them over the rounds, delivers every result to the local
+  round, alternates them over the rounds with the order swapped every other round
+  (baseline first, then contender first, and so on, so that a drift that favours
+  whichever side runs first cancels rather than biasing the effect), delivers every result to the local
   store, and hands the run to the comparator. It builds nothing: both build
   directories must already exist. For `variants` it has one target: it lists
   the cases once, splits them by the two values of one parameter, and writes
