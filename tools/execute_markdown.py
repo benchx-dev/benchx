@@ -18,9 +18,12 @@ Conventions:
   of the first command that fails and the commands after it do not run: put it last. The page
   has the fence without its `exit=1`: the site's fence parser does not take a key=value there.
   Python fences have no such marker: one that raises fails the run.
-- The first `text` fence after an executable block is a committed output snapshot: it is
-  left out of the page, and the output of the run is put after the block instead. Prose may
-  come between the block and its snapshot; a heading or another fence ends the association.
+- The first `text` or `json` fence after an executable block is a committed output snapshot:
+  it is left out of the page, and the output of the run is put after the block instead, in a
+  fence of the same language (so the output of `cat config.json` is shown as JSON, once). Prose
+  may come between the block and its snapshot; a heading or another fence ends the association.
+  A `json` fence that is not the output of the block before it (the file that a command writes,
+  say) needs a heading or another fence in between, or another language (`jsonc`).
 - Unlabelled and other fences are kept as they are.
 - Output is never compared with the snapshot.
 - A file with no executable block is allowed: the page is a copy of it.
@@ -47,6 +50,9 @@ from markdown_it import MarkdownIt
 
 EXECUTABLE_LANGUAGES = {"sh", "bash", "python"}
 
+# The languages of a committed output snapshot, which the fresh output replaces.
+SNAPSHOT_LANGUAGES = {"text", "json"}
+
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
@@ -61,8 +67,11 @@ def clean(text: str, root: Path) -> str:
     return text
 
 
-def text_fence(text: str) -> str:
-    """Format captured output as a Markdown text fence."""
+def text_fence(text: str, language: str = "text") -> str:
+    """Format captured output as a Markdown fence.
+
+    `text`, unless it replaces a committed snapshot of another language (`json`).
+    """
     if not text.strip():
         return ""
 
@@ -70,7 +79,7 @@ def text_fence(text: str) -> str:
     runs = re.findall(r"`+", text)
     marker = "`" * max(3, max(map(len, runs), default=0) + 1)
 
-    return f"\n{marker}text\n{text.rstrip()}\n{marker}\n"
+    return f"\n{marker}{language}\n{text.rstrip()}\n{marker}\n"
 
 
 def expected_status(attributes: list[str], language: str) -> int:
@@ -264,6 +273,7 @@ def run(
     rendered = []
     cursor = 0
     awaiting_output = False
+    fresh_output = None  # (index in `rendered`, cleaned text) of the last block's output
     block_number = 0
 
     # Python blocks share variables across the document.
@@ -293,17 +303,22 @@ def run(
                     and "noexec" not in parts[1:]
                 )
 
-                if language == "text" and awaiting_output:
-                    # Remove the first committed text-output
+                if language in SNAPSHOT_LANGUAGES and awaiting_output:
+                    # Remove the first committed text or json output
                     # snapshot after an executable block.
                     #
                     # Ordinary prose may intervene, but a heading
                     # or another fence ends the association.
                     #
                     # Fresh output has already been inserted
-                    # immediately after the executable block.
+                    # immediately after the executable block, as
+                    # text: it takes the language of the snapshot.
                     #
                     # We never compare committed and fresh output.
+                    if language != "text":
+                        index, shown = fresh_output
+                        rendered[index] = text_fence(shown, language)
+
                     awaiting_output = False
 
                 elif executable:
@@ -362,9 +377,9 @@ def run(
 
                     # Insert fresh text output after executable code.
                     # Empty output does not produce a text fence.
-                    rendered.append(
-                        text_fence(clean(result, repository_root))
-                    )
+                    shown = clean(result, repository_root)
+                    rendered.append(text_fence(shown))
+                    fresh_output = (len(rendered) - 1, shown)
 
                     awaiting_output = True
 

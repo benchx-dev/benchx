@@ -10,9 +10,12 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
   example's directory. `python` fences are executed in one namespace shared by the whole README.
   Add `noexec` after the language (```` ```sh noexec ````) to show a block without running it.
   Unlabelled fences, and any other language (`json`, ...), are shown as they are.
-- The first `text` fence after an executable block is its committed output snapshot. The page leaves
-  it out and shows the output of the run instead. Prose may come in between; a heading or another
-  fence ends the association. The two are never compared.
+- The first `text` or `json` fence after an executable block is its committed output snapshot. The
+  page leaves it out and shows the output of the run instead, in a fence of the same language (so
+  `cat benchx.conf.json` followed by a `json` fence shows the file once, as JSON). Prose may come in
+  between; a heading or another fence ends the association. The two are never compared. A `json`
+  fence that is not the output of the block before it (the file that a command writes, say) needs a
+  heading or another fence before it, or another language (`jsonc`).
 - A README with no executable block is allowed: it is copied to the site as it is.
 - A block that exits non-zero, or a `python` block that raises, fails the example, and with it the
   pull request's check. `bx bench` exits 0 when a benchmark case fails, so a script must assert on

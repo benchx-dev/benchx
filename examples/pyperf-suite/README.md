@@ -169,7 +169,7 @@ bench_join  4.384 us  4.39 us ± 52.28 ns  4.336 us .. 4.549 us  15  success  [d
 Benchmark results are saved to the local store. `bx head` lists its contents:
 
 ```bash
-bx head -10
+bx head -n 10
 ```
 
 ```text

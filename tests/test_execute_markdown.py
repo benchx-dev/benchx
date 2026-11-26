@@ -62,10 +62,30 @@ def test_prose_may_come_between_a_block_and_its_snapshot(repo):
     assert "```text\na\n```" in page and "Some prose." in page and "OLD" not in page
 
 
-@pytest.mark.parametrize("between", ["## Next\n", "```json\n{}\n```\n"], ids=["heading", "fence"])
+@pytest.mark.parametrize("between", ["## Next\n", "```yaml\na: 1\n```\n"], ids=["heading", "fence"])
 def test_a_heading_or_another_fence_ends_the_association(repo, between):
     page = page_of(repo, f"```sh\necho a\n```\n\n{between}\n```text\nKEEP\n```\n")
     assert "KEEP" in page  # no longer a snapshot of the block above: it is an ordinary fence
+
+
+def test_a_json_snapshot_is_replaced_by_the_output_in_a_json_fence(repo):
+    page = page_of(repo, "# T\n\n```sh\necho '{\"new\": 1}'\n```\n\nSome prose.\n\n```json\n{\"old\": 0}\n```\n\nafter\n")
+    assert '```json\n{"new": 1}\n```' in page  # the output, once, in the language of the snapshot
+    assert "old" not in page and "```text" not in page
+    assert "Some prose." in page and page.rstrip().endswith("after")
+    assert page.count("```json") == 1  # the snapshot is gone, not shown next to the output
+
+
+def test_only_the_first_snapshot_is_replaced(repo):
+    page = page_of(repo, "```sh\necho a\n```\n\n```json\nOLD\n```\n\n```text\nKEEP\n```\n\n```json\nKEEP2\n```\n")
+    assert "OLD" not in page and "KEEP\n" in page and "KEEP2" in page
+
+
+def test_a_json_fence_after_a_heading_or_of_another_language_is_not_a_snapshot(repo):
+    after_heading = page_of(repo, "```sh\necho a\n```\n\n## Next\n\n```json\n{\"keep\": 1}\n```\n")
+    assert '```json\n{"keep": 1}\n```' in after_heading and "```text\na\n```" in after_heading
+    other_language = page_of(repo, "```sh\necho a\n```\n\n```jsonc\n// keep\n```\n")
+    assert "```jsonc\n// keep\n```" in other_language and "```text\na\n```" in other_language
 
 
 def test_noexec_unlabelled_and_other_fences_are_kept_and_not_run(repo):
