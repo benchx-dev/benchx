@@ -1,5 +1,4 @@
 {
   "schema_version": "benchx/config/0.1.0",
-  "paths": { "store": "out/home/store.parquet", "results": "out" },
-  "adapter": {"name": "pyperf"}
+  "paths": { "store": "out/home/store.parquet", "results": "out" }
 }

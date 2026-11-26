@@ -24,7 +24,8 @@ MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", 
     (MEASURE + ["--adapter", "google-benchmark", "--processes", "2"], "google-benchmark takes no --processes"),
     (MEASURE + ["--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
     (MEASURE + ["--repetitions", "3"], "pyperf takes no --repetitions"),
-    (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"], "--adapter is required"),
+    (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", "--repetitions", "3"],
+     "pyperf takes no --repetitions"),  # no --adapter: the default is pyperf
     (["A", "B", "--profile", "revisions", "--rounds", "1", "--adapter", "pyperf"], "--suite is required"),
     (["A", "B", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"], "--profile is required"),
     # the shorthand of `bx bench MODULE.py`: Python files with no --suite
@@ -238,6 +239,16 @@ def test_one_python_file_as_the_target_of_variants_is_the_long_form_spelled_shor
     assert cli.main(["compare", str(tree / "mod.py"), *variants, "--run-key", "s", "--out", str(tmp / "s")]) \
         == cli.EXIT_OK
     assert orders_of(tmp / "s") == orders_of(tmp / "l") and len(orders_of(tmp / "s")) == 4
+
+
+def test_with_no_adapter_given_a_tree_and_a_suite_are_benchmarked_with_pyperf(tmp, monkeypatch):
+    """`bx compare TREE --suite NAME` with no --adapter and no adapter.name in a config: pyperf, as `bx bench`."""
+    pytest.importorskip("pyperf")
+    monkeypatch.chdir(tmp)
+    tree = variants_tree(tmp, VARIANTS)
+    assert cli.main(["compare", str(tree), "--profile", "variants", "--vary", "role", "--suite", "mod.py",
+                     *SHORTHAND_FAST, "--run-key", "d", "--out", str(tmp / "d")]) == cli.EXIT_OK
+    assert {o["suites"][0]["adapter"] for o in orders_of(tmp / "d")} == {"pyperf"}
 
 
 def test_python_files_with_different_paths_in_their_checkouts_are_refused_before_anything_runs(tmp, worktrees, capsys):
