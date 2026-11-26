@@ -159,7 +159,9 @@ by counting, and gives no treatment special meaning beyond them:
   *absent* when no row has it. Failed attempts count: the design of the run is
   what is being read, not which attempts happened to succeed.
 - **Complete.** A crossed key is complete when every value appears on every side.
-- **Alternation.** Whether the sides alternate by `procedure.slot`. This is judged
+- **Alternation.** Whether the sides alternate by `procedure.slot`: taken in slot
+  order two at a time, each pair holds one slot of each side, in either order, so
+  a, b, a, b and the counterbalanced a, b, b, a both alternate. This is judged
   over the whole run, not within a unit: a slot is a position in the run's
   realized order, and a unit that skipped one attempt has gaps that say nothing
   about the schedule.

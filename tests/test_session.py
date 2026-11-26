@@ -35,7 +35,9 @@ def test_session_alternates_delivers_and_compares(repo, tmp, builds):
     assert all(len(docs) == 4 for docs in by_slot.values())  # per case, a result and its load average
     trees = [{d["provenance"]["subject_tree"] for d in by_slot[slot]} for slot in sorted(by_slot)]
     assert all(len(t) == 1 for t in trees)
-    assert all(a != b for a, b in zip(trees, trees[1:]))  # every slot switches sides
+    assert all(a != b for a, b in zip(trees[0::2], trees[1::2]))  # each round runs both sides
+    # The baseline runs first in even rounds and second in odd ones (#126).
+    assert [t for t in trees[0::2]] == [trees[0], trees[1]] * 3
     assert all(d["procedure"]["round"] == slot // 2 for slot, docs in by_slot.items() for d in docs)
 
 

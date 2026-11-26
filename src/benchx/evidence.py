@@ -169,16 +169,19 @@ def relation(rows, column) -> str:
 
 
 def slot_schedule(slots_and_sides) -> str:
-    """Whether the sides alternate, from (slot, side) over a whole run. A slot
-    is a position in the run's realized order, so a single unit cannot show it:
-    a unit that skipped one attempt has gaps that say nothing about the schedule."""
+    """Whether the sides alternate, from (slot, side) over a whole run: taken in slot
+    order two at a time, each pair holds one slot of each side, in either order. So
+    a, b, a, b alternates, and so does a, b, b, a, which balances the order over the
+    rounds (#126); a, a, b, b does not. A slot is a position in the run's realized
+    order, so a single unit cannot show it: a unit that skipped one attempt has gaps
+    that say nothing about the schedule."""
     slots = {}
     for slot, side in slots_and_sides:
         if slot is None:
             return "absent"
         slots.setdefault(slot, set()).add(side)
     order = [slots[slot] for slot in sorted(slots)]
-    if any(len(o) != 1 for o in order) or any(a == b for a, b in zip(order, order[1:])):
+    if any(len(o) != 1 for o in order) or any(a == b for a, b in zip(order[0::2], order[1::2])):
         return "not-alternating"
     return "alternating"
 

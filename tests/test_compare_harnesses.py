@@ -260,21 +260,20 @@ def test_variants_run_one_order_per_value_and_round_with_that_values_cases_only(
     # Four orders, one per value and round; each holds exactly its own value's cases.
     orders = sorted((tmp / "out" / "orders").glob("order-*.json"))
     assert [o.name for o in orders] == [f"order-{slot:04d}.json" for slot in range(4)]
-    for slot, path in enumerate(orders):
-        value = ("baseline", "variant")[slot % 2]
+    for path, value in zip(orders, ("baseline", "variant", "variant", "baseline")):
         assert json.loads(path.read_text())["suites"][0]["filter"] == harnesses.exact_filter(
             [f"bench_truncate('{value}', 10)", f"bench_truncate('{value}', 100)"], arguments=True)
-    # The results, by slot: baseline, variant, baseline, variant; both sizes in each.
+    # The results, by slot: baseline, variant, then variant, baseline (#126); both sizes in each.
     by_slot = {}
     for d in measurands(store):
         by_slot.setdefault(d["procedure"]["slot"], []).append(d["coordinates"]["workload"]["parameters"])
     assert sorted(by_slot) == [0, 1, 2, 3]
     assert [sorted({p["role"] for p in by_slot[slot]}) for slot in range(4)] == [
-        ["'baseline'"], ["'variant'"], ["'baseline'"], ["'variant'"]]
+        ["'baseline'"], ["'variant'"], ["'variant'"], ["'baseline'"]]
     assert all(sorted(p["size"] for p in by_slot[slot]) == ["10", "100"] for slot in range(4))
     assert [m.split(":")[0] for m in said if m.startswith("round ")] == [
-        "round 1/2 role='baseline'", "round 1/2 role='variant'", "round 2/2 role='baseline'",
-        "round 2/2 role='variant'"]
+        "round 1/2 role='baseline'", "round 1/2 role='variant'", "round 2/2 role='variant'",
+        "round 2/2 role='baseline'"]
 
 
 @requires_pyarrow

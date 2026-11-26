@@ -50,6 +50,9 @@ def test_a_failed_attempt_still_shows_the_design():
 @pytest.mark.parametrize("schedule, expected", [
     ([(0, "a"), (1, "b"), (2, "a"), (3, "b")], "alternating"),
     ([(0, "a"), (1, "a"), (2, "b"), (3, "b")], "not-alternating"),
+    ([(0, "a"), (1, "b"), (2, "b"), (3, "a")], "alternating"),  # counterbalanced (#126)
+    ([(0, "b"), (1, "a"), (2, "a"), (3, "b"), (4, "b"), (5, "a")], "alternating"),
+    ([(0, "a"), (1, "b"), (2, "a"), (3, "a"), (4, "b"), (5, "b")], "not-alternating"),  # round 2 is a, a
     ([(0, "a"), (0, "b")], "not-alternating"),  # one slot, two sides
     ([(0, "a"), (None, "b")], "absent"),
 ])
