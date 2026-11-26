@@ -46,3 +46,17 @@ packages = ["src/benchx"]
 # package is the source directory, and the checkout has tests/.
 [tool.hatch.build.targets.wheel.force-include]
 "tests" = "benchx/tests"
+
+# `coverage run -m pytest tests`, then `coverage report`; CI runs it in the coverage job of
+# tests.yml. Only the test process is measured: the subprocesses the tests start (`bx`, the
+# harness workers) mostly run code the tests also reach in-process, and measuring them too
+# (`patch = ["subprocess"]`) barely moves any file's number while slowing the run a lot.
+# asv_runtime.py and benchx_params.py are run as copies beside each case's driver, so
+# coverage cannot see what the workers run of them: their misses are not dead code.
+[tool.coverage.run]
+source_pkgs = ["benchx"]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+sort = "cover"
