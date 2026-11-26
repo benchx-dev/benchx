@@ -1,6 +1,7 @@
 # Documentation site, built with Zensical (https://zensical.org).
 #
-#   python tools/gen_docs.py        # generate docs/index.md and docs/schemas/
+#   python tools/gen_docs.py        # build docs/generated/, which the site is built from: the
+#                                   # pages of docs/ copied, plus the home page, schemas, examples
 #   zensical serve                  # preview at http://127.0.0.1:8000
 #   zensical build --strict --clean # what CI runs
 #
@@ -8,8 +9,8 @@
 #                                   # without it, the pages of the examples are the committed
 #                                   # READMEs, under a "not executed" notice
 #
-# The generated pages are gitignored; run the generator again after changing
-# a schema or the README.
+# Everything under docs/generated/ is generated and gitignored. Edit the pages in docs/, never
+# there, and run the generator again after changing a page, a schema, the README or an example.
 
 [project]
 site_name = "benchx"
@@ -20,7 +21,8 @@ repo_name = "benchx-dev/benchx"
 edit_uri = "edit/main/docs/"
 copyright = "Copyright &copy; benchx contributors"
 
-docs_dir = "docs"
+# Built by tools/gen_docs.py: the pages of docs/ copied, and the generated ones next to them.
+docs_dir = "docs/generated"
 site_dir = "site"
 
 # Ablation studies are working notes, not part of the published design;

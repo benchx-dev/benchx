@@ -1,8 +1,12 @@
 """Generate the documentation pages that are derived from other files.
 
 Run before `zensical build` (the docs workflow does; locally: `python tools/gen_docs.py`).
-It writes, into docs/, files that are gitignored and never committed:
+It builds docs/generated/, the folder the site is built from (`docs_dir` in zensical.toml), which is
+gitignored and never committed. In it:
 
+- a copy of the hand-written pages of docs/. The generated pages must sit next to them: a page's
+  URL is its path in the docs folder, and Zensical takes one, so the site keeps `/`, `/schemas/`
+  and `/examples/` and has no `/generated/`;
 - index.md, from the repository README (links to docs/... rewritten);
 - schemas/index.md, listing every schema;
 - schemas/<name>.md, one reference page per schema (newest version);
@@ -19,7 +23,10 @@ object, the conditional rules (allOf/if/then) in prose, the $defs once each,
 and the examples as tabbed code blocks. Cross-schema $refs
 (urn:benchx:schema:<name>:<version>#/...) link to the other schema's page.
 
-Stale output is removed first, so deleting a schema deletes its page.
+docs/generated/ is removed first, so deleting a schema or a page deletes it from the site. Edit the
+pages in docs/, not in docs/generated/, and run this again to see the change. Earlier versions wrote
+index.md, schemas/ and examples/ directly under docs/: if they are still there, the run stops (they
+would be copied next to the pages generated here).
 """
 
 from __future__ import annotations
@@ -538,7 +545,8 @@ def example_pages(executed: Path | None) -> dict[str, str]:
 
 # --------------------------------------------------------------------------- main
 
-GENERATED = ["index.md", "schemas", "examples"]  # paths under docs/, all gitignored
+OUT = DOCS / "generated"  # the folder the site is built from: gitignored, rebuilt on each run
+LEGACY = ["index.md", "schemas", "examples"]  # where earlier versions wrote, directly under docs/
 
 
 def main() -> None:
@@ -551,15 +559,20 @@ def main() -> None:
                              "made them; without it the examples' pages are their committed READMEs")
     args = parser.parse_args()
 
-    for rel in GENERATED:
-        path = DOCS / rel
-        if path.is_dir():
-            shutil.rmtree(path)
-        elif path.exists():
-            path.unlink()
+    left = [f"docs/{rel}" for rel in LEGACY if (DOCS / rel).exists()]
+    if left:
+        raise SystemExit(
+            f"{', '.join(left)}: left by an earlier tools/gen_docs.py, which wrote directly under "
+            f"docs/. They would be copied into {OUT.relative_to(ROOT)}/ next to the pages generated "
+            "there. They are gitignored output, not source: delete them.")
+    if OUT.exists():
+        shutil.rmtree(OUT)
+
+    # The hand-written pages go in too: the generated pages have to sit next to them (see the top).
+    shutil.copytree(DOCS, OUT, ignore=lambda folder, names: ["generated"] if Path(folder) == DOCS else [])
 
     def write(rel: str, content: str | bytes) -> None:
-        path = DOCS / rel
+        path = OUT / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(content, bytes):
             path.write_bytes(content)
@@ -584,7 +597,7 @@ def main() -> None:
     for name, page in examples.items():
         write(f"examples/{name}.md", page)
     print(f"generated {len(pages)} schema pages and {len(examples)} example pages "
-          f"({'executed' if args.executed else 'not executed'}) under {DOCS.relative_to(ROOT)}/")
+          f"({'executed' if args.executed else 'not executed'}) under {OUT.relative_to(ROOT)}/")
 
 
 if __name__ == "__main__":

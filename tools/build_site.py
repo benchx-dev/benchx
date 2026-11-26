@@ -4,7 +4,7 @@
     python tools/build_site.py --serve    # and preview it, http://127.0.0.1:8000
 
 This is what the docs workflow does, on this machine: it executes the README of every example
-(tools/execute_markdown.py), puts the pages in docs/examples/ (tools/gen_docs.py --executed), and
+(tools/execute_markdown.py), puts the pages in docs/generated/examples/ (tools/gen_docs.py --executed), and
 builds the site with Zensical in strict mode. The pages and the logs of the runner go in a
 temporary directory, which is removed when the site is built; if an example fails, no site is
 built and the directory is kept, so that its logs can be read.
@@ -87,7 +87,7 @@ def main() -> int:
     generate = [sys.executable, str(TOOLS / "gen_docs.py"), "--executed", str(pages)]
     if subprocess.run(generate, cwd=ROOT, env=env, check=False).returncode:
         return fail(f"tools/gen_docs.py failed. The pages of the examples are in {pages}")
-    shutil.rmtree(tmp)  # the pages are in docs/examples/ now
+    shutil.rmtree(tmp)  # the pages are in docs/generated/examples/ now
     build = [zensical, "serve"] if args.serve else [zensical, "build", "--strict", "--clean"]
     try:
         if subprocess.run(build, cwd=ROOT, env=env, check=False).returncode:

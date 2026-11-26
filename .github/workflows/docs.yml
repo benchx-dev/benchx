@@ -6,7 +6,7 @@ name: docs
 #             "<example> (README)": it executes examples/<example>/README.md with
 #             tools/execute_markdown.py, against this checkout of benchx, and uploads
 #             docs-<example>, the page that the site shows. A failing example is a red check.
-#   build     needs every example. Puts the pages in docs/examples/, builds the site (strict).
+#   build     needs every example. Puts the pages in docs/generated/examples/, builds the site (strict).
 #   deploy    needs build. Only for a push to main.
 #
 # It runs for every pull request. A push to main deploys only when it changes one of the paths

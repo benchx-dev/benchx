@@ -112,7 +112,8 @@ uv run --with-requirements docs/requirements.txt python tools/gen_docs.py
 uv run --with-requirements docs/requirements.txt zensical serve
 ```
 
-`tools/gen_docs.py` generates `docs/index.md` and `docs/schemas/` (gitignored);
+`tools/gen_docs.py` builds `docs/generated/` (gitignored), the folder the site is built from: the
+pages of `docs/` copied, plus the home page, the schema reference and the pages of the examples;
 `zensical.toml` configures the site, and `.github/workflows/docs.yml` builds and
 deploys it.
 
