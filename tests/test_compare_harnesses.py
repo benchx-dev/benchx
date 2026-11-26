@@ -395,6 +395,7 @@ ASV_FAST = {"processes": 2, "values": 2, "warmups": 0, "min_time": 0.001}
 
 
 def test_variants_asv_cases_are_split_by_value_under_their_module_qualified_names(tmp):
+    pytest.importorskip("pyperf")
     from benchx import adapters
     tree = variants_tree(tmp, "", ASV_FILES)
     asv, env = adapters.get("asv"), dict(os.environ)

@@ -131,10 +131,12 @@ def merge(base: dict, facts: dict) -> dict:
 # Bytecode caches are written by running the suite, so they must not change the tree id.
 _PYCACHE_EXCLUDE = ":(exclude,glob)**/__pycache__/**"
 
-# `out/`, where a script gives each `bx bench` call its own results directory, is untracked
-# and so not part of a tree's identity; it is left out of the list of untracked paths the log
-# names as well, since it would head that list in every run.
-_OUT_EXCLUDE = ":(exclude,glob)**/out/**"
+# The same folders, and `out/`, where a script gives each `bx bench` call its own results directory,
+# left out of the list of untracked paths the log names (`out/` would head it in every run). These are
+# ignore patterns (`ls-files --exclude`), not exclude pathspecs: with `--directory`, git up to 2.27
+# still names `pkg/` when all it holds is `pkg/sub/__pycache__/`, as the pathspec is not applied
+# when deciding whether a collapsed directory is empty; ignore patterns are applied as git walks.
+_UNTRACKED_IGNORES = ("--exclude=__pycache__/", "--exclude=out/")
 
 
 _IGNORED: tuple[Path, ...] = ()
@@ -180,8 +182,8 @@ def git_identity(path) -> dict | None:
                  [r for r, g in own if g] or "none")
     status = _run(["git", "status", "--porcelain", "--untracked-files=no", "--", ".", *excludes], cwd=top, raw=True)
     # What is not tracked, for the log: collapse untracked directories without re-diffing tracked files or submodules.
-    listed = _run(["git", "ls-files", "--others", "--exclude-standard", "--directory", "--no-empty-directory",
-                   "--", ".", *excludes, _OUT_EXCLUDE], cwd=top, raw=True)
+    listed = _run(["git", "ls-files", "--others", "--exclude-standard", *_UNTRACKED_IGNORES, "--directory",
+                   "--no-empty-directory", "--", ".", *excludes], cwd=top, raw=True)
     untracked = (listed or "").splitlines()
     # A scratch copy of the repository's own index, so the repository's index is untouched (schema §4.1): what is
     # staged (`git add`, `git mv`, `git rm --cached`) stays as staged, then the tracked files as they are now.
