@@ -30,7 +30,7 @@ so that core `benchx` remains cloud-free and CI-vendor-neutral:
    machine catalog, and thin caller workflows. Use `benchx-arrow` as a minimal
    template when setting up continuous benchmarking for another project.
 
-## Local worked examples
+## Worked examples of local benchmarking
 
 The sources of these examples live in [`examples/`](https://github.com/benchx-dev/benchx/tree/main/examples)
 in this repository.
