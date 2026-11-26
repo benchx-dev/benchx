@@ -17,6 +17,13 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
 - A block that exits non-zero, or a `python` block that raises, fails the example, and with it the
   pull request's check. `bx bench` exits 0 when a benchmark case fails, so a script must assert on
   its results itself, as `pyperf-suite/run.sh` does with its history count.
+- A `sh` or `bash` block that is meant to fail, to show an error, says so: ```` ```bash exit=1 ````.
+  It must then end with exactly that status: a 0, or any other status, fails the example just as
+  an unexpected failure does, so the page cannot go on showing an error the code no longer gives.
+  Its output goes into the page as for any block, and the run goes on. The fence is one script
+  run with `-e`, so the status is that of the first command that fails, and the commands after it
+  do not run: put the failing command last. The page has the fence without `exit=1` (the site's
+  fence parser does not take a `key=value` there). Python blocks have no such marker.
 - On the page, ANSI escape sequences are removed from the output, and so is the path of the
   repository checkout (`/home/runner/work/benchx/benchx/examples/x` shows as `examples/x`).
 - Do not link to other files of the example from the README: the page is built into the site on its

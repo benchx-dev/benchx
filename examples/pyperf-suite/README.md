@@ -145,7 +145,7 @@ correspondence between the run key and the run results. The error will be report
 as _idempotency conflict_:
 
 
-```bash
+```bash exit=1
 # same run-key
 bx bench . bench_join --run-key example-again --out out/again2
 ```

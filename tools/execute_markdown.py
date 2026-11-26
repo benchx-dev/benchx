@@ -12,6 +12,12 @@ Conventions:
   directory of the source file.
 - python fences: executed in one namespace shared by the whole file.
 - A language followed by `noexec` (```sh noexec) is not executed.
+- A sh/bash fence that is meant to fail says so: ```sh exit=1. The block must end with exactly
+  that status (a 0 fails the run as well as any other status), its output goes into the page as
+  for any block, and the run goes on. The fence is one script run with -e, so the status is that
+  of the first command that fails and the commands after it do not run: put it last. The page
+  has the fence without its `exit=1`: the site's fence parser does not take a key=value there.
+  Python fences have no such marker: one that raises fails the run.
 - The first `text` fence after an executable block is a committed output snapshot: it is
   left out of the page, and the output of the run is put after the block instead. Prose may
   come between the block and its snapshot; a heading or another fence ends the association.
@@ -67,12 +73,58 @@ def text_fence(text: str) -> str:
     return f"\n{marker}text\n{text.rstrip()}\n{marker}\n"
 
 
+def expected_status(attributes: list[str], language: str) -> int:
+    """The exit status a block must end with: N for `exit=N` after the language, else 0."""
+    given = [a for a in attributes if a.startswith("exit=")]
+    if not given:
+        return 0
+
+    if language not in {"sh", "bash"}:
+        raise ValueError(
+            f"{given[0]}: only sh and bash blocks take exit=; a {language} block fails by raising"
+        )
+
+    if len(given) > 1:
+        raise ValueError(f"{' '.join(given)}: a block has one exit=")
+
+    value = given[0].removeprefix("exit=")
+
+    if not re.fullmatch(r"[0-9]{1,3}", value) or int(value) > 255:
+        raise ValueError(f"{given[0]}: exit= takes a status from 0 to 255")
+
+    return int(value)
+
+
+def page_fence(fence_lines: list[str], token) -> list[str]:
+    """The lines of a fence as they go into the page: without its `exit=N`.
+
+    The site's fence parser (pymdownx.superfences) does not accept an unquoted key=value after the
+    language: it shows the fence as text, with the markup that follows it. The README keeps
+    `exit=N`, since that is what the runner reads; the page has no use for it.
+    """
+    parts = token.info.strip().split()
+    kept = [part for part in parts if not part.startswith("exit=")]
+
+    if len(kept) == len(parts):
+        return fence_lines
+
+    opening = fence_lines[0]
+    indent = opening[: len(opening) - len(opening.lstrip(" "))]
+    newline = opening[len(opening.rstrip("\r\n")):]
+
+    return [f"{indent}{token.markup}{' '.join(kept)}{newline}", *fence_lines[1:]]
+
+
 def execute_bash(
     code: str,
     workdir: Path,
     logfile: Path,
+    expected: int = 0,
 ) -> str:
-    """Execute a complete Bash block and stream output to logs."""
+    """Execute a complete Bash block and stream output to logs.
+
+    The block must end with the status `expected`: any other one raises.
+    """
     chunks = []
 
     with logfile.open("w", encoding="utf-8") as log, subprocess.Popen(
@@ -93,10 +145,14 @@ def execute_bash(
 
         status = process.wait()
 
-    if status != 0:
+    if status != expected:
+        marked = f", not the exit={expected} of the block" if expected else ""
         raise RuntimeError(
-            f"Bash exited with status {status}; see {logfile}"
+            f"Bash exited with status {status}{marked}; see {logfile}"
         )
+
+    if expected:
+        print(f"[exit status {status}, as the block says]", flush=True)
 
     return "".join(chunks)
 
@@ -256,20 +312,24 @@ def run(
                     logfile = logs / f"block-{block_number:03d}.log"
 
                     # Preserve original code fence in rendered docs.
-                    rendered.extend(lines[start:end])
+                    rendered.extend(page_fence(lines[start:end], token))
 
                     print(
                         f"\n[{block_number}] "
-                        f"{source}:{line} ({language})",
+                        f"{source}:{line} ({' '.join(parts)})",
                         flush=True,
                     )
 
                     try:
+                        # An invalid exit= is an error of the README: before anything runs.
+                        expected = expected_status(parts[1:], language)
+
                         if language in {"sh", "bash"}:
                             result = execute_bash(
                                 token.content,
                                 workdir,
                                 logfile,
+                                expected,
                             )
                         else:
                             result = execute_python(
@@ -294,8 +354,8 @@ def run(
                         )
 
                         print(
-                            f"Failed block {block_number}. "
-                            f"Diagnostics: {logfile}",
+                            f"Failed block {block_number}."
+                            + (f" Diagnostics: {logfile}" if logfile.exists() else ""),
                             file=sys.stderr,
                         )
                         raise
@@ -311,7 +371,7 @@ def run(
                 else:
                     # Preserve unlabelled, json, yaml, noexec,
                     # and other non-executable fences unchanged.
-                    rendered.extend(lines[start:end])
+                    rendered.extend(page_fence(lines[start:end], token))
                     awaiting_output = False
 
             cursor = end

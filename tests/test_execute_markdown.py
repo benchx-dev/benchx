@@ -116,6 +116,53 @@ def test_a_failing_block_raises_with_an_annotation_and_writes_no_page(repo, caps
     assert not (repo / "examples" / "ex" / "ran").exists()  # the blocks after it did not run
 
 
+def test_a_block_marked_exit_is_expected_to_fail_and_the_run_goes_on(repo):
+    page = page_of(repo, (
+        "# T\n\n```sh exit=1\necho before\nfalse\necho never\n```\n\n```text\nOLD\n```\n\n"
+        "```sh\necho next\n```\n"))
+    assert "```sh\necho before\nfalse\necho never\n```" in page  # the block is kept, without its marker
+    assert "```text\nbefore\n```" in page  # `false` stopped the script (-e): "never" is not in the output
+    assert "OLD" not in page and "```text\nnext\n```" in page  # the snapshot is replaced, the next block ran
+    assert "exit=" not in page
+
+
+def test_the_marker_is_left_out_of_every_fence_of_the_page_and_the_fence_is_kept_as_it_was(repo):
+    page = page_of(repo, "~~~sh exit=2\nexit 2\n~~~\n\n```sh noexec exit=1\nexit 1\n```\n")
+    assert page == "~~~sh\nexit 2\n~~~\n\n```sh noexec\nexit 1\n```\n"  # a noexec block is not run, so not checked
+
+
+@pytest.mark.parametrize(("marked", "script", "said"), [
+    ("exit=1", "true", r"status 0, not the exit=1"),
+    ("exit=1", "exit 2", r"status 2, not the exit=1"),
+    ("exit=2", "exit 1", r"status 1, not the exit=2"),
+    ("exit=0", "exit 1", r"status 1;"),
+], ids=["a-success", "another-failure", "a-lower-one", "zero-is-the-default"])
+def test_a_block_that_does_not_end_with_its_marked_status_fails_the_run(repo, capsys, marked, script, said):
+    source = source_of(repo, f"# T\n\n```sh {marked}\n{script}\n```\n\n```sh\ntouch ran\n```\n")
+    output = repo.parent / "out" / "ex.md"
+    with pytest.raises(RuntimeError, match=said):
+        runner.run(source, output, repo.parent / "logs")
+    assert "::error file=examples/ex/README.md,line=3::" in capsys.readouterr().out
+    assert not output.exists() and not (repo / "examples" / "ex" / "ran").exists()
+
+
+@pytest.mark.parametrize("marked", ["exit=", "exit=x", "exit=-1", "exit=256", "exit=1 exit=2"],
+                         ids=["empty", "word", "negative", "too-large", "twice"])
+def test_a_malformed_marker_fails_the_run_before_the_block_runs(repo, capsys, marked):
+    source = source_of(repo, f"```sh {marked}\ntouch ran\n```\n")
+    with pytest.raises(ValueError, match="exit="):
+        runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
+    assert "::error file=examples/ex/README.md,line=1::" in capsys.readouterr().out
+    assert not (repo / "examples" / "ex" / "ran").exists()
+
+
+def test_a_python_block_cannot_be_marked_exit(repo):
+    source = source_of(repo, "```python exit=1\nopen('ran', 'w')\n```\n")
+    with pytest.raises(ValueError, match="only sh and bash"):
+        runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
+    assert not (repo / "examples" / "ex" / "ran").exists()
+
+
 def test_a_failing_python_block_raises_and_its_traceback_is_in_the_log(repo):
     source = source_of(repo, "```python\nraise ValueError('boom')\n```\n")
     output = repo.parent / "out" / "ex.md"
