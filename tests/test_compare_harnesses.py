@@ -27,6 +27,9 @@ MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1", 
     (["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"], "--adapter is required"),
     (["A", "B", "--profile", "revisions", "--rounds", "1", "--adapter", "pyperf"], "--suite is required"),
     (["A", "B", "--suite", "s", "--rounds", "1", "--adapter", "pyperf"], "--profile is required"),
+    # the shorthand of `bx bench MODULE.py`: Python files with no --suite
+    (["m.py", "--profile", "variants", "--rounds", "1", "--adapter", "google-benchmark"], "benchmarked with pyperf"),
+    (["m.py", "B", "--profile", "revisions", "--rounds", "1"], "every target must be one"),
     (MEASURE + ["--project", "p", "--no-project"], "--project or --no-project"),
     (MEASURE + ["--quantity", "wall-time,wall-time"], "twice"),
     (MEASURE + ["-e", "NOEQUALS"], "-e wants NAME=VALUE"),
@@ -193,6 +196,73 @@ def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):
     order = json.loads(Path(tmp / "out" / "orders" / "order-0001.json").read_text())
     assert (order["suites"][0]["adapter"], order["target"]["kind"]) == ("pyperf", "working_tree")
     assert order["target"]["path"] == str(worktrees["head"].resolve())
+
+
+# --- Python files as targets: the shorthand of `bx bench MODULE.py` ----------------------------
+
+SHORTHAND_FAST = ["--rounds", "2", "--min-rounds", "2", "--processes", "2", "--values", "2", "--loops", "20",
+                  "--warmups", "0", "--no-ingest"]
+
+
+def orders_of(out):
+    """The orders of a run, without what is the run's own (its key and the order's id)."""
+    orders = [json.loads(path.read_text()) for path in sorted((out / "orders").glob("order-*.json"))]
+    for order in orders:
+        order.pop("work_order_id"), order.pop("run_key")
+    return orders
+
+
+def test_python_files_as_targets_are_the_long_form_spelled_shorter(tmp, worktrees, monkeypatch):
+    """As for `bx bench`: the shorthand and the long form write the same orders. Two sides, two files."""
+    pytest.importorskip("pyperf")
+    monkeypatch.chdir(tmp)
+    base, head = worktrees["base"], worktrees["head"]
+    case = ["--filter", harnesses.exact_filter(["f"])]  # the default case set is bench_*/benchmark_* functions
+    assert cli.main(["compare", str(base), str(head), "--profile", "revisions", "--adapter", "pyperf",
+                     "--suite", "mod.py", *case, *SHORTHAND_FAST, "--run-key", "l", "--out", str(tmp / "l")]) \
+        == cli.EXIT_OK
+    assert cli.main(["compare", str(base / "mod.py"), str(head / "mod.py"), "--profile", "revisions",
+                     *case, *SHORTHAND_FAST, "--run-key", "s", "--out", str(tmp / "s")]) == cli.EXIT_OK
+    short, long = orders_of(tmp / "s"), orders_of(tmp / "l")
+    assert len(short) == 4 and short == long
+    assert short[0]["target"]["kind"] == "working_tree" and short[0]["suites"][0]["adapter"] == "pyperf"
+
+
+def test_one_python_file_as_the_target_of_variants_is_the_long_form_spelled_shorter(tmp, monkeypatch):
+    pytest.importorskip("pyperf")
+    monkeypatch.chdir(tmp)
+    tree = variants_tree(tmp, VARIANTS)
+    variants = ["--profile", "variants", "--vary", "role", *SHORTHAND_FAST]
+    assert cli.main(["compare", str(tree), *variants, "--adapter", "pyperf", "--suite", "mod.py",
+                     "--run-key", "l", "--out", str(tmp / "l")]) == cli.EXIT_OK
+    assert cli.main(["compare", str(tree / "mod.py"), *variants, "--run-key", "s", "--out", str(tmp / "s")]) \
+        == cli.EXIT_OK
+    assert orders_of(tmp / "s") == orders_of(tmp / "l") and len(orders_of(tmp / "s")) == 4
+
+
+def test_python_files_with_different_paths_in_their_checkouts_are_refused_before_anything_runs(tmp, worktrees, capsys):
+    base, head = worktrees["base"], worktrees["head"]
+    (head / "other.py").write_text("def f():\n    pass\n")
+    assert cli.main(["compare", str(base / "mod.py"), str(head / "other.py"), "--profile", "revisions",
+                     "--rounds", "1", "--out", str(tmp / "out")]) == cli.EXIT_REFUSED
+    assert "different paths in their checkouts (mod.py, other.py)" in capsys.readouterr().err
+    assert not (tmp / "out").exists()
+
+
+def test_a_missing_python_file_is_refused_as_it_is_for_bench(tmp, monkeypatch, capsys):
+    monkeypatch.chdir(tmp)
+    assert cli.main(["compare", "nosuch.py", "--profile", "variants", "--rounds", "1"]) == cli.EXIT_REFUSED
+    assert "bx compare: error: no such module" in capsys.readouterr().err  # bench: "bx bench: error: no such module"
+
+
+def test_the_files_adapter_is_the_only_one_the_shorthand_fits(tmp, monkeypatch, capsys):
+    """The same refusal as `bx bench mod.py` gives, from the same check."""
+    monkeypatch.chdir(tmp)
+    (tmp / "benchx.conf.json").write_text(json.dumps(
+        {"schema_version": "benchx/config/0.1.0", "adapter": {"name": "google-benchmark", "suite": "demo"}}))
+    (tmp / "mod.py").write_text("def bench_a():\n    pass\n")
+    assert cli.main(["compare", "mod.py", "--profile", "variants", "--rounds", "1"]) == cli.EXIT_REFUSED
+    assert "adapter.name to 'google-benchmark'" in capsys.readouterr().err
 
 
 # --- variants: one target, the two values of one parameter (UC-02) ------------------------------

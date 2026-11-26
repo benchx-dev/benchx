@@ -391,6 +391,33 @@ def _bench_target(args) -> tuple[str, str | None, str | None]:
     return target, suite, "pyperf"
 
 
+def _compare_targets(args) -> tuple[list[str], str | None, str | None]:
+    """The targets, the suite they force (or None: --suite, then the file's), and the adapter
+    they force: the shorthand of `bx bench MODULE.py`, for each target. Without `--suite`, a
+    target that is a Python file is a module: its checkout is the target, its path in it the
+    suite, and the harness pyperf. The suite is one name for every side, so all the targets must
+    be Python files then, with the same path in their checkouts (or the same file, for variants)."""
+    modules = [t for t in args.targets if t.endswith(".py")]
+    if args.suite or not modules:
+        logger.debug("plain targets: %s, with the suite from --suite or the file's adapter.suite", args.targets)
+        return args.targets, None, None
+    if len(modules) != len(args.targets):
+        raise UsageError("a Python file is a target of the shorthand, so every target must be one; "
+                         "to compare trees, give --suite")
+    if args.adapter not in (None, "pyperf"):
+        raise UsageError(f"a Python file is benchmarked with pyperf, not {args.adapter}")
+    logger.debug("the Python-module shorthand: %s are benchmarked with pyperf", modules)
+    try:
+        resolved = [bench_mod.module_target(module) for module in modules]
+    except session.SessionError as e:  # `bx bench` reports it as an error in the arguments too
+        raise UsageError(str(e)) from None
+    suites = sorted({suite for _, suite in resolved})
+    if len(suites) != 1:
+        raise UsageError(f"the Python files have different paths in their checkouts ({', '.join(suites)}), "
+                         "and the suite is one name for every side: give the trees as targets with --suite")
+    return [target for target, _ in resolved], suites[0], "pyperf"
+
+
 def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     """The settings `bx bench` and `bx compare` share, each from the command line,
     else the file, else its default (config.Config.pick); ConfigError when a
@@ -862,10 +889,11 @@ def _read(cfg, args, policy, sources):
 def _measure(cfg, args, policy, sources):
     """The workbench's session loop: run both sides, deliver, compare."""
     try:  # the check phase: nothing has run, and no folder exists yet
-        settings = _common(cfg, args)
+        targets, forced_suite, forced_adapter = _compare_targets(args)
+        settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
         session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
                               settings["quantities"])
-        _needs_provider(cfg, *args.targets)
+        _needs_provider(cfg, *targets)
         rounds, rounds_source = cfg.pick_with_source(args.rounds, cfg.section("compare").get("rounds"),
                                                      session.ROUNDS, flag="--rounds", key="compare.rounds")
         label = session.parse_label(args.label) if args.label else None
@@ -896,10 +924,10 @@ def _measure(cfg, args, policy, sources):
     try:
         if policy["profile"] == "variants":
             doc = session.compare_variants(
-                *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
+                *targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
                 progress=say.info, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
         else:
-            doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=say.info,
+            doc = session.compare_targets(*targets, rounds=rounds, store=store, label=label, progress=say.info,
                                           **policy, **settings)
     except runner.Refused as e:
         return _refused(e)
@@ -1243,7 +1271,8 @@ def main(argv=None):
                                    "benchmark parameter (--vary), as in TARGET --profile variants --suite NAME "
                                    "--rounds R.")
     p.add_argument("targets", nargs="*", metavar="TARGET",
-                   help="measure mode: BASELINE CONTENDER (variants: TARGET)")
+                   help="measure mode: BASELINE CONTENDER (variants: TARGET); with no --suite, Python files "
+                        "(as in bx bench MODULE.py): each one's checkout is the target, its path the suite")
     p.add_argument("--profile", choices=list(compare_mod.PROFILES), help="default: compare.profile")
     p.add_argument("--vary", metavar="NAME",
                    help="variants: the workload parameter whose two values are the sides "

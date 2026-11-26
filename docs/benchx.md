@@ -66,6 +66,10 @@ bx compare BASELINE CONTENDER --profile revisions|environments
 bx compare TARGET --profile variants --adapter pyperf|asv --suite NAME [--rounds 6]
            [--vary NAME] [--baseline VALUE] [--filter REGEX] [...]  # the options above, except --label
 
+# the shorthand of bx bench MODULE.py, in measure mode: Python files, no --suite, pyperf
+bx compare BASE/MODULE.py HEAD/MODULE.py --profile revisions|environments --rounds R [...]
+bx compare MODULE.py --profile variants --rounds R [--vary NAME] [...]
+
 # read mode: compare results already measured
 bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
            [--label NAME] [--vary NAME] [--results DIR] [--k 3] [--json | --tables [--all]]
@@ -194,7 +198,9 @@ function without readable source has no version.
 
 `bx bench MODULE.py [FUNCTION …]` is the shorthand for the quickest case, timing a few
 functions: the module's git checkout is the target, its path the suite, and the
-functions are exact case names. `bx run` is the layer underneath: it executes a finished
+functions are exact case names. `bx compare` takes the same shorthand for each target when
+there is no `--suite`: every target is then a Python file, and the files have the same path
+in their checkouts, since the suite is one name for all the sides. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
 [`examples/pyperf-suite`](examples/pyperf-suite.md) is a runnable walk-through.
 
