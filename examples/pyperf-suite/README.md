@@ -19,7 +19,7 @@ In the simplest case, benchmarks are plain python functions. Here is an example 
 of several small microbenchmarks (here we only show one function out of five in the suite):
 
 ```sh
-head -20 bench_suite.py
+$ head -20 bench_suite.py
 ```
 
 ```text
@@ -61,7 +61,7 @@ The first subcommand is `bx bench` which accepts the
 name of the suite or a selection of benchmarks:
 
 ```bash
-bx bench . --run-key example-all --out out/all
+$ bx bench . --run-key example-all --out out/all
 ```
 
 Here the first argument to `bx bench` is the current directory, and it makes it search
@@ -95,7 +95,7 @@ bench_sum_squares  34.18 us  34.35 us ± 344.5 ns  34.11 us .. 35.29 us  15  suc
 To run a single benchmark from the suite, use the second optional argument of `bx bench`:
 
 ```bash
-bx bench . bench_env_var -e EXAMPLE_N=100000 --processes 3 \
+$ bx bench . bench_env_var -e EXAMPLE_N=100000 --processes 3 \
   --run-key example-env --out out/env
 ```
 Note how parameters that control benchmark execution (here `--processes`) can supplied
@@ -119,7 +119,7 @@ Here we rerun a benchmark again under a new run key, so its series gets a second
 
 
 ```bash
-bx bench . bench_join --run-key example-again --out out/again
+$ bx bench . bench_join --run-key example-again --out out/again
 ```
 
 ```text
@@ -147,7 +147,7 @@ as _idempotency conflict_:
 
 ```bash exit=1
 # same run-key
-bx bench . bench_join --run-key example-again --out out/again2
+$ bx bench . bench_join --run-key example-again --out out/again2
 ```
 
 ```text
@@ -169,7 +169,7 @@ bench_join  4.384 us  4.39 us ± 52.28 ns  4.336 us .. 4.549 us  15  success  [d
 Benchmark results are saved to the local store. `bx head` lists its contents:
 
 ```bash
-bx head -n 10
+$ bx head -n 10
 ```
 
 ```text
@@ -194,7 +194,7 @@ Note that each run has two entries, one per measured quantity (by default: wall 
 `bx series` lists the series from the local store. We can also filter by measured quantities.
 
 ```bash
-bx series --quantity wall-time
+$ bx series --quantity wall-time
 ```
 
 Note that `bench_env_var` workload has two entries: we ran it with two values of the envirornment variable, setting `-e` changes the environment, which `benchx` tracks:
@@ -221,7 +221,7 @@ Settings provided as command line arguments take precedence over the config file
 Here is an example:
 
 ```bash
-cat benchx.conf.json
+$ cat benchx.conf.json
 ```
 
 ```json
@@ -265,7 +265,7 @@ Finally, take a peek into the output directory (typically, you never need to loo
 unless debugging):
 
 ```bash
-ls -l out/all/
+$ ls -l out/all/
 ```
 
 ```text
