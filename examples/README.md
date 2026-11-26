@@ -7,7 +7,8 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
 ## Writing one
 
 - `sh` and `bash` fences are executed with Bash (`-e -o pipefail`), a whole fence at a time, in the
-  example's directory. `python` fences are executed in one namespace shared by the whole README.
+  example's directory. A `$ ` at the start of a line is removed before the run and kept on the
+  page. `python` fences are executed in one namespace shared by the whole README.
   Add `noexec` after the language (```` ```sh noexec ````) to show a block without running it.
   Unlabelled fences, and any other language (`json`, ...), are shown as they are.
 - The first `text` or `json` fence after an executable block is its committed output snapshot. The

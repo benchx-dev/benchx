@@ -9,7 +9,8 @@ the output (see below), and what GitHub annotations are relative to. It needs `m
 
 Conventions:
 - sh/bash fences: executed with Bash (-e -o pipefail), a whole fence at a time, in the
-  directory of the source file.
+  directory of the source file. A `$ ` at the start of a line is removed before the run (the
+  page keeps it, as a prompt).
 - python fences: executed in one namespace shared by the whole file.
 - A language followed by `noexec` (```sh noexec) is not executed.
 - A sh/bash fence that is meant to fail says so: ```sh exit=1. The block must end with exactly
@@ -122,6 +123,11 @@ def page_fence(fence_lines: list[str], token) -> list[str]:
     newline = opening[len(opening.rstrip("\r\n")):]
 
     return [f"{indent}{token.markup}{' '.join(kept)}{newline}", *fence_lines[1:]]
+
+
+def without_prompts(code: str) -> str:
+    """The code of a Bash block with the `$ ` prompt removed from the start of its lines."""
+    return re.sub(r"(?m)^\$ ", "", code)
 
 
 def execute_bash(
@@ -341,7 +347,7 @@ def run(
 
                         if language in {"sh", "bash"}:
                             result = execute_bash(
-                                token.content,
+                                without_prompts(token.content),
                                 workdir,
                                 logfile,
                                 expected,

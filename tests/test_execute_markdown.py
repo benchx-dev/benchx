@@ -99,6 +99,12 @@ def test_a_readme_with_no_executable_block_is_copied(repo, capsys):
     assert "No executable blocks" in capsys.readouterr().out
 
 
+def test_a_dollar_prompt_is_removed_before_the_run_and_kept_on_the_page(repo):
+    page = page_of(repo, "```sh\n$ echo one\ntrue\n$ echo two\n```\n")
+    assert "```sh\n$ echo one\ntrue\n$ echo two\n```" in page
+    assert "```text\none\ntwo\n```" in page
+
+
 def test_output_containing_backticks_gets_a_longer_fence(repo):
     page = page_of(repo, "```sh\nprintf '%s\\n' '```'\n```\n")
     assert "````text\n```\n````" in page
