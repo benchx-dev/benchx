@@ -330,9 +330,11 @@ outside the checkout is identified by one file): put it inside the checkout.
   requires one tree id per side and, for a benchmark recorded apart from the
   subject, one benchmark file throughout, UC-03 §10; a dirty side makes any
   profile's comparison local-only), pairs the
-  sides by round, and applies `benchx/paired-relative/v1` (effect = mean
+  sides by round, and applies `benchx/paired-relative/v2` (effect = mean
   relative paired difference, noise = its standard error, change when
-  |effect| > *k* × noise). `environments` names its sides by the label
+  |effect| exceeds noise times the t quantile, at the rounds' degrees of freedom, with
+  the two-sided tail of a normal at *k* σ; `--k 3` is a 0.27% false-alarm rate per unit
+  whatever the number of rounds). `environments` names its sides by the label
   `--label` gives, and `variants` by the two values of one workload parameter
   (`--vary`); under `variants` a failed attempt on either side fails its unit
   (`side-failed`). `--results` reads and validates standalone JSON result files on disk without

@@ -327,7 +327,7 @@ A fixed multiplier also means different confidence at different sample sizes. Wi
 under a t distribution is about 80% at 2 rounds, 90% at 3, 96% at 5, and 99% at 20.
 A method therefore records its degrees of freedom or uses quantiles.
 
-### 4.4 `benchx/paired-relative/v1`
+### 4.4 `benchx/paired-relative/v2`
 
 Requires alternating slots, equal attempts, and no duplicate points. Per round it
 computes d = contender / baseline − 1 from each side's estimate.
@@ -335,8 +335,13 @@ computes d = contender / baseline − 1 from each side's estimate.
 - **Effect:** the mean of d, measure `relative`.
 - **Noise:** the standard error of d across rounds, recorded with `noise_kind:
   standard-error` and its `degrees_of_freedom`.
-- **Decision:** a change when |effect| > *k* × noise, labeled by the quantity's
-  direction when known, otherwise `changed`.
+- **Decision:** a change when |effect| > *m* × noise, labeled by the quantity's
+  direction when known, otherwise `changed`. *m* is the t quantile, at the noise's
+  degrees of freedom, whose two-sided tail is that of a normal at *k* σ: for the
+  default *k* = 3 that tail is 0.27%, and *m* is 19.2 at 3 rounds, 5.5 at 6 and
+  4.1 at 10, tending to 3 as the rounds grow. It is recorded as `multiplier`. v1
+  used *m* = *k* at every sample size, which at 3 rounds flagged about one no-op
+  unit in ten (#126).
 - **Indeterminate:** `insufficient-rounds` below `min_rounds` pairs, and never with
   fewer than two since the noise needs a spread; `zero-baseline` when a baseline
   estimate is zero; `deterministic-deferred` for a quantity declared deterministic.
