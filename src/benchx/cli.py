@@ -438,7 +438,8 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     if args.project and args.no_project:
         raise UsageError("give --project or --no-project, not both")
     timeouts = cfg.section("timeouts")
-    adapter, adapter_source = cfg.pick_with_source(given, block.get("name"), flag="--adapter", key="adapter.name")
+    adapter, adapter_source = cfg.pick_with_source(given, block.get("name"), "pyperf", flag="--adapter",
+                                                   key="adapter.name")
     named = block.get("name")
     if given and named and given != named:  # the file's block serves another adapter of its family
         adapter_source += f"; the file says {named}, same family"
@@ -1109,7 +1110,7 @@ def _add_target_options(parser, command):
     """The options `bx bench` and `bx compare` (measure mode) share: the harness,
     its suite and cases, its precision flags, and where the results go."""
     parser.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
-                        help="the harness (default: adapter.name; required)")
+                        help="the harness (default: adapter.name, else pyperf)")
     parser.add_argument("--suite", help="pyperf: the module's path in the working tree; "
                                         "google-benchmark: the binary in the build directory "
                                         "(default: adapter.suite; required)")
