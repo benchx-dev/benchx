@@ -4,6 +4,10 @@
 #   zensical serve                  # preview at http://127.0.0.1:8000
 #   zensical build --strict --clean # what CI runs
 #
+#   python tools/build_site.py      # all of it, with the examples executed (see the script);
+#                                   # without it, the pages of the examples are the committed
+#                                   # READMEs, under a "not executed" notice
+#
 # The generated pages are gitignored; run the generator again after changing
 # a schema or the README.
 

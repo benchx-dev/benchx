@@ -50,7 +50,15 @@ The page and the per-block logs go where you point `--output` and `--logs`, not 
 The example's own output goes to its `out/`. Remove an `out/` that an earlier run left before running
 again: in `pyperf-suite` the store rejects a second run under the same run key.
 
-To see the site with the executed pages:
+To build the site with the executed pages, in one command (the pages and the logs go in a temporary
+directory, and an `out/` left by an earlier run is removed first):
+
+```sh
+uv run --python 3.13 --extra parquet --extra test --with-requirements docs/requirements.txt \
+    python tools/build_site.py             # into site/; add --serve to preview it
+```
+
+Or by hand, after running the examples as above:
 
 ```sh
 python tools/gen_docs.py --executed /tmp/pages
