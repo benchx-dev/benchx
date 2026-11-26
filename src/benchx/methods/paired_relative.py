@@ -19,7 +19,7 @@ class PairedRelative(Method):
     version = "v1"
     dims = ("round", "side")
     requires = ("equal-attempts", "alternating-slots", "duplicate-points")
-    defaults = {"k": 3.0, "min_rounds": 3}
+    defaults = {"k": 3.0, "min_rounds": 4}
     config_schema = {
         "type": "object",
         "additionalProperties": False,

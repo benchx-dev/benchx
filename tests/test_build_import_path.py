@@ -78,7 +78,7 @@ def compare(tmp, toy, monkeypatch, *, reported):
 
     monkeypatch.setattr(session.target_mod, "resolve", provider)
     doc = session.compare_targets(
-        "@base", "@head", profile="revisions", suite=str(toy["suite"]), rounds=3, store=Store(tmp / "s.parquet"),
+        "@base", "@head", profile="revisions", suite=str(toy["suite"]), rounds=3, min_rounds=3, store=Store(tmp / "s.parquet"),
         adapter="pyperf", flags={"processes": 2, "values": 2, "loops": 50, "warmups": 1},
         filter=harnesses.exact_filter(["bench_work"]), out=tmp / "out", run_key="toy")
     assert doc["failed_invariants"] == []

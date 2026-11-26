@@ -301,9 +301,9 @@ def test_a_provider_target_without_a_provider_is_refused(build, tmp, capsys):
 def test_compare_takes_its_policy_from_the_file(repo, tmp, capsys):
     base = make_build(tmp / "b0", repo["wt-base"], cases())
     head = make_build(tmp / "b1", repo["wt-head"], cases(quiet=1.02e-3))
-    write_config(tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 3, "k": 4.0})
+    write_config(tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 4, "k": 4.0, "min_rounds": 3})
     assert cli.main(["compare", f"{base}:{repo['wt-base']}", f"{head}:{repo['wt-head']}", "--run-key", "cmp",
                      "--json"]) == cli.EXIT_OK
     doc = json.loads(capsys.readouterr().out)
     assert doc["method"]["configuration"] == {"k": 4.0, "min_rounds": 3}
-    assert {d["procedure"]["round"] for d in Store(tmp / "store.parquet").documents("cmp")} == {0, 1, 2}
+    assert {d["procedure"]["round"] for d in Store(tmp / "store.parquet").documents("cmp")} == {0, 1, 2, 3}

@@ -50,8 +50,12 @@ def run(rounds=3, base_values=(1.0, 2.0, 3.0), ratio=1.1):
     return docs
 
 
+# The fixtures here have 3 rounds, one fewer than the default min_rounds, so the helpers ask for 3.
+FEW = {"min_rounds": 3}
+
+
 def evaluate(docs, **kwargs):
-    doc = compare.compare(docs, run_key="run", profile="revisions", baseline=BASE, **kwargs)
+    doc = compare.compare(docs, run_key="run", profile="revisions", baseline=BASE, **{**FEW, **kwargs})
     assert core.check(doc, "comparison-document") == []
     return doc
 
@@ -208,7 +212,8 @@ def labeled(docs, configurations=("plain", "hardened")):
 
 
 def test_environments_sides_are_named_by_label():
-    doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build")
+    doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build",
+                          **FEW)
     assert core.check(doc, "comparison-document") == []
     assert (doc["sides"]["varying"], doc["sides"]["baseline"], doc["sides"]["contender"]) == ("provenance.labels.build", "plain", "hardened")
     assert doc["failed_invariants"] == [] and doc["units"][0]["verdict"] == "regressed"
@@ -380,7 +385,8 @@ def variants_run(rounds=3, sizes=(None,), ratio=1.1, base_values=(1.0, 2.0, 3.0)
 
 
 def vevaluate(docs, parameter="role", baseline="'baseline'", **kwargs):
-    doc = compare.compare(docs, run_key="run", profile="variants", baseline=baseline, parameter=parameter, **kwargs)
+    doc = compare.compare(docs, run_key="run", profile="variants", baseline=baseline, parameter=parameter,
+                          **{**FEW, **kwargs})
     assert core.check(doc, "comparison-document") == []
     return doc
 

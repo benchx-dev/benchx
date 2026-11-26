@@ -180,7 +180,7 @@ def test_show_says_where_each_value_comes_from(tree, monkeypatch, capsys):
     assert cli.main(["config", "show"]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert '"demo"  (file)' in out and '"mod.py"  (file)' in out
-    assert "compare.rounds             -  (unset)" in out
+    assert "compare.rounds             6  (default)" in out and "compare.min_rounds         4  (default)" in out
     assert "timeouts.case_s            60  (default)" in out
 
 

@@ -57,6 +57,10 @@ def tree(tmp, monkeypatch):
     return path
 
 
+# Three rounds keep the real runs here short, one fewer than the default min_rounds, so ask for 3.
+FEW = ["--min-rounds", "3"]
+
+
 def loop(target, selectors, fast, rounds=3, out=False):
     """The caller's loop (§3): one `bx bench` call per value per round, in the same order every round."""
     slot = 0
@@ -72,7 +76,7 @@ def loop(target, selectors, fast, rounds=3, out=False):
 def compare(capsys, *extra, baseline=BASELINE):
     """`bx compare --run`: the exit code, the comparison document (None if not printed) and stderr."""
     capsys.readouterr()
-    code = cli.main(["compare", "--run", RUN, "--profile", "variants", "--baseline", baseline, "--json", *extra])
+    code = cli.main(["compare", "--run", RUN, "--profile", "variants", "--baseline", baseline, "--json", *FEW, *extra])
     captured = capsys.readouterr()
     return code, (json.loads(captured.out) if captured.out.strip() else None), captured.err
 
@@ -217,7 +221,7 @@ def test_the_loop_with_an_asv_suite_and_a_second_parameter(tmp, monkeypatch, cap
 def measure(capsys, *extra):
     capsys.readouterr()
     code = cli.main(["compare", ".", "--profile", "variants", "--suite", "mod.py", "--adapter", "pyperf",
-                     "--rounds", "3", "--run-key", RUN, "--json", *PYPERF, *extra])
+                     "--rounds", "3", *FEW, "--run-key", RUN, "--json", *PYPERF, *extra])
     captured = capsys.readouterr()
     return code, (json.loads(captured.out) if captured.out.strip() else None), captured.err
 

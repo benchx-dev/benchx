@@ -625,9 +625,9 @@ def _resolved(cfg):
     yield "paths.store", str(cfg.store_path), store_from
     yield "paths.results", str(cfg.results_dir), "file" if "results" in cfg.section("paths") else "default"
     yield row("compare.profile", compare.get("profile"))
-    yield row("compare.rounds", compare.get("rounds"))
+    yield row("compare.rounds", compare.get("rounds"), session.ROUNDS)
     yield row("compare.k", compare.get("k"), 3.0)
-    yield row("compare.min_rounds", compare.get("min_rounds"), 3)
+    yield row("compare.min_rounds", compare.get("min_rounds"), 4)
 
 
 def _report(outcome, store_path=None):
@@ -811,7 +811,7 @@ def _policy(cfg, args) -> tuple[dict, list]:
     profile, profile_source = cfg.pick_with_source(args.profile, compare.get("profile"), flag="--profile",
                                                    key="compare.profile")
     k, k_source = cfg.pick_with_source(args.k, compare.get("k"), 3.0, flag="--k", key="compare.k")
-    min_rounds, min_source = cfg.pick_with_source(args.min_rounds, compare.get("min_rounds"), 3, flag="--min-rounds",
+    min_rounds, min_source = cfg.pick_with_source(args.min_rounds, compare.get("min_rounds"), 4, flag="--min-rounds",
                                                   key="compare.min_rounds")
     return ({"profile": profile, "k": k, "min_rounds": min_rounds},
             [("compare.profile", profile, profile_source), ("compare.k", k, k_source),
@@ -867,7 +867,7 @@ def _measure(cfg, args, policy, sources):
                               settings["quantities"])
         _needs_provider(cfg, *args.targets)
         rounds, rounds_source = cfg.pick_with_source(args.rounds, cfg.section("compare").get("rounds"),
-                                                     flag="--rounds", key="compare.rounds")
+                                                     session.ROUNDS, flag="--rounds", key="compare.rounds")
         label = session.parse_label(args.label) if args.label else None
     except (UsageError, config_mod.ConfigError) as e:
         say.error(f"bx compare: error: {e}")
@@ -1249,7 +1249,7 @@ def main(argv=None):
                    help="variants: the workload parameter whose two values are the sides "
                         "(default: the only parameter the results carry)")
     p.add_argument("--k", type=float, help="noise multiplier (default: compare.k, else 3)")
-    p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 3)")
+    p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 4)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--tables", action="store_true",
                    help="after the summary, asv-style tables: one per side, then the changes")
@@ -1267,7 +1267,7 @@ def main(argv=None):
                       help="compare these result files or directories directly, without using the local store")
     measure = p.add_argument_group("measure mode")
     measure.add_argument("--rounds", type=int,
-                         help="alternation rounds; each runs both sides once (default: compare.rounds)")
+                         help=f"alternation rounds; each runs both sides once (default: compare.rounds, else {session.ROUNDS})")
     measure.add_argument("--no-ingest", action="store_true",
                          help="write result files and compare in memory; skip the local store")
     _add_target_options(measure, "compare")

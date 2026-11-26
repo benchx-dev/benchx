@@ -31,6 +31,9 @@ from .errors import SessionError
 from .identity import normalize_remote
 
 PROFILES = tuple(compare_mod.PROFILES)
+# Rounds when neither --rounds nor compare.rounds says: even, so an order that alternates
+# AB, BA, ... balances, and enough that the k = 3 threshold rarely flags a no-op change (#126).
+ROUNDS = 6
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -338,7 +341,7 @@ def _note_local_only(progress, sides) -> None:
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
                     adapter, flags=None, file_precision=None, environment_variables=None, filter=None,
                     quantities=("wall-time",), project=None, label=None, run_key=None, out=None, source_uri=None,
-                    k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
+                    k=3.0, min_rounds=4, progress=None, build=True, provider=None, results_dir=None,
                     case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
                     collectors=None, harness_verbosity=0) -> dict:
     """Alternate baseline and contender over `rounds` rounds, deliver every
@@ -491,7 +494,7 @@ def _the_two_values(runnable: dict, cases: list[str], parameter: str) -> list[st
 def compare_variants(target: str, *, suite: str, rounds: int, store, adapter, parameter=None, baseline=None,
                      flags=None, file_precision=None, environment_variables=None, filter=None,
                      quantities=("wall-time",), project=None, run_key=None, out=None, source_uri=None,
-                     k=3.0, min_rounds=3, progress=None, build=True, provider=None, results_dir=None,
+                     k=3.0, min_rounds=4, progress=None, build=True, provider=None, results_dir=None,
                      case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, config_path=None,
                      collectors=None, harness_verbosity=0) -> dict:
     """Alternate the two values of one workload parameter of one target over `rounds` rounds,

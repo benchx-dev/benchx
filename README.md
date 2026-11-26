@@ -20,7 +20,7 @@ Run benchmarks locally, compare two checkouts, and inspect history in a browser:
 bx bench benchmarks.py
 
 # Paired A/B comparison across two checkouts
-bx compare ../wt-base ../wt-head --profile revisions --suite benchmarks.py --rounds 5
+bx compare ../wt-base ../wt-head --profile revisions --suite benchmarks.py
 
 # Build and serve the interactive static dashboard locally
 bx view
