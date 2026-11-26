@@ -32,8 +32,8 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
   an unexpected failure does, so the page cannot go on showing an error the code no longer gives.
   Its output goes into the page as for any block, and the run goes on. The fence is one script
   run with `-e`, so the status is that of the first command that fails, and the commands after it
-  do not run: put the failing command last. The page has the fence without `exit=1` (the site's
-  fence parser does not take a `key=value` there). Python blocks have no such marker.
+  do not run: put the failing command last. Python blocks have no such marker.
+  The page has a fence without its `exit=1` or `noexec` (the site's fence parser takes neither).
 - On the page, ANSI escape sequences are removed from the output, and so is the path of the
   repository checkout (`/home/runner/work/benchx/benchx/examples/x` shows as `examples/x`).
 - Do not link to other files of the example from the README: the page is built into the site on its
@@ -49,7 +49,8 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
    `tools/gen_docs.py --executed` stops, since the site would show the example unexecuted.
 3. Add a line for it under "Worked examples of local benchmarking" in `docs/examples.md`.
 
-An example that needs more than `benchx` and `pyperf` (a compiler, another package) gets its own job in
+An example that needs other Python packages than `benchx` and `pyperf` lists them as `requires` in its
+matrix entry (`matmul-params` does, for numpy and torch). One that needs more (a compiler) gets its own job in
 `docs.yml` instead of a matrix leg. The contract is the artifact: the job uploads `docs-<name>`
 containing `<name>.md`.
 
