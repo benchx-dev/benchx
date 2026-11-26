@@ -141,6 +141,7 @@ def test_the_harness_says_what_a_bare_path_names():
 
 
 def test_a_bare_path_is_a_working_tree_for_pyperf(pyperf_tree):
+    pytest.importorskip("pyperf")
     side = session._side(str(pyperf_tree), "benchmarks/mod.py", "describe", harness=harnesses.PYPERF)
     assert (side["kind"], side["path"], side["source"]) == ("working_tree", pyperf_tree.resolve(),
                                                            str(pyperf_tree.resolve()))
@@ -155,6 +156,7 @@ def test_a_bare_pyperf_path_is_whole_even_with_a_colon(tmp_path):
 
 
 def test_a_bare_pyperf_path_without_git_is_identified_by_content(tmp_path):
+    pytest.importorskip("pyperf")
     root = tmp_path / "plain"
     (root / "benchmarks").mkdir(parents=True)
     (root / "benchmarks" / "mod.py").write_text("def bench_a():\n    pass\n")
