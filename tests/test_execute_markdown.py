@@ -92,7 +92,8 @@ def test_a_json_fence_after_a_heading_or_of_another_language_is_not_a_snapshot(r
 
 def test_noexec_unlabelled_and_other_fences_are_kept_and_not_run(repo):
     text = "```sh noexec\nexit 1\n```\n\n```\n$ pip install x\n```\n\n```json\n{}\n```\n"
-    assert page_of(repo, text) == text  # `exit 1` would have failed the run
+    # `exit 1` would have failed the run; the page has no `noexec` (the site's fence parser takes none)
+    assert page_of(repo, text) == text.replace("sh noexec", "sh")
 
 
 def test_a_readme_with_no_executable_block_is_copied(repo, capsys):
@@ -156,7 +157,7 @@ def test_a_block_marked_exit_is_expected_to_fail_and_the_run_goes_on(repo):
 
 def test_the_marker_is_left_out_of_every_fence_of_the_page_and_the_fence_is_kept_as_it_was(repo):
     page = page_of(repo, "~~~sh exit=2\nexit 2\n~~~\n\n```sh noexec exit=1\nexit 1\n```\n")
-    assert page == "~~~sh\nexit 2\n~~~\n\n```sh noexec\nexit 1\n```\n"  # a noexec block is not run, so not checked
+    assert page == "~~~sh\nexit 2\n~~~\n\n```sh\nexit 1\n```\n"  # a noexec block is not run, so not checked
 
 
 @pytest.mark.parametrize(("marked", "script", "said"), [

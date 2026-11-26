@@ -45,8 +45,12 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # `requires`: what the example needs beyond benchx and pyperf, for `uv pip install`.
       matrix:
-        example: [pyperf-suite]
+        include:
+          - example: pyperf-suite
+          - example: matmul-params
+            requires: numpy torch --index-url https://download.pytorch.org/whl/cpu
     env:
       EXAMPLE: ${{ matrix.example }}
     steps:
@@ -68,6 +72,12 @@ jobs:
           uv python install 3.13
           uv sync --extra parquet --extra test --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install what the example needs
+        if: matrix.requires
+        env:
+          REQUIRES: ${{ matrix.requires }}
+        run: uv pip install $REQUIRES
 
       - name: Show what is under test
         run: |
