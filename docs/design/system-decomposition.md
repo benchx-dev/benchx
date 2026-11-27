@@ -15,20 +15,7 @@ Two rules shape the decomposition:
 
 ## 2. Overview
 
-```text
-                        produce results               consume results
-  ┌─────────────────┐  ┌────────────┐   ┌───────┐   ┌────────────┐  ┌──────────┐
-  │ Local workbench │─▶│            │   │       │   │ Comparator │  │  Views   │
-  │      (bx)       │  │  Runner +  │──▶│ Store │──▶│(bx compare)│  │(bx view) │
-  └─────────────────┘  │  Adapters  │   │       │   └────────────┘  └──────────┘
-  ┌─────────────────┐  │            │   └───▲───┘
-  │  CI workbench   │─▶│            │       │         Planned extensions:
-  │   (benchx-ci)   │  └────────────┘       │         Scheduler · Detector
-  └────────▲────────┘  ┌───────────┐        │         Alerts · Importers
-           │           │ Importers │────────┘
-    Target provider    └───────────┘
-  (project-owned build)
-```
+![BenchX components: the bx workbench sends work orders to the runner, which drives harness adapters (pyperf, Google Benchmark, asv suites) and emits schema results into the result store (store.jsonl or store.parquet); the comparator and static dashboard (bx view) read from the store.](components.svg)
 
 Everything to the left of the store produces schema results; everything to the
 right only reads them.
