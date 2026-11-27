@@ -95,7 +95,7 @@ serves facts.
   revision, dirty working tree. A result that cannot state where it came from
   is a defect.
 - Behaves identically whether invoked by a person on a laptop or by CI on a
-  fleet machine; only precision settings differ.
+  fleet machine.
 
 **Does not:** decide what to run or when, store history, or compare results.
 
