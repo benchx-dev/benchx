@@ -20,7 +20,7 @@ from typing import get_args
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import core, harnesses, log, orders, runner, session, snapshot
+from . import core, harnesses, log, orders, projection, runner, session, snapshot
 from . import tables as tables_mod
 from . import target as target_mod
 from . import views as views_mod
@@ -665,14 +665,33 @@ def cmd_series(args):
         return EXIT_REFUSED
     if (store := _open_store(cfg.store_path, "series")) is None:
         return EXIT_REFUSED
-    listed = store.series(args.workload, args.quantity)
+    listed = store.series(args.workload, args.quantity, include_conditions=args.all)
     if not listed:
         logger.info("no series%s", " matches the filter" if args.workload or args.quantity else " in the store")
     for s in listed:
         estimator = json.loads(s["estimator"])["method_version"]
-        print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
+        params = json.loads(s["parameters"]) if s.get("parameters") else {}
+        label = projection.workload_label({"name": s["workload"], "parameters": params})
+        print(f"{s['fingerprint'][:12]}  {s['project']}  {label}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
     return EXIT_OK
+
+
+def _git_revision_order(shas: list[str], repo: Path) -> dict[str, int] | None:
+    """Topological commit rank from git ancestry/committer_date for `shas`, or None."""
+    from .views import inputs as view_inputs, marts as view_marts
+
+    git_repo = view_inputs._find_git_repo(repo)
+    if git_repo is None or not shas:
+        return None
+    meta = view_inputs._git_commit_info(shas, git_repo)
+    if not meta:
+        return None
+    runs = [
+        {"sha": sha, "parents": info.get("parents") or [], "committer_date": info.get("committer_date")}
+        for sha, info in meta.items()
+    ]
+    return view_marts._order_shas(runs)
 
 
 def cmd_history(args):
@@ -682,13 +701,19 @@ def cmd_history(args):
         return EXIT_REFUSED
     if (store := _open_store(cfg.store_path, "history")) is None:
         return EXIT_REFUSED
-    points = store.history(args.series)
+    raw_points = store.history(args.series)
+    repo = Path(args.repo) if args.repo is not None else cfg.root
+    rev_order = _git_revision_order(sorted({p["revision"] for p in raw_points}), repo) if raw_points else None
+    points = store.history(args.series, revision_order=rev_order) if rev_order else raw_points
     if not points:
         logger.info("no series matches %s", args.series)
     elif len(matched := {p["series_fingerprint"] for p in points}) > 1:
         logger.warning("%s matches %d series, whose points are listed together; `changed` is worked out per series: %s",
                        args.series, len(matched), ", ".join(sorted(f[:12] for f in matched)))
-    print("revision order unavailable without a revision graph; listed by measurement start")
+    if rev_order:
+        print("ordered by git revision ancestry")
+    else:
+        print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
         warned = f"  [{', '.join(p['warnings'])}]" if p["warnings"] else ""  # such as dirty-subject-tree
@@ -976,13 +1001,42 @@ def cmd_validate(args):
 
 
 def cmd_view(args):
-    """Build static dashboard views and optionally serve them over local HTTP."""
+    """Build static dashboard views and optionally serve them over local HTTP, or render CLI views."""
     if (cfg := _load("view")) is None:
         return EXIT_REFUSED
-    serve = args.serve or args.out is None
-    if args.open and not serve:
-        say.error("bx view: error: --open goes with serving (omit --out, or pass --serve)")
-        return EXIT_REFUSED
+    if args.cli is not None:
+        site_flags = [
+            flag for flag, active in (
+                ("--out", args.out is not None),
+                ("--serve", args.serve),
+                ("--open", args.open),
+                ("--marts", args.marts),
+                ("--no-marts", args.no_marts),
+                ("--views-format parquet", args.views_format != "json"),
+                ("--stamp", args.stamp is not None),
+            )
+            if active
+        ]
+        if site_flags:
+            say.error(f"bx view: error: {', '.join(site_flags)} cannot be combined with --cli")
+            return EXIT_REFUSED
+    else:
+        cli_flags = [
+            flag for flag, active in (
+                ("--commit", args.commit is not None),
+                ("--workload", args.workload is not None),
+                ("--limit", args.limit is not None),
+                ("--json", args.json),
+            )
+            if active
+        ]
+        if cli_flags:
+            say.error(f"bx view: error: {', '.join(cli_flags)} go with --cli")
+            return EXIT_REFUSED
+        serve = args.serve or args.out is None
+        if args.open and not serve:
+            say.error("bx view: error: --open goes with serving (omit --out, or pass --serve)")
+            return EXIT_REFUSED
     if (cfg := _start_logging(cfg, args, None, "view")) is None:
         return EXIT_REFUSED
 
@@ -994,6 +1048,37 @@ def cmd_view(args):
     else:
         source_kwargs["store_path"] = args.store if args.store is not None else cfg.store_path
 
+    repo = Path(args.repo) if args.repo is not None else cfg.root
+
+    if args.cli is not None:
+        try:
+            marts, _runs, _source, outcome = views_mod.load_marts(**source_kwargs, repo=repo)
+            rendered = views_mod.render_cli(
+                marts,
+                args.cli,
+                commit=args.commit,
+                workload=args.workload,
+                limit=args.limit,
+                as_json=args.json,
+                repo=repo,
+            )
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.split(".")[0] == "pyarrow":
+                hint = ""
+                if "store_path" in source_kwargs:
+                    hint = ", or pass --results DIR to build views from JSON results directly"
+                say.error(f"bx view: error: {exc}{hint}")
+                return EXIT_REFUSED
+            raise
+        except views_mod.ViewError as exc:
+            say.error(f"bx view: error: {exc}")
+            return EXIT_REFUSED
+        exit_code = EXIT_OK
+        if outcome and outcome["rejected"]:
+            exit_code = _report(outcome)
+        print(rendered)
+        return exit_code
+
     if args.marts:
         write_marts: bool | None = True
     elif args.no_marts:
@@ -1003,7 +1088,6 @@ def cmd_view(args):
     else:
         write_marts = None
 
-    repo = Path(args.repo) if args.repo is not None else cfg.root
     build_kwargs = {
         **source_kwargs,
         "project_file": Path(args.project_file) if args.project_file else None,
@@ -1209,10 +1293,13 @@ def main(argv=None):
     p = sub.add_parser("series", parents=[options], help="list series")
     p.add_argument("--workload")
     p.add_argument("--quantity")
+    p.add_argument("--all", action="store_true",
+                   help="include condition measurements such as load-average")
     p.set_defaults(fn=cmd_series)
 
     p = sub.add_parser("history", parents=[options], help="one series' points (a query; history mode is deferred)")
     p.add_argument("series", help="series fingerprint or prefix")
+    p.add_argument("--repo", help="git checkout used to order points by revision ancestry")
     p.set_defaults(fn=cmd_history)
 
     p = sub.add_parser("head", parents=[options], help="the latest results in the store, newest first")
@@ -1312,6 +1399,16 @@ def main(argv=None):
     p.add_argument("--views-format", choices=("json", "parquet"), default="json",
                    help="format for frontend view payloads under data/views/ (default %(default)s; parquet requires benchx[parquet])")
     p.add_argument("--stamp", help="cache-busting version stamped onto static asset URLs in index.html")
+    cli_group = p.add_argument_group("terminal output")
+    cli_group.add_argument(
+        "--cli", nargs="?", const="changes", choices=views_mod.CLI_VIEWS, metavar="VIEW",
+        help=f"print a derived view table to stdout instead of building/serving HTML "
+             f"({', '.join(views_mod.CLI_VIEWS)}; default changes)",
+    )
+    cli_group.add_argument("--commit", help="with --cli: filter to one commit (SHA prefix or git ref)")
+    cli_group.add_argument("--workload", help="with --cli: regex filter on suite or case name")
+    cli_group.add_argument("-n", "--limit", type=int, help="with --cli: maximum number of rows to print")
+    cli_group.add_argument("--json", action="store_true", help="with --cli: emit the selected view rows as JSON")
     p.set_defaults(fn=cmd_view)
 
     args, extra = ap.parse_known_args(argv)

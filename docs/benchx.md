@@ -75,14 +75,15 @@ bx run <order.json> [--out DIR] [--no-ingest]
                                          # runner + Google Benchmark adapter → result files → local store
 
 bx ingest <dir|file>                     # result files and work orders → the local store
-bx series [--workload … --quantity …]    # list series
-bx history <series>                      # one series' points (a query); dirty ones are marked
+bx series [--workload … --quantity … --all]  # list measurand series (--all adds conditions like load-average)
+bx history <series> [--repo DIR]         # one series' points (git ancestry order when --repo or checkout has them)
 bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first; dirty ones are marked
 bx view [--out DIR] [--serve] [--host 127.0.0.1] [--port 8000] [--open]
         [--store PATH | --results PATH… | --runs DIR]
         [--project-file PATH] [--title TITLE] [--repo DIR]
         [--views-format json|parquet] [--marts | --no-marts] [--stamp STR]
-                                         # build and serve the static benchmark dashboard (no --out: temp dir + serve)
+        [--cli [changes|movers|latest|commits] [--commit REF] [--workload REGEX] [-n N] [--json]]
+                                         # build/serve the static dashboard, or print derived views to stdout (--cli)
 
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
