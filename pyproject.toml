@@ -12,6 +12,8 @@ dependencies = [
     "rfc3986-validator>0.1.0",
     "referencing",
     "rfc8785",
+    # The default harness: the pyperf and asv adapters time with it.
+    "pyperf",
 ]
 readme = "docs/benchx.md"
 classifiers = [
@@ -25,7 +27,7 @@ Repository = "https://github.com/benchx-dev/benchx"
 
 [project.optional-dependencies]
 parquet = ["pyarrow>=19"]
-test = ["pytest", "pyperf", "asv_runner"]
+test = ["pytest", "asv_runner"]
 
 [project.scripts]
 bx = "benchx.cli:main"

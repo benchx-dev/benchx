@@ -32,6 +32,10 @@ $ pip install benchx                # JSONL store, compare, validate, and bx vie
 $ pip install 'benchx[parquet]'     # adds PyArrow for the Parquet store and CI --runs views
 ```
 
+Either brings [pyperf](https://pyperf.readthedocs.io), which times Python and asv benchmarks.
+The benchmarks run in the `python` first on `PATH`; if that is a different environment from
+benchx's (a project's own virtualenv or conda env), install pyperf there too, or benchx.
+
 
 # CLI API
 
@@ -180,7 +184,7 @@ workload's parameters. Precision resolves as flags, then `adapter.precision` in
 `benchx.conf.json` (`bx config init` writes a template), then the harness's defaults, and the
 resolved values are written into the order. `--quantity` takes a comma-separated list,
 and one run collects them all. The workers run the `python` first on `PATH`, which must have
-pyperf.
+pyperf (benchx brings it, so any environment benchx is installed in has it).
 
 A function has a version, as an asv benchmark does: its `version` attribute, else a hash of
 its source (as asv_runner hashes a plain function: comments and docstrings count; what it

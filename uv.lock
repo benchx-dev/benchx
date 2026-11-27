@@ -25,6 +25,7 @@ name = "benchx"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
+    { name = "pyperf" },
     { name = "referencing" },
     { name = "rfc3339-validator" },
     { name = "rfc3986-validator" },
@@ -37,7 +38,6 @@ parquet = [
 ]
 test = [
     { name = "asv-runner" },
-    { name = "pyperf" },
     { name = "pytest" },
 ]
 
@@ -46,7 +46,7 @@ requires-dist = [
     { name = "asv-runner", marker = "extra == 'test'" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=19" },
-    { name = "pyperf", marker = "extra == 'test'" },
+    { name = "pyperf" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "referencing" },
     { name = "rfc3339-validator" },
