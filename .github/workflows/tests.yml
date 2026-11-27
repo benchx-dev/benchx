@@ -117,3 +117,46 @@ jobs:
           python -m pytest --pyargs benchx -ra
           uv pip install "$(ls "$GITHUB_WORKSPACE"/dist/*.whl)[parquet,test]"
           python -m pytest --pyargs benchx -ra
+
+  # Line and branch coverage of the suite (#87), as a starting point for finding dead code:
+  # the table is in the job summary, the HTML report in the coverage-html artifact. Nothing
+  # fails on the number. pyproject.toml ([tool.coverage]) says what is measured, and why a
+  # few files look less covered than they are.
+  coverage:
+    name: coverage / py3.13
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install package and test dependencies
+        run: uv sync --extra parquet --extra test --python 3.13
+
+      - name: Run tests under coverage
+        run: uv run --extra parquet --extra test --with coverage --python 3.13 coverage run -m pytest tests -ra
+
+      - name: Report
+        if: always()
+        run: |
+          uv run --extra parquet --extra test --with coverage --python 3.13 coverage report
+          {
+            echo "## Coverage"
+            echo
+            uv run --extra parquet --extra test --with coverage --python 3.13 coverage report --format=markdown
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run --extra parquet --extra test --with coverage --python 3.13 coverage html
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: warn
+          retention-days: 14
