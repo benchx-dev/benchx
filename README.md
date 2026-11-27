@@ -124,4 +124,5 @@ stability guarantees in the near future.
 
 ## License
 
-Apache License 2.0.
+Apache License 2.0. `bx view` ships a copy of [uPlot](https://github.com/leeoniya/uPlot), which is
+MIT-licensed; its license is in `src/benchx/views/static/vendor/uplot/LICENSE`.
