@@ -1,5 +1,3 @@
-# Benchmark Use Case Template
-
 ## UC-01: Run a single parametrized benchmark
 
 | | |
