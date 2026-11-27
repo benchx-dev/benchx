@@ -33,7 +33,7 @@ def test_a_comparison_logs_its_inputs_each_unit_and_a_summary(caplog):
                "40 result document(s) used of 40 offered" in m for level, m in messages)
     units = [m for level, m in messages if level == "INFO" and m.startswith("unit ")]
     assert len(units) == len(doc["units"]) == 4
-    assert all(re.search(r"regressed, rounds 5, reference [\d.e-]+, effect \+50\.00%, noise [\d.]+%, k x noise", m)
+    assert all(re.search(r"regressed, rounds 5, reference [\d.e-]+, effect \+50\.00%, noise [\d.]+%, threshold [\d.]+% \([\d.]+ x noise\)", m)
                and m.endswith("attempts baseline success 5; contender success 5") for m in units)
     assert any(level == "INFO" and m.startswith("compared run run, profile revisions") and "4 unit(s), 4 regressed" in m
                and "0 missing, 0 invariant(s) failed, 0 excluded" in m for level, m in messages)

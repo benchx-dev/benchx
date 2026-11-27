@@ -1248,7 +1248,8 @@ def main(argv=None):
     p.add_argument("--vary", metavar="NAME",
                    help="variants: the workload parameter whose two values are the sides "
                         "(default: the only parameter the results carry)")
-    p.add_argument("--k", type=float, help="noise multiplier (default: compare.k, else 3)")
+    p.add_argument("--k", type=float, help="confidence in normal sigmas: the threshold is the t quantile with that two-sided tail, "
+                                       "times the noise (default: compare.k, else 3)")
     p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 4)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--tables", action="store_true",

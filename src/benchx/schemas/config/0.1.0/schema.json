@@ -96,7 +96,7 @@
       "properties": {
         "profile": { "enum": ["revisions", "environments", "variants"] },
         "rounds": { "type": "integer", "minimum": 1 },
-        "k": { "type": "number", "exclusiveMinimum": 0 },
+        "k": { "type": "number", "exclusiveMinimum": 0, "maximum": 20 },
         "min_rounds": { "type": "integer", "minimum": 1 }
       }
     },

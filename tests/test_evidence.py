@@ -7,6 +7,7 @@ import json
 import pytest
 
 from benchx import compare, core, methods
+from benchx.methods import paired_relative
 from benchx.core import catalog
 from benchx.evidence import Assessment, Evidence, Method, NotApplicable, Row, pivot, relation, slot_schedule
 from benchx.key import Key
@@ -200,7 +201,33 @@ def test_every_result_is_used_or_excluded_exactly_once():
 def test_the_noise_says_what_it_is_and_records_its_degrees_of_freedom():
     details = evaluate(run(rounds=5, base_values=(1.0, 2.0, 3.0, 4.0, 5.0)))["units"][0]["details"]
     assert details["noise_kind"] == "standard-error" and details["degrees_of_freedom"] == 4
-    assert details["threshold"] == pytest.approx(3.0 * details["noise"])
+    assert details["multiplier"] == pytest.approx(6.620206)  # the t quantile for k = 3 at 4 degrees of freedom
+    assert details["threshold"] == pytest.approx(details["multiplier"] * details["noise"])
+
+
+@pytest.mark.parametrize("k, df, expected", [  # scipy.stats.t.ppf(1 - norm.sf(k), df)
+    (3.0, 1, 235.801498), (3.0, 2, 19.206744), (3.0, 3, 9.21894), (3.0, 5, 5.50708), (3.0, 9, 4.094255),
+    (3.0, 199, 3.038128), (2.0, 2, 4.526537), (2.0, 4, 2.869309), (4.0, 7, 8.466925),
+    # far in the tail, where 1 - P(|T| < t) would have lost every digit
+    (6.0, 2, 22512.16), (10.0, 5, 65927.32), (10.0, 1000, 10.25796), (20.0, 30, 4492.842)])
+def test_the_multiplier_is_the_t_quantile_with_the_tail_of_k_sigma(k, df, expected):
+    assert paired_relative.multiplier(k, df) == pytest.approx(expected, rel=1e-6)
+    assert paired_relative.multiplier(k, df) >= k  # a t tail is heavier than a normal one
+    assert paired_relative.multiplier(0.0, df) == 0.0
+
+
+def test_an_effect_beyond_three_standard_errors_is_not_a_change_at_three_rounds():
+    """#126: three rounds whose effect is 6.9 standard errors. A fixed k = 3 called it a
+    regression; at 2 degrees of freedom the threshold is 19.2 standard errors."""
+    differences = (0.03, 0.04, 0.05)  # mean 0.04, standard error 0.0058: 6.9 standard errors
+    docs, slot = [], 0
+    for r, d in enumerate(differences):
+        for side, value in ((BASE, 1.0), (HEAD, 1.0 + d)):
+            docs.append(result(side, r, slot, value))
+            slot += 1
+    unit = evaluate(docs)["units"][0]
+    assert 3 < unit["effect"]["value"] / unit["details"]["noise"] < unit["details"]["multiplier"]
+    assert unit["verdict"] == "no-change-detected"
 
 
 def test_the_method_and_selector_are_recorded_even_with_no_units():
@@ -236,10 +263,12 @@ def test_an_unknown_method_is_refused():
 def test_configuration_is_checked_against_the_methods_schema():
     with pytest.raises(compare.CompareError, match="alpha"):
         compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, alpha=0.05)
-    with pytest.raises(compare.CompareError, match="benchx/paired-relative/v1"):
+    with pytest.raises(compare.CompareError, match="benchx/paired-relative/v2"):
         compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, k="three")
     with pytest.raises(compare.CompareError, match="minimum"):
         compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, k=-1.0)
+    with pytest.raises(compare.CompareError, match="maximum"):
+        compare.compare(run(), run_key="run", profile="revisions", baseline=BASE, k=21.0)
     assert evaluate(run(), k=0.0)["method"]["configuration"]["k"] == 0.0  # zero is allowed
 
 

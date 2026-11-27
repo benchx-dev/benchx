@@ -66,7 +66,7 @@ def toy(tmp_path):
     return {"sides": sides, "suite": suite / "bench_toy.py"}
 
 
-def compare(tmp, toy, monkeypatch, *, reported):
+def compare(tmp, toy, monkeypatch, *, reported, rounds=3):
     """`bx compare @base @head` over the toy builds; `reported` names the directory
     each provider answer gives as `target.path`: "build" or "package"."""
     def provider(spec, operation, provider=None):
@@ -78,7 +78,7 @@ def compare(tmp, toy, monkeypatch, *, reported):
 
     monkeypatch.setattr(session.target_mod, "resolve", provider)
     doc = session.compare_targets(
-        "@base", "@head", profile="revisions", suite=str(toy["suite"]), rounds=3, min_rounds=3, store=Store(tmp / "s.parquet"),
+        "@base", "@head", profile="revisions", suite=str(toy["suite"]), rounds=rounds, min_rounds=3, store=Store(tmp / "s.parquet"),
         adapter="pyperf", flags={"processes": 2, "values": 2, "loops": 50, "warmups": 1},
         filter=harnesses.exact_filter(["bench_work"]), out=tmp / "out", run_key="toy")
     assert doc["failed_invariants"] == []
@@ -118,8 +118,11 @@ def test_the_package_directory_as_target_imports_each_build(tmp, toy, monkeypatc
     `sys.path` entry finds each side's build, in one shared environment."""
     pytest.importorskip("pyperf")
     monkeypatch.delenv("PYTHONPATH", raising=False)
-    doc = compare(tmp, toy, monkeypatch, reported="package")
+    # Six rounds: the per-round ratios of a 100-fold difference spread widely, and at three
+    # rounds (2 degrees of freedom) the threshold is 19 standard errors, which they missed
+    # about one run in three (#126).
+    doc = compare(tmp, toy, monkeypatch, reported="package", rounds=6)
     unit = doc["units"][0]
-    assert unit["details"]["rounds"] == 3
+    assert unit["details"]["rounds"] == 6
     assert unit["verdict"] == "regressed"
     assert unit["effect"]["value"] > 10
