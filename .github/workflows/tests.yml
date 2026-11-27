@@ -109,6 +109,7 @@ jobs:
           default_reqs = [r for r in reqs if "extra ==" not in r]
           parquet_reqs = [r for r in reqs if "extra ==" in r and "parquet" in r]
           assert any(r.startswith("pyarrow") for r in parquet_reqs), reqs
+          assert any(r.startswith("pyperf") for r in default_reqs), f"pyperf missing from the default deps {default_reqs}"
           for unwanted in ("pyarrow", "jsonpointer", "format-nongpl", "fqdn", "idna", "isoduration", "rfc3987-syntax", "uri-template", "webcolors"):
               assert not any(unwanted in r for r in default_reqs), f"unexpected default dep {unwanted!r} in {default_reqs}"
           '

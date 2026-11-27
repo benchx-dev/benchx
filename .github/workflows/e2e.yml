@@ -96,13 +96,13 @@ jobs:
           cache-dependency-glob: benchx/uv.lock
 
       # The scripts run plain `python`, `bx` and `spin`, and hard-code
-      # lib/python3.12/site-packages, so this is Python 3.12 on the PATH. The `test`
-      # extra is only for pyperf, which the benchmarks need.
+      # lib/python3.12/site-packages, so this is Python 3.12 on the PATH. benchx brings
+      # pyperf, which the benchmarks need.
       - name: Install benchx on Python 3.12
         working-directory: benchx
         run: |
           uv python install 3.12
-          uv sync --extra parquet --extra test --python 3.12
+          uv sync --extra parquet --python 3.12
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install NumPy's build tools
@@ -263,14 +263,14 @@ jobs:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
 
-      # The script runs plain `python` and `bx`, and the workers need pyperf, which the
-      # `test` extra brings. benchx is installed in editable mode, which is where it reads
-      # its schemas from.
+      # The script runs plain `python` and `bx`, and the workers need pyperf, which benchx
+      # brings. benchx is installed in editable mode, which is where it reads its schemas
+      # from.
       - name: Install benchx
         working-directory: benchx
         run: |
           uv python install 3.13
-          uv sync --extra parquet --extra test --python 3.13
+          uv sync --extra parquet --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Show what is under test
@@ -319,13 +319,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
 
-      # The workers need pyperf, which the `test` extra brings. benchx is installed in
-      # editable mode, which is where it reads its schemas from.
+      # The workers need pyperf, which benchx brings. benchx is installed in editable
+      # mode, which is where it reads its schemas from.
       - name: Install benchx
         working-directory: benchx
         run: |
           uv python install 3.13
-          uv sync --extra parquet --extra test --python 3.13
+          uv sync --extra parquet --python 3.13
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # The README's install lines. torch comes from PyTorch's CPU index: the default
