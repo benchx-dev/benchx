@@ -2,8 +2,9 @@
 name = "benchx"
 dynamic = ["version"]
 description = "BenchX: a flexible and powerful benchmarking framework"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
+license = "Apache-2.0 AND MIT"
+# MIT is uPlot's, vendored for `bx view` under src/benchx/views/static/vendor/uplot.
+license-files = ["LICENSE", "src/benchx/views/static/vendor/uplot/LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.18",
