@@ -25,5 +25,5 @@ def bench_matmul(n, xp):
     a @ b
 
 
-bench_matmul.params = [[10, 50, 100], ["numpy", "torch"]]
+bench_matmul.params = [[10, 50, 100, 200], ["numpy", "torch"]]
 bench_matmul.param_names = ["n", "xp"]
