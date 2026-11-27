@@ -1,4 +1,4 @@
-# <OpenBLAS> user stories
+# OpenBLAS user stories
 
 **Project:** [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS)
 **Current benchmarking setup:** One set of benchmarks is on `codspeed`, runs in each PR;

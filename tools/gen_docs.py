@@ -32,9 +32,21 @@ URN = re.compile(r"^urn:benchx:schema:(?P<name>[a-z0-9-]+):(?P<version>[0-9.]+)(
 
 # --------------------------------------------------------------------------- utilities
 
+_CODE_SPAN_OR_TAG = re.compile(r"(`[^`\n]*`)|(<(?!https?://|mailto:)(/?[a-zA-Z][^>\n]*)>)")
+
+
+def esc_prose(text: str) -> str:
+    """Escape angle-bracket placeholders outside inline code so Markdown does not parse them as HTML tags."""
+    def repl(m: re.Match) -> str:
+        if m.group(1) is not None:
+            return m.group(1)
+        return f"&lt;{m.group(3)}&gt;"
+    return _CODE_SPAN_OR_TAG.sub(repl, text)
+
+
 def esc(text: str) -> str:
     """Make a description safe inside a Markdown table cell."""
-    return text.replace("|", "\\|").replace("\n", " ").strip()
+    return esc_prose(text).replace("|", "\\|").replace("\n", " ").strip()
 
 
 def code(value) -> str:
@@ -368,11 +380,11 @@ def render_object(s: dict, page: "SchemaPage", path: list[str], level: int, out:
         out.append(f"{hashes} `{'.'.join(sub_path)}` {{ #{anchor(sub_path)} }}")
         out.append("")
         if sub.get("description"):
-            out.append(sub["description"].strip())
+            out.append(esc_prose(sub["description"].strip()))
             out.append("")
         if sub.get("$comment"):
             out.append('!!! note "Implementer note"')
-            out.append("    " + sub["$comment"].strip().replace("\n", "\n    "))
+            out.append("    " + esc_prose(sub["$comment"].strip()).replace("\n", "\n    "))
             out.append("")
         if has_table(sub):
             render_object(sub, page, sub_path, min(level + 1, 6), out)
@@ -405,11 +417,11 @@ class SchemaPage:
             out.append("Older versions: " + ", ".join(f"[{v}]({self.name}/{v}/schema.json)" for v in self.older))
         out.append("")
         if s.get("description"):
-            out.append(s["description"].strip())
+            out.append(esc_prose(s["description"].strip()))
             out.append("")
         if s.get("$comment"):
             out.append('!!! note "Implementer note"')
-            out.append("    " + s["$comment"].strip().replace("\n", "\n    "))
+            out.append("    " + esc_prose(s["$comment"].strip()).replace("\n", "\n    "))
             out.append("")
         out.append("## Properties")
         out.append("")
@@ -428,11 +440,11 @@ class SchemaPage:
                 out.append(f"### `{name}` {{ #{anchor(['def', name])} }}")
                 out.append("")
                 if isinstance(d, dict) and d.get("description"):
-                    out.append(d["description"].strip())
+                    out.append(esc_prose(d["description"].strip()))
                     out.append("")
                 if isinstance(d, dict) and d.get("$comment"):
                     out.append('!!! note "Implementer note"')
-                    out.append("    " + d["$comment"].strip().replace("\n", "\n    "))
+                    out.append("    " + esc_prose(d["$comment"].strip()).replace("\n", "\n    "))
                     out.append("")
                 if has_table(d):
                     render_object(d, self, [name], 3, out)

@@ -11,13 +11,13 @@ you need.
 
 ---
 
-# <Project name> user stories
+# &lt;Project name&gt; user stories
 
-**Project:** <name, link>
-**Current benchmarking setup:** <one or two sentences: what you run, how often,
+**Project:** &lt;name, link&gt;
+**Current benchmarking setup:** &lt;one or two sentences: what you run, how often,
 where results go — e.g. "nightly ASV runs on two dedicated machines, results
-published as a static site">
-**Contact:** <name/handle for follow-up questions>
+published as a static site"&gt;
+**Contact:** &lt;name/handle for follow-up questions&gt;
 
 ## Who uses benchmarks here
 
@@ -29,9 +29,9 @@ infra operator, …). One line each on what they care about.
 
 Use as many as apply. Format:
 
-### <Short title>
+### &lt;Short title&gt;
 
-> As a <role>, I want <goal>, so that <why it matters>.
+> As a &lt;role&gt;, I want &lt;goal&gt;, so that &lt;why it matters&gt;.
 
 **Today:** How this works right now, in a sentence or two.
 **Pain:** Where the current experience falls short, if it does.

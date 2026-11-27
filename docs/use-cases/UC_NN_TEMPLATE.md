@@ -12,7 +12,7 @@ shape stays comparable across documents.
 
 ---
 
-## UC-NN: <title>
+## UC-NN: &lt;title&gt;
 
 | | |
 |---|---|
