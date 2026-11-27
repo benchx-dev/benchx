@@ -44,7 +44,7 @@ def bench_sorted():
 ```
 
 Additionally, this directory contains an optional configuration file, `benchx.conf.json`,
-which collects settings for the benchmarking process. See Sec. 7 below for details.
+which collects settings for the benchmarking process. See Sec. 8 below for details.
 
 The benchmark functions are timed bodies: `pyperf` calls each one many times, and does
 the calibration (how many calls make up one value) itself. Put setup at module level.
@@ -212,7 +212,26 @@ c4525d138f93  local/gonzales  bench_env_var  wall-time [s]  est=benchx/median/v1
 To filter by the workload use the `--workload` argument: `bx series --quantity wall-time --workload bench_env_var`.
 
 
-### 7. The config file
+### 7. The history of one series
+
+`bx history` lists the points of one series, one for each run. We take the series of
+`bench_join` and see the two runs of it that we made, `example-all` and `example-again`.
+The last line fails the example unless there are exactly two points:
+
+```bash
+$ SERIES=$(bx series --workload bench_join --quantity wall-time | awk 'NR == 1 {print $1}')
+$ bx history "$SERIES" | tee out/history.txt
+$ [ "$(grep -c example- out/history.txt)" -eq 2 ]
+```
+
+```text
+revision order unavailable without a revision graph; listed by measurement start
+5828abd0be55  2026-11-27T14:08:37.171737Z  3.97284e-06 (server)  example-all:bench_join:wall-time
+5828abd0be55  2026-11-27T14:08:47.457609Z  3.96866e-06 (server)  example-again:bench_join:wall-time
+```
+
+
+### 8. The config file
 
 An optional `benchx.conf.json` file collects various configuration settings. Calling
 `bx config init` writes a file with default settings, which you can then customize.
@@ -259,7 +278,7 @@ file takes pyperf's default.
 
 
 
-### 8. What is written
+### 9. What is written
 
 Finally, take a peek into the output directory (typically, you never need to look there
 unless debugging):
