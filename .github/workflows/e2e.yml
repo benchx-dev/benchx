@@ -56,12 +56,12 @@ jobs:
       CCACHE_MAXSIZE: 500M
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
@@ -81,7 +81,7 @@ jobs:
       # The key is new for every run, because a cache cannot be overwritten; a run starts
       # from the most recent one. It is saved at the end, also when a later step fails.
       - name: Restore the ccache cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -90,7 +90,7 @@ jobs:
       - name: Zero the ccache statistics
         run: ccache --zero-stats
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -164,14 +164,14 @@ jobs:
 
       - name: Save the ccache cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: numpy-spin-output
           path: |
@@ -186,18 +186,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -232,7 +232,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: arrow-output
           path: |
@@ -247,18 +247,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -287,7 +287,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pyperf-suite-output
           path: benchx_examples/examples/pyperf-suite/out
@@ -303,18 +303,18 @@ jobs:
       BENCHX_HOME: ${{ github.workspace }}/benchx_examples/examples/matmul-params/out/home
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -354,7 +354,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: matmul-params-output
           path: benchx_examples/examples/matmul-params/out
@@ -367,18 +367,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out benchx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: benchx
 
       - name: Clone benchx_examples
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: benchx-dev/benchx_examples
           ref: ${{ inputs.examples_ref || 'main' }}
           path: benchx_examples
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: benchx/uv.lock
@@ -410,7 +410,7 @@ jobs:
 
       - name: Upload the output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: numpy-venvs-output
           path: benchx_examples/examples/numpy-venvs/out
