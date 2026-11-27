@@ -207,6 +207,17 @@ def test_no_results_still_builds(tmp_path):
     assert _load(out / "commits" / f"{SHAS[1]}.json")["changes"] == []
 
 
+def test_static_site_loads_no_external_scripts_or_styles(tmp_path):
+    # gh-129: charts must render offline, so uPlot is vendored rather than loaded from a CDN.
+    site._write_static(tmp_path, "v1")
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "://" not in html
+    assert 'src="vendor/uplot/uPlot.iife.min.js?v=v1"' in html
+    assert 'href="vendor/uplot/uPlot.min.css?v=v1"' in html
+    for asset in site.STATIC_FILES:
+        assert (tmp_path / asset).is_file(), asset
+    assert "MIT License" in (tmp_path / "vendor" / "uplot" / "LICENSE").read_text(encoding="utf-8")
+
 def test_last_executed_is_by_finish_time_not_commit_order():
     commits = [
         {"sha": "new", "node": "n1", "finished_at": "2026-01-02T10:00:00+00:00", "started_at": None},
