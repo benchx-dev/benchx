@@ -17,8 +17,20 @@ from urllib.parse import quote
 from . import inputs, marts as marts_mod, payloads
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_FILES = ("app.js", "style.css", "favicon.svg", "logo.svg")
-_STAMP_RE = re.compile(r'(href="(style\.css|favicon\.svg)|src="(app\.js))"')
+STATIC_FILES = (
+    "app.js",
+    "style.css",
+    "favicon.svg",
+    "logo.svg",
+    # uPlot is vendored so charts render offline (gh-129); LICENSE ships with it (MIT).
+    "vendor/uplot/uPlot.iife.min.js",
+    "vendor/uplot/uPlot.min.css",
+    "vendor/uplot/LICENSE",
+)
+_STAMP_RE = re.compile(
+    r'(href="(style\.css|favicon\.svg|vendor/uplot/uPlot\.min\.css)'
+    r'|src="(app\.js|vendor/uplot/uPlot\.iife\.min\.js))"'
+)
 
 
 def _has_pyarrow() -> bool:
@@ -80,6 +92,7 @@ def resolve_project(
 
 def _write_static(out: Path, stamp: str) -> None:
     for name in STATIC_FILES:
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(STATIC_DIR / name, out / name)
     index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     if stamp:
