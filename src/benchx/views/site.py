@@ -121,6 +121,42 @@ def _write_logs(runs: list[dict], data_dir: Path) -> int:
     return written
 
 
+def load_marts(
+    *,
+    store_path: str | Path | None = None,
+    results_paths: list[str | Path] | None = None,
+    runs_dir: str | Path | None = None,
+    repo: Path | None = None,
+    has_parquet_marts: bool = False,
+) -> tuple[dict, list[dict], str, dict | None]:
+    """Load view inputs and compute derived marts in memory without writing a site."""
+    chosen = sum(x is not None for x in (store_path, results_paths, runs_dir))
+    if chosen != 1:
+        raise inputs.ViewError("give exactly one of store_path, results_paths, or runs_dir")
+
+    outcome = None
+    if runs_dir is not None:
+        source = "runs"
+        runs, raw_points, ingest_problems = inputs.read_runs_dir(runs_dir)
+    elif results_paths is not None:
+        source = "results"
+        runs, raw_points, ingest_problems, outcome = inputs.read_results(
+            list(results_paths), repo=repo
+        )
+    else:
+        source = "store"
+        runs, raw_points, ingest_problems = inputs.read_store(store_path, repo=repo)
+
+    marts = marts_mod.build_marts(
+        runs,
+        raw_points,
+        ingest_problems=ingest_problems,
+        source=source,
+        has_parquet_marts=has_parquet_marts,
+    )
+    return marts, runs, source, outcome
+
+
 def build_site(
     out: Path,
     *,
@@ -155,27 +191,13 @@ def build_site(
     if views_format == "parquet":
         inputs._require_pyarrow("writing Parquet views")
 
-    outcome = None
-    if runs_dir is not None:
-        source = "runs"
-        runs, raw_points, ingest_problems = inputs.read_runs_dir(runs_dir)
-    elif results_paths is not None:
-        source = "results"
-        runs, raw_points, ingest_problems, outcome = inputs.read_results(
-            list(results_paths), repo=repo
-        )
-    else:
-        source = "store"
-        runs, raw_points, ingest_problems = inputs.read_store(store_path, repo=repo)
-
-    marts = marts_mod.build_marts(
-        runs,
-        raw_points,
-        ingest_problems=ingest_problems,
-        source=source,
+    marts, runs, source, outcome = load_marts(
+        store_path=store_path,
+        results_paths=results_paths,
+        runs_dir=runs_dir,
+        repo=repo,
         has_parquet_marts=emit_marts,
     )
-    del raw_points
     marts["manifest"]["views_format"] = views_format
 
     out = Path(out).resolve()

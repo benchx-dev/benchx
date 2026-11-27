@@ -225,19 +225,47 @@ class Store:
             _add_entities(found, doc, store_project(doc), projection)
         return {name: list(rows.values()) for name, rows in found.items()}
 
-    def series(self, workload=None, quantity=None, projection: Projection = identity.POLICY) -> list[dict]:
+    def series(
+        self,
+        workload=None,
+        quantity=None,
+        projection: Projection = identity.POLICY,
+        *,
+        include_conditions: bool = False,
+    ) -> list[dict]:
         rows = self.entities(projection).get("series", [])
-        return [s for s in rows if (workload is None or workload in s["workload"])
-                and (quantity is None or s["quantity"] == quantity)]
+        return [
+            s for s in rows
+            if (include_conditions or quantity is not None or s.get("kind", "measurand") != "condition")
+            and (workload is None or workload in s["workload"])
+            and (quantity is None or s["quantity"] == quantity)
+        ]
 
-    def history(self, fingerprint_prefix: str, projection: Projection = identity.POLICY) -> list[dict]:
+    def history(
+        self,
+        fingerprint_prefix: str,
+        projection: Projection = identity.POLICY,
+        *,
+        revision_order: dict[str, int] | None = None,
+    ) -> list[dict]:
         """A series' points in axis order, each with the ignored facts that
         changed since the point before it (§4.3). On the revision axis they
-        are listed by measurement start instead: the implementation has no revision
-        graph (schema §4.1)."""
+        are ordered by `revision_order` when a git graph supplies one, else by
+        measurement start (schema §4.1)."""
         points = [p for p in self.entities(projection).get("series_point", [])
                   if p["series_fingerprint"].startswith(fingerprint_prefix)]
-        points.sort(key=lambda p: (projection.order_key(tuple(p["axis"])), p["started_at"], p["ingest_key"]))
+        if revision_order:
+            fallback = len(revision_order) + 1
+            points.sort(
+                key=lambda p: (
+                    revision_order.get(p["revision"], fallback),
+                    projection.order_key(tuple(p["axis"])),
+                    p["started_at"],
+                    p["ingest_key"],
+                )
+            )
+        else:
+            points.sort(key=lambda p: (projection.order_key(tuple(p["axis"])), p["started_at"], p["ingest_key"]))
         previous = {}
         for point in points:
             ignored = point.pop("ignored")
@@ -379,11 +407,12 @@ def _add_entities(entities: dict, doc: dict, project: str, projection: Projectio
                         "fingerprint": core.sha256_hex(core.canonical(env_identity)),
                         "identity": core.canonical(env["identity"]).decode()})
     put("revision", {"source": doc["source"]["uri"], "key": doc["revision"]["key"]})
+    kind = doc["measurement"].get("kind", "measurand")
     for point in identity.points(doc, project, projection):
         put("series", {"fingerprint": point["series_fingerprint"],
                        "identity_schema": projection.identity_schema, "project": project,
                        "workload": coordinates["workload"]["name"], "parameters": parameters,
-                       "quantity": quantity["name"], "unit": quantity["unit"],
+                       "quantity": quantity["name"], "unit": quantity["unit"], "kind": kind,
                        "estimator": core.canonical(point["estimator"]).decode(),
                        "comparison_identity": core.canonical(point["identity"]).decode()})
         put("series_point", {"series_fingerprint": point["series_fingerprint"],
