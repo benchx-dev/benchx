@@ -19,6 +19,14 @@ Conventions:
   of the first command that fails and the commands after it do not run: put it last. The page
   has the fence without its `exit=1`: the site's fence parser does not take a key=value there.
   Python fences have no such marker: one that raises fails the run.
+- A sh/bash fence that ends with status 0 must also leave no failed result in the example's
+  store: `bx bench` exits 0 when a case fails, but it stores the result with its status. The
+  runner reads the store (`bx head --json`, run in the directory of the source file) before and
+  after the block, and a result that is new and has the status error, censored, partial or
+  skipped fails the run. The load-average results are not the benchmark's own and are left out.
+  A block marked `exit=N` with N other than 0 is not checked: it is meant to fail. Nothing is
+  checked where `bx` is not on the PATH. Only what is stored is seen: a run with --no-ingest, or
+  a store that the fence itself relocates (with BENCHX_HOME, say), is not.
 - The first `text` or `json` fence after an executable block is a committed output snapshot:
   it is left out of the page, and the output of the run is put after the block instead, in a
   fence of the same language (so the output of `cat config.json` is shown as JSON, once). Prose
@@ -40,8 +48,10 @@ the page only after every block has run: a failing block leaves no page.
 import argparse
 import contextlib
 import io
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import traceback
@@ -53,6 +63,10 @@ EXECUTABLE_LANGUAGES = {"sh", "bash", "python"}
 
 # The languages of a committed output snapshot, which the fresh output replaces.
 SNAPSHOT_LANGUAGES = {"text", "json"}
+
+# The statuses of a failed result. `skipped` is one too: an example runs where what it needs is
+# installed, so a skipped case means that something is missing.
+FAILED_STATUSES = {"error", "censored", "partial", "skipped"}
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -130,6 +144,53 @@ def without_prompts(code: str) -> str:
     return re.sub(r"(?m)^\$ ", "", code)
 
 
+def failed_results(workdir: Path) -> dict[str, str] | None:
+    """The failed results in the store of the example in `workdir`: what each says, by ingest key.
+
+    None where `bx` is not installed. `bx bench` exits 0 when a case fails, but it stores the
+    result with its status. The load-average results (a condition measurement, skipped where the
+    platform has no probe) are not the benchmark's own and are left out.
+    """
+    if shutil.which("bx") is None:
+        return None
+
+    done = subprocess.run(
+        ["bx", "head", "-n", str(10**9), "--json"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if done.returncode:
+        raise RuntimeError(
+            f"bx head could not read the store (status {done.returncode}): "
+            f"{(done.stderr or done.stdout).strip()}"
+        )
+
+    failed = {}
+
+    for line in done.stdout.splitlines():
+        result = json.loads(line)
+        measurement = result["measurement"]
+
+        if measurement["status"] not in FAILED_STATUSES or measurement.get("kind") == "condition":
+            continue
+
+        workload = result["coordinates"]["workload"]
+        parameters = ", ".join(f"{k}={v}" for k, v in (workload.get("parameters") or {}).items())
+        case = workload["name"] + (f" [{parameters}]" if parameters else "")
+        message = (result["provenance"].get("info") or {}).get("message")
+        said = f"{measurement['status']} ({measurement['reason']})" if "reason" in measurement else measurement["status"]
+
+        failed[result["ingest_key"]] = (
+            f"{result['provenance']['run_key']}: {case}, {measurement['quantity']['name']}: {said}"
+            + (f": {message}" if message else "")
+        )
+
+    return failed
+
+
 def execute_bash(
     code: str,
     workdir: Path,
@@ -138,9 +199,11 @@ def execute_bash(
 ) -> str:
     """Execute a complete Bash block and stream output to logs.
 
-    The block must end with the status `expected`: any other one raises.
+    The block must end with the status `expected`: any other one raises. A block that ends with 0
+    must not have added a failed result to the store either (see `failed_results`).
     """
     chunks = []
+    before = failed_results(workdir) if expected == 0 else None
 
     with logfile.open("w", encoding="utf-8") as log, subprocess.Popen(
         ["bash", "-e", "-o", "pipefail", "-c", code],
@@ -168,6 +231,15 @@ def execute_bash(
 
     if expected:
         print(f"[exit status {status}, as the block says]", flush=True)
+
+    if before is not None:
+        added = {key: said for key, said in failed_results(workdir).items() if key not in before}
+
+        if added:
+            raise RuntimeError(
+                f"Bash exited with status 0, but {len(added)} result(s) it stored failed:\n  "
+                + "\n  ".join(added.values())
+            )
 
     return "".join(chunks)
 

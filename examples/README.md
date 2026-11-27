@@ -19,8 +19,14 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
   heading or another fence before it, or another language (`jsonc`).
 - A README with no executable block is allowed: it is copied to the site as it is.
 - A block that exits non-zero, or a `python` block that raises, fails the example, and with it the
-  pull request's check. `bx bench` exits 0 when a benchmark case fails, so a script must assert on
-  its results itself, as `pyperf-suite/run.sh` does with its history count.
+  pull request's check.
+- `bx bench` exits 0 when a benchmark case fails, so the runner also reads the example's store before
+  and after each `sh` or `bash` block that ends with status 0. A block that stored a failed result
+  (error, censored, partial or skipped: a missing dependency is an error) fails the example, and
+  the message names the case. A block marked `exit=N` with N other than 0 is not checked, and an
+  example cannot show a failed case in its output. Only what is stored is seen: not a run with
+  `--no-ingest`. Any other check on the results (the number of points in a series, say) is a
+  command in the block that fails when it is wrong, as in section 7 of `pyperf-suite`.
 - A `sh` or `bash` block that is meant to fail, to show an error, says so: ```` ```bash exit=1 ````.
   It must then end with exactly that status: a 0, or any other status, fails the example just as
   an unexpected failure does, so the page cannot go on showing an error the code no longer gives.

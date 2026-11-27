@@ -6,6 +6,8 @@ benchx has no tools/ (`python -m pytest --pyargs benchx` runs this file from sit
 """
 
 import importlib.util
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -220,3 +222,117 @@ def test_the_command_line(repo):
     output.unlink()
     failed = subprocess.run(args, cwd=repo, capture_output=True, text=True, check=False)
     assert failed.returncode != 0 and "::error" in failed.stdout and not output.exists()
+
+
+# The failed results that `bx bench` leaves in the store while it exits 0. A `bx` of the tests
+# answers `bx head --json` with the lines of $FAKE_STORE, which a block writes to.
+
+
+@pytest.fixture
+def fake_bx(tmp_path, monkeypatch):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "bx").write_text(
+        '#!/bin/sh\n'
+        '[ "$1" = head ] || exit 64\n'
+        'if [ -n "$FAKE_BX_ERROR" ]; then echo "$FAKE_BX_ERROR" >&2; exit 2; fi\n'
+        'if [ -f "$FAKE_STORE" ]; then cat "$FAKE_STORE"; fi\n')
+    (scripts / "bx").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{scripts}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_STORE", str(tmp_path / "store.jsonl"))
+
+
+def result(status, case="bench_x", quantity="wall-time", reason=None, kind=None, message=None):
+    """One line of `bx head --json`, with the fields that the runner reads."""
+    measurement = {"status": status, "quantity": {"name": quantity}}
+    measurement.update({k: v for k, v in {"reason": reason, "kind": kind}.items() if v})
+    return json.dumps({
+        "ingest_key": f"r:{case}:{quantity}:{status}",
+        "provenance": {"run_key": "r", "info": {"message": message} if message else {}},
+        "coordinates": {"workload": {"name": case, "parameters": {"n": "10"}}},
+        "measurement": measurement})
+
+
+def stores(*lines):
+    """A block that appends to the store of the test, as `bx bench` does."""
+    return "printf '%s\\n' " + " ".join(f"'{line}'" for line in lines) + ' >> "$FAKE_STORE"'
+
+
+@pytest.mark.parametrize("status", ["error", "censored", "partial", "skipped"])
+def test_a_block_that_exits_0_but_stored_a_failed_result_fails_the_run(repo, fake_bx, status):
+    source = source_of(repo, f"```sh\n{stores(result(status, reason='harness.error', message='boom'))}\n```\n")
+    output = repo.parent / "out" / "ex.md"
+    with pytest.raises(RuntimeError, match=rf"status 0, but 1 result\(s\) it stored failed:\n  "
+                                           rf"r: bench_x \[n=10\], wall-time: {status} \(harness.error\): boom"):
+        runner.run(source, output, repo.parent / "logs")
+    assert not output.exists()
+
+
+def test_results_that_did_not_fail_and_the_load_average_do_not_fail_the_run(repo, fake_bx):
+    rows = [result("success"),
+            result("success", quantity="load-average", kind="condition"),
+            result("skipped", quantity="load-average", kind="condition", reason="probe-unavailable")]
+    page_of(repo, f"```sh\n{stores(*rows)}\n```\n")
+
+
+def test_a_failure_stored_before_a_block_is_not_blamed_on_it_and_a_marked_block_is_not_checked(repo, fake_bx):
+    page = page_of(repo, (
+        f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
+        f"```sh\n{stores(result('success', case='other'))}\n```\n"))
+    assert "exit=" not in page
+
+
+def test_a_new_failure_is_found_though_an_earlier_block_stored_one_too(repo, fake_bx):
+    source = source_of(repo, (
+        f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
+        f"```sh\n{stores(result('error', case='other'))}\n```\n"))
+    with pytest.raises(RuntimeError, match=r"1 result\(s\) it stored failed:\n  r: other "):
+        runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
+
+
+def test_a_store_that_bx_cannot_read_fails_the_block(repo, fake_bx, monkeypatch):
+    monkeypatch.setenv("FAKE_BX_ERROR", "requires pyarrow")
+    source = source_of(repo, "```sh\ntrue\n```\n")
+    with pytest.raises(RuntimeError, match=r"bx head could not read the store \(status 2\): requires pyarrow"):
+        runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
+
+
+def test_nothing_is_checked_where_bx_is_not_installed(repo, monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: None)
+    assert runner.failed_results(repo) is None
+    assert "```text\nhi\n```" in page_of(repo, "```sh\necho hi\n```\n")
+
+
+# With the real `bx` and pyperf, which also keeps the runner in step with the stored documents.
+
+
+@pytest.fixture
+def bench_example(repo, monkeypatch):
+    pytest.importorskip("pyperf")
+    scripts = Path(sys.executable).parent
+    if not (scripts / "bx").exists():
+        pytest.skip("bx is not installed next to this Python")
+    monkeypatch.setenv("PATH", f"{scripts}{os.pathsep}{os.environ['PATH']}")
+    example = repo / "examples" / "ex"
+    (example / "benchx.conf.json").write_text(json.dumps({
+        "schema_version": "benchx/config/0.1.0", "paths": {"store": "out/store.jsonl", "results": "out"}}))
+    (example / "bench_x.py").write_text(
+        "import importlib\n\n\n"
+        "def bench_ok():\n    sum(range(10))\n\n\n"
+        "def bench_needs_a_library():\n    importlib.import_module('no_such_library_for_the_test')\n")
+
+
+QUICK = "--processes 1 --values 1 --min-time 0.01"
+
+
+def test_a_case_that_bx_bench_could_not_measure_fails_the_run(bench_example, repo):
+    source = source_of(repo, f"```sh\nbx bench bench_x.py {QUICK} --run-key bad\n```\n")
+    with pytest.raises(RuntimeError, match=r"status 0, but \d+ result\(s\) it stored failed:\n"
+                                           r"  bad: bench_needs_a_library, wall-time: error \(harness.error\): "
+                                           r"ModuleNotFoundError: No module named 'no_such_library_for_the_test'"):
+        runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
+
+
+def test_cases_that_bx_bench_measured_pass(bench_example, repo):
+    page = page_of(repo, f"```sh\nbx bench bench_x.py bench_ok {QUICK} --run-key good\n```\n")
+    assert "bench_ok" in page and "success" in page
