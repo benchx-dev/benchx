@@ -51,6 +51,7 @@ jobs:
           - example: pyperf-suite
           - example: matmul-params
             requires: numpy torch --index-url https://download.pytorch.org/whl/cpu
+          - example: pandas-asv
     env:
       EXAMPLE: ${{ matrix.example }}
     steps:

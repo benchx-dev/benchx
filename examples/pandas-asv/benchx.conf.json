@@ -1,0 +1,17 @@
+{
+  "schema_version": "benchx/config/0.1.0",
+  "project": "pandas",
+  "adapter": {
+    "name": "asv",
+    "precision": {
+      "repetitions": { "mode": "fixed", "levels": [{ "unit": "process", "n": 2 }, { "unit": "value", "n": 5 }] },
+      "warmup": { "mode": "count", "n_warmup": 1 }
+    }
+  },
+  "collectors": {
+    "deps": {
+      "command": ["python", "{root}/describe_env.py"]
+    }
+  },
+  "paths": { "store": "out/store.parquet", "results": "out" }
+}
