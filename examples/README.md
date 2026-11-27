@@ -47,7 +47,7 @@ Each directory here is an example: a `README.md` and the files it uses. CI execu
 1. Create `examples/<name>/README.md` and its files.
 2. Add `<name>` to the matrix of the `examples` job in `.github/workflows/docs.yml`. Without it
    `tools/gen_docs.py --executed` stops, since the site would show the example unexecuted.
-3. Add a line for it under "Executed examples" in `docs/examples.md`.
+3. Add a line for it under "Worked examples of local benchmarking" in `docs/examples.md`.
 
 An example that needs more than `benchx` and `pyperf` (a compiler, another package) gets its own job in
 `docs.yml` instead of a matrix leg. The contract is the artifact: the job uploads `docs-<name>`

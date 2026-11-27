@@ -7,17 +7,20 @@ name: docs
 #             tools/execute_markdown.py, against this checkout of benchx, and uploads
 #             docs-<example>, the page that the site shows. A failing example is a red check.
 #   build     needs every example. Puts the pages in docs/generated/examples/, builds the site (strict).
-#   deploy    needs build. Only for a push to main.
+#   deploy    needs build. Only for a push to main, or a run by hand on main.
 #
 # It runs for every pull request. A push to main deploys only when it changes one of the paths
-# below. To add an example, see examples/README.md.
+# below: the pages show the output of benchx, so the package and what it depends on count. To add
+# an example, see examples/README.md.
 
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
-      - "src/benchx/schemas/**"
+      - "src/benchx/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - "tools/gen_docs.py"
       - "tools/execute_markdown.py"
       - "examples/**"
@@ -26,6 +29,7 @@ on:
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -140,7 +144,7 @@ jobs:
           path: site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
