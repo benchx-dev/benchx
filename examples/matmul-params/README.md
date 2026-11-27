@@ -65,9 +65,9 @@ We can select specific cases by either giving exact parameter values or a regex.
 the benchmark with string arguments, we have to use the quoted strings in CLI.
 
 ```
-$ bx bench bench_matmul.py bench_matmul  $QUICK                  # a function's name: all six
-$ bx bench bench_matmul.py "bench_matmul(100, 'torch')"  $QUICK  # one combination
-$ bx bench bench_matmul.py --filter "'torch'" $QUICK        # a regex: the three torch cases
+$ bx bench bench_matmul.py bench_matmul                  # a function's name: all six
+$ bx bench bench_matmul.py "bench_matmul(100, 'torch')"  # one combination
+$ bx bench bench_matmul.py --filter "'torch'"            # a regex: the three torch cases
 ```
 
 A regex is searched in `bench_matmul(10, 'torch')`, the function's name and the argument
@@ -84,7 +84,7 @@ We can of course, visually inspect the output above, and try to guesstimate the 
 `benchx` however provides a better way to perform a comparison and run a statistical analysis to come up with
 a _comparison verdict_ (faster, slower or indeterminate). The relevant CLI command is `bx compare`.
 
-## A first attempt (which fails)
+## A first attempt (that fails)
 
 We have already run benchmarks for both numpy and torch, can we use them to run the comparison via `bx compare`?
 First, we need to find out the *run key*. We did not specify it explicitly, thus it has been automatically
@@ -186,12 +186,76 @@ In general, for our quick-and-dirty setting, `$QUICK`, results are expected to s
 noise. A real comparison will need to use at least the default settings or actually larger number of rounds and values.
 
 
+### Show all comparison results, as a table
+
+The output above only shows "effects" and does not show actual timings. To show both, we could have
+added `--table --all` to the `bx compare` call. Given that we did not add it, we can rerun the
+comparison (but not the benchmarks themselves!) in the so-called *run mode*, where it pulls the
+data to compare from the store.
+
+First, instead of the benchmark suite, it needs the run key for the precomputed data.
+Then, we give it the same `--profile variants --vary xp` arguments to specify what to
+compare, and also we tell it which side is the baseline, `--baseline "'numpy'"`
+Taking it all together,
+
+```bash
+$ RUN=$(bx head -n 1 | awk 'NR==2 {print $4}') 
+$ bx compare --run $RUN --profile variants --vary xp --baseline "'numpy'" --tables --all
+```
+
+which first repeats the same information it gave without `--table`, and then emits
+the summary tables.
+
+```text
+run compare-20261127T180714Z  profile variants  baseline 'numpy'  contender 'torch'
+
+IMPROVED (3)
+  bench_matmul [n=50]              wall-time  effect  -64.67%  noise   1.85%  rounds=5
+  bench_matmul [n=100]             wall-time  effect  -68.11%  noise   1.35%  rounds=5
+  bench_matmul [n=200]             wall-time  effect  -42.49%  noise   2.05%  rounds=5
+
+NO CHANGE DETECTED (1)
+  bench_matmul [n=10]              wall-time  effect   -3.72%  noise   3.69%  rounds=5
+
+For local/gonzales xp='numpy' (5 rounds):
+bench_matmul  ok
+  ===== ============
+    n               
+  ----- ------------
+    10   2.92±0.4μs 
+    50    18.1±4μs  
+   100   49.4±10μs  
+   200    160±30μs  
+  ===== ============
+
+For local/gonzales xp='torch' (5 rounds):
+bench_matmul  ok
+  ===== ============
+    n               
+  ----- ------------
+    10   2.80±0.2μs 
+    50   6.42±0.5μs 
+   100    16.1±2μs  
+   200    95.6±9μs  
+  ===== ============
+
+| Change   | Before ['numpy']   | After ['torch']   |   Ratio |   Noise | Verdict            | Benchmark (Parameter)   |
+|----------|--------------------|-------------------|---------|---------|--------------------|-------------------------|
+|          | 2.92±0.4μs         | 2.80±0.2μs        |    0.96 |   3.69% | no change detected | bench_matmul(10)        |
+| -        | 18.1±4μs           | 6.42±0.5μs        |    0.35 |   1.85% | improved           | bench_matmul(50)        |
+| -        | 49.4±10μs          | 16.1±2μs          |    0.33 |   1.35% | improved           | bench_matmul(100)       |
+| -        | 160±30μs           | 95.6±9μs          |    0.60 |   2.05% | improved           | bench_matmul(200)       |
+```
+
+
 ## A manual loop + "run mode" comparisons.
 
 Above we used `bx compare` in the so-called *measure mode*, where it ran the benchmarks under the comparison schedule. An alternative, more
-manual, way is to run a loop over `bx bench` calls and then invoke `bx compare` in the *run mode*, where it pulls the data from the store.
-We need to handle alternating the sides manually: Each call runs one library, with `--filter`, as one side of a session; we use
-`--round` and `--slot` to place it into the comparison sequence, and `bx compare --run` compares the sides:
+manual, way is to run a loop over `bx bench` calls and then invoke `bx compare` in the *run mode*, as before.
+
+For the first step, we need to handle alternating the sides manually: Each call runs one library,
+with `--filter`, as one side of a session; we use `--round` and `--slot` to place it into the comparison sequence;
+we also need to specify the same run key for all calls, via the `--run-key` argument.
 
 ```
 for r in 0 1 2; do
