@@ -38,18 +38,24 @@ def verdicts(doc) -> dict:
 def revisions_run(repo, tmp):
     base = make_build(tmp / "build-base", repo["wt-base"], cases())
     head = make_build(tmp / "build-head", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3))
-    out = run_rounds(tmp, [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
-                     rounds=6, run_key="rev-1", out=tmp / "results-rev")
+    out = run_rounds(
+        tmp,
+        [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        rounds=6,
+        run_key="rev-1",
+        out=tmp / "results-rev",
+    )
     return out
 
 
 @pytest.fixture
 def environments_run(repo, tmp):
     plain = make_build(tmp / "build-plain", repo["wt-head"], cases())
-    hardened = make_build(tmp / "build-hardened", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3),
-                          hardened=True)
-    sides = [{"build": plain, "source": repo["wt-head"], "labels": {"build": "plain"}},
-             {"build": hardened, "source": repo["wt-head"], "labels": {"build": "hardened"}}]
+    hardened = make_build(tmp / "build-hardened", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3), hardened=True)
+    sides = [
+        {"build": plain, "source": repo["wt-head"], "labels": {"build": "plain"}},
+        {"build": hardened, "source": repo["wt-head"], "labels": {"build": "hardened"}},
+    ]
     return run_rounds(tmp, sides, rounds=6, run_key="env-1", out=tmp / "results-env")
 
 
@@ -77,8 +83,7 @@ def test_results_are_valid_documents(revisions_run):
 def test_revisions_profile(revisions_run, repo, tmp):
     store = Store(tmp / "store.parquet")
     assert store.ingest_paths([revisions_run])["ingested"] == 48  # with the load averages
-    doc = compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions",
-                          baseline=repo["base"][:10])
+    doc = compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions", baseline=repo["base"][:10])
     assert core.check(doc, "comparison-document") == []
     assert doc["failed_invariants"] == [] and doc["missing"] == []
     # criterion 5: +2% on a quiet benchmark flags, +3% on a noisy one does not
@@ -91,8 +96,9 @@ def test_revisions_profile(revisions_run, repo, tmp):
 def test_environments_profile(environments_run, tmp):
     store = Store(tmp / "store.parquet")
     store.ingest_paths([environments_run])
-    doc = compare.compare(store.documents("env-1"), run_key="env-1", profile="environments", label="build",
-                          baseline="plain")
+    doc = compare.compare(
+        store.documents("env-1"), run_key="env-1", profile="environments", label="build", baseline="plain"
+    )
     assert doc["sides"]["varying"] == "provenance.labels.build"
     assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
@@ -100,9 +106,16 @@ def test_environments_profile(environments_run, tmp):
 def test_environments_needs_a_real_difference(repo, tmp):
     a = make_build(tmp / "a", repo["wt-head"], cases())
     b = make_build(tmp / "b", repo["wt-head"], cases())
-    out = run_rounds(tmp, [{"build": a, "source": repo["wt-head"], "labels": {"build": "a"}},
-                           {"build": b, "source": repo["wt-head"], "labels": {"build": "b"}}],
-                     rounds=3, run_key="same", out=tmp / "same")
+    out = run_rounds(
+        tmp,
+        [
+            {"build": a, "source": repo["wt-head"], "labels": {"build": "a"}},
+            {"build": b, "source": repo["wt-head"], "labels": {"build": "b"}},
+        ],
+        rounds=3,
+        run_key="same",
+        out=tmp / "same",
+    )
     doc = compare.compare(results(out), run_key="same", profile="environments", label="build", baseline="a")
     assert core.check(doc, "comparison-document") == []
     assert [f["invariant"] for f in doc["failed_invariants"]] == ["sides-differ"]
@@ -127,8 +140,10 @@ def test_ingest_contract(revisions_run, tmp):
     # criterion 3: a conflicting unit is rejected with its taxonomy code
     assert attempt(lambda d: d["measurement"]["quantity"].update(unit="ms"), ":ms") == "unit-conflict"
     assert attempt(lambda d: d["coordinates"]["workload"].update(name="other"), ":moved") == "attempt-conflict"
-    assert attempt(lambda d: d["coordinates"]["subject"]["components"][0].update(
-        source="https://elsewhere.org/x"), ":src") == "identity-violation"
+    assert (
+        attempt(lambda d: d["coordinates"]["subject"]["components"][0].update(source="https://elsewhere.org/x"), ":src")
+        == "identity-violation"
+    )
     same_key = json.loads(json.dumps(doc))
     same_key["measurement"]["observations"][0] *= 2
     assert store.ingest([("y.json", json.dumps(same_key))])["rejected"][0]["code"] == "idempotency-conflict"
@@ -143,8 +158,9 @@ def test_same_document_from_any_store(revisions_run, repo, tmp):
     for name in ("persistent", "throwaway"):
         store = Store(tmp / f"{name}.parquet")
         store.ingest_paths([revisions_run])
-        documents.append(compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions",
-                                         baseline=repo["base"]))
+        documents.append(
+            compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions", baseline=repo["base"])
+        )
     assert documents[0] == documents[1]
 
 
@@ -158,16 +174,22 @@ def test_traceability(revisions_run, tmp):
         assert store.order(doc["provenance"]["info"]["workorder_ref"])["run_key"] == "rev-1"
     comparison = compare.compare(docs, run_key="rev-1", profile="revisions", baseline=docs[0]["revision"]["key"])
     measured = [d for d in docs if d["measurement"]["quantity"]["name"] != "load-average"]
-    assert {(i["producer"], i["ingest_key"]) for i in comparison["inputs"]} == \
-        {(d["producer"]["name"], d["ingest_key"]) for d in measured}
+    assert {(i["producer"], i["ingest_key"]) for i in comparison["inputs"]} == {
+        (d["producer"]["name"], d["ingest_key"]) for d in measured
+    }
 
 
 def test_missing_and_unequal(repo, tmp):
     """Criterion 4: a variant on one side only is reported, never dropped."""
     base = make_build(tmp / "b1", repo["wt-base"], cases())
     head = make_build(tmp / "b2", repo["wt-head"], {QUIET: cases()[QUIET]})
-    out = run_rounds(tmp, [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
-                     rounds=3, run_key="miss", out=tmp / "miss")
+    out = run_rounds(
+        tmp,
+        [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        rounds=3,
+        run_key="miss",
+        out=tmp / "miss",
+    )
     doc = compare.compare(results(out), run_key="miss", profile="revisions", baseline=repo["base"])
     assert doc["missing"] == [{"workload": {"name": NOISY}, "quantity": "wall-time", "side": "contender"}]
     assert QUIET in verdicts(doc)
@@ -176,8 +198,9 @@ def test_missing_and_unequal(repo, tmp):
 def test_alternation_is_checked(repo, tmp):
     base = make_build(tmp / "b1", repo["wt-base"], cases())
     head = make_build(tmp / "b2", repo["wt-head"], cases())
-    for slot, (build, source) in enumerate([(base, "wt-base"), (base, "wt-base"), (head, "wt-head"),
-                                            (head, "wt-head")]):
+    for slot, (build, source) in enumerate(
+        [(base, "wt-base"), (base, "wt-base"), (head, "wt-head"), (head, "wt-head")]
+    ):
         path = tmp / f"o{slot}.json"
         path.write_text(json.dumps(order(build, repo[source], "seq", round=slot % 2, slot=slot)))
         runner.run(path, tmp / "seq")
@@ -195,26 +218,35 @@ def _dirty_run(repo, tmp, profile_sides, run_key):
 @requires_pyarrow
 def test_ad_hoc_is_thin_and_a_dirty_run_is_accepted(repo, tmp):
     """Criterion 7: no project, no configuration; a dirty single run is recorded as dirty (UC-01)."""
-    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
-                                                     {"build": head, "source": repo["wt-head"]}], "adhoc")
+    out = _dirty_run(
+        repo,
+        tmp,
+        lambda base, head: [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        "adhoc",
+    )
     docs = results(out)
     assert all("project" not in d for d in docs)
     assert {d["provenance"]["subject_dirty"] for d in docs} == {"clean", "dirty"}
     store = Store(tmp / "store.parquet")
     assert store.ingest_paths([out])["rejected"] == []
-    assert {s["project"] for s in store.series()} == {f"local/{docs[0]['coordinates']['environment']['identity']['runner']}"}
+    assert {s["project"] for s in store.series()} == {
+        f"local/{docs[0]['coordinates']['environment']['identity']['runner']}"
+    }
 
 
 @requires_pyarrow
 def test_revisions_labels_a_dirty_side_local_only(repo, tmp):
     """Criterion 7, UC-03 §10: a revisions comparison with a dirty side is compared and labeled
     local-only, and the sides that are not clean are named."""
-    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
-                                                     {"build": head, "source": repo["wt-head"]}], "dirty-rev")
+    out = _dirty_run(
+        repo,
+        tmp,
+        lambda base, head: [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        "dirty-rev",
+    )
     store = Store(tmp / "store.parquet")
     store.ingest_paths([out])
-    doc = compare.compare(store.documents("dirty-rev"), run_key="dirty-rev", profile="revisions",
-                          baseline=repo["base"])
+    doc = compare.compare(store.documents("dirty-rev"), run_key="dirty-rev", profile="revisions", baseline=repo["base"])
     assert doc["failed_invariants"] == [] and doc["local_only"] is True
     assert doc["units"] and core.check(doc, "comparison-document") == []
     caveats = {c for u in doc["units"] for c in u.get("caveats", [])}
@@ -227,22 +259,36 @@ def test_revisions_labels_a_dirty_side_local_only(repo, tmp):
 @requires_pyarrow
 def test_environments_labels_a_dirty_side_local_only(repo, tmp):
     """Criterion 7, schema §5.5: the environments profile still allows a dirty side, labeled."""
-    out = _dirty_run(repo, tmp, lambda base, head: [
-        {"build": base, "source": repo["wt-head"], "labels": {"build": "a"}},
-        {"build": make_build(tmp / "b3", repo["wt-head"], cases(quiet=1.02e-3), hardened=True),
-         "source": repo["wt-head"], "labels": {"build": "b"}}], "dirty-env")
+    out = _dirty_run(
+        repo,
+        tmp,
+        lambda base, head: [
+            {"build": base, "source": repo["wt-head"], "labels": {"build": "a"}},
+            {
+                "build": make_build(tmp / "b3", repo["wt-head"], cases(quiet=1.02e-3), hardened=True),
+                "source": repo["wt-head"],
+                "labels": {"build": "b"},
+            },
+        ],
+        "dirty-env",
+    )
     store = Store(tmp / "store.parquet")
     store.ingest_paths([out])
-    doc = compare.compare(store.documents("dirty-env"), run_key="dirty-env", profile="environments",
-                          label="build", baseline="a")
+    doc = compare.compare(
+        store.documents("dirty-env"), run_key="dirty-env", profile="environments", label="build", baseline="a"
+    )
     assert doc["failed_invariants"] == [] and doc["local_only"] is True
     assert doc["units"]
 
 
 def test_a_dirty_result_carries_the_dirty_warnings_and_a_clean_one_does_not(repo, tmp):
     """Schema §4.1: a quality warning for each flag that is `dirty`; none for a clean result or a condition."""
-    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
-                                                     {"build": head, "source": repo["wt-head"]}], "warned")
+    out = _dirty_run(
+        repo,
+        tmp,
+        lambda base, head: [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        "warned",
+    )
     seen = {}
     for d in results(out):
         assert core.check(d, "measurement-result") == []
@@ -278,8 +324,12 @@ def test_a_single_run_records_an_unknown_tree_without_a_tree_id(repo, tmp):
 @requires_pyarrow
 def test_head_and_history_show_the_dirty_warnings(repo, tmp, capsys):
     """Q7: the listings mark a dirty result and leave a clean one unmarked."""
-    out = _dirty_run(repo, tmp, lambda base, head: [{"build": base, "source": repo["wt-base"]},
-                                                     {"build": head, "source": repo["wt-head"]}], "listed")
+    out = _dirty_run(
+        repo,
+        tmp,
+        lambda base, head: [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
+        "listed",
+    )
     store = Store(tmp / "store.parquet")
     store.ingest_paths([out])
     marker = "[dirty-subject-tree, dirty-benchmark-tree]"
@@ -288,8 +338,9 @@ def test_head_and_history_show_the_dirty_warnings(repo, tmp, capsys):
     assert cli.main(["head", "-n", "50"]) == cli.EXIT_OK
     rows = capsys.readouterr().out.splitlines()[1:]
     assert any(marker in row for row in rows) and any(marker not in row for row in rows)
-    series = [x for x in store.series(workload=QUIET, quantity="wall-time")
-              if json.loads(x["estimator"]) == identity.MEDIAN]
+    series = [
+        x for x in store.series(workload=QUIET, quantity="wall-time") if json.loads(x["estimator"]) == identity.MEDIAN
+    ]
     assert cli.main(["history", series[0]["fingerprint"][:12]]) == cli.EXIT_OK
     points = capsys.readouterr().out.splitlines()[1:]
     assert any(marker in point for point in points) and any(marker not in point for point in points)
@@ -305,7 +356,10 @@ def test_tracked_series_and_history(revisions_run, tmp):
     assert len(medians) == 1 and medians[0]["identity_schema"] == "benchx/benchx-identity/v1"
     # Google Benchmark's own median is a different estimator, so a different series
     assert {json.loads(s["estimator"])["method_version"] for s in series} == {
-        "benchx/median/v1", "google-benchmark/median", "google-benchmark/mean"}
+        "benchx/median/v1",
+        "google-benchmark/median",
+        "google-benchmark/mean",
+    }
     points = store.history(medians[0]["fingerprint"][:12])
     assert len(points) == 12
     # an ignored fact that changes along the series is flagged on the point (schema §4.3)
@@ -319,16 +373,20 @@ def test_another_projection_on_request(revisions_run, tmp):
     store = Store(tmp / "store.parquet")
     store.ingest_paths([revisions_run])
     profile = compare.PROFILES["revisions"]
-    medians = [s for s in store.series(workload=QUIET, quantity="wall-time", projection=profile)
-               if json.loads(s["estimator"]) == identity.MEDIAN]
+    medians = [
+        s
+        for s in store.series(workload=QUIET, quantity="wall-time", projection=profile)
+        if json.loads(s["estimator"]) == identity.MEDIAN
+    ]
     assert len(medians) == 1 and medians[0]["identity_schema"] == profile.identity_schema
     points = store.history(medians[0]["fingerprint"], profile)
     assert len(points) == 12 and len({tuple(p["axis"]) for p in points}) == 2
 
 
 def test_failures_are_results(repo, tmp):
-    build = make_build(tmp / "b", repo["wt-head"], cases(), error=["BM_Broken"], skip=["BM_Skipped"],
-                       sleep={"BM_Slow": 3})
+    build = make_build(
+        tmp / "b", repo["wt-head"], cases(), error=["BM_Broken"], skip=["BM_Skipped"], sleep={"BM_Slow": 3}
+    )
     path = tmp / "o.json"
     path.write_text(json.dumps(order(build, repo["wt-head"], "fail", timeout_seconds=1)))
     runner.run(path, tmp / "fail")
@@ -339,24 +397,52 @@ def test_failures_are_results(repo, tmp):
     assert by_case["BM_Slow"]["procedure"]["timeout_seconds"] == 1
 
 
-@pytest.mark.parametrize("change, message", [
-    (lambda o: o["precision"].update(warmup={"mode": "count", "n_warmup": 2}), "warmup"),
-    (lambda o: o.update(target={"kind": "artifact", "uri": "file:///tmp/x", "sha256": "0" * 64,
-                                "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "abc"}),
-     "build and working_tree targets"),
-    (lambda o: o.update(target={"kind": "revision", "source": {"uri": SOURCE_URI, "type": "git"},
-                                "revision": "deadbeef"}), "malformed at /target"),  # the runner never builds
-    (lambda o: o.update(environment_policy={"name": "laptop-default", "version": "1.0.0"}),
-     "environment_policy is deferred"),
-    (lambda o: o.update(build={"type": "release"}), "build is deferred"),
-    (lambda o: o.update(components=[{"name": "numpy", "role": "dependency", "revision": "abc",
-                                     "source": {"uri": SOURCE_URI, "type": "git"}}]),
-     "components is deferred"),
-    (lambda o: o.update(schedule={"kind": "alternating"}), "schedule is deferred"),
-    (lambda o: o["suites"][0].update(suite="missing-binary"), "not found"),
-    (lambda o: o.update(quantities=["peak-rss"]), "quantities"),
-    (lambda o: o.update(surprise=1), "'surprise' was unexpected"),
-])
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda o: o["precision"].update(warmup={"mode": "count", "n_warmup": 2}), "warmup"),
+        (
+            lambda o: o.update(
+                target={
+                    "kind": "artifact",
+                    "uri": "file:///tmp/x",
+                    "sha256": "0" * 64,
+                    "source": {"uri": SOURCE_URI, "type": "git"},
+                    "revision": "abc",
+                }
+            ),
+            "build and working_tree targets",
+        ),
+        (
+            lambda o: o.update(
+                target={"kind": "revision", "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "deadbeef"}
+            ),
+            "malformed at /target",
+        ),  # the runner never builds
+        (
+            lambda o: o.update(environment_policy={"name": "laptop-default", "version": "1.0.0"}),
+            "environment_policy is deferred",
+        ),
+        (lambda o: o.update(build={"type": "release"}), "build is deferred"),
+        (
+            lambda o: o.update(
+                components=[
+                    {
+                        "name": "numpy",
+                        "role": "dependency",
+                        "revision": "abc",
+                        "source": {"uri": SOURCE_URI, "type": "git"},
+                    }
+                ]
+            ),
+            "components is deferred",
+        ),
+        (lambda o: o.update(schedule={"kind": "alternating"}), "schedule is deferred"),
+        (lambda o: o["suites"][0].update(suite="missing-binary"), "not found"),
+        (lambda o: o.update(quantities=["peak-rss"]), "quantities"),
+        (lambda o: o.update(surprise=1), "'surprise' was unexpected"),
+    ],
+)
 def test_refusals(repo, tmp, change, message):
     build = make_build(tmp / "b", repo["wt-head"], cases())
     document = order(build, repo["wt-head"], "refused")
@@ -388,16 +474,23 @@ def test_every_refusal_is_reported(repo, tmp):
     ]
 
 
-@pytest.mark.parametrize("script, message", [
-    ("#!/bin/sh\necho 'cannot open the dataset' >&2\nexit 3\n",
-     "demo-bench failed to list its benchmarks: exit status 3: cannot open the dataset"),
-    ("#!/bin/sh\nexit 1\n", "demo-bench failed to list its benchmarks: exit status 1: no message"),
-    ("\x00\x01 not a program", "cannot run demo-bench to list its benchmarks: "),
-], ids=["exits-3-with-a-message", "exits-1-silently", "cannot-start"])
+@pytest.mark.parametrize(
+    "script, message",
+    [
+        (
+            "#!/bin/sh\necho 'cannot open the dataset' >&2\nexit 3\n",
+            "demo-bench failed to list its benchmarks: exit status 3: cannot open the dataset",
+        ),
+        ("#!/bin/sh\nexit 1\n", "demo-bench failed to list its benchmarks: exit status 1: no message"),
+        ("\x00\x01 not a program", "cannot run demo-bench to list its benchmarks: "),
+    ],
+    ids=["exits-3-with-a-message", "exits-1-silently", "cannot-start"],
+)
 def test_a_binary_that_cannot_list_its_benchmarks_is_a_refusal(repo, tmp, capsys, script, message):
     """The planned cases come from asking the binary, so one that fails or cannot start cannot be
     planned: the order is refused with what it said, before any case runs, not with a traceback."""
     from benchx import cli
+
     build = make_build(tmp / "b", repo["wt-head"], cases())
     (build / "demo-bench").write_bytes(script.encode())
     path = tmp / "o.json"
@@ -412,6 +505,7 @@ def test_a_binary_that_cannot_list_its_benchmarks_is_a_refusal(repo, tmp, capsys
 def test_a_filter_that_selects_no_case_is_a_refusal(repo, tmp, capsys):
     """Nothing to run is not a success: a typo in the filter would end in `0 result(s)` and exit 0."""
     from benchx import cli
+
     build = make_build(tmp / "b", repo["wt-head"], cases())
     document = order(build, repo["wt-head"], "nocase")
     document["suites"][0]["filter"] = "^BM_NoSuch$"
@@ -441,6 +535,7 @@ def test_invalid_order_is_refused_with_its_document_errors(repo, tmp):
     problems = refused(tmp, document)
     assert {type(problem) for problem in problems} == {StructureError}
     assert {problem.path for problem in problems} == {(), ("run_key",)}
+
 
 def test_source_found_through_cmake_cache(repo, tmp):
     build = make_build(tmp / "b", repo["wt-head"], cases())
@@ -531,8 +626,16 @@ def test_entities_auto_create(revisions_run, tmp):
     store.ingest_paths([revisions_run])
     assert [p.name for p in tmp.glob("store*")] == ["store.parquet"]
     entities = store.entities()
-    assert set(entities) == {"project", "source", "workload_variant", "quantity", "environment", "revision",
-                             "series", "series_point"}
+    assert set(entities) == {
+        "project",
+        "source",
+        "workload_variant",
+        "quantity",
+        "environment",
+        "revision",
+        "series",
+        "series_point",
+    }
     assert len(entities["revision"]) == 2
 
 
@@ -541,6 +644,7 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
     """Schema §5.4: a batch is N independent documents with N outcomes. A file that is
     not UTF-8, or is not there, is rejected as malformed, and the rest is ingested."""
     from benchx import cli
+
     sweep = tmp / "sweep"
     sweep.mkdir()
     (sweep / "good.json").write_text(json.dumps(adhoc))
@@ -567,6 +671,7 @@ def test_a_file_that_cannot_be_read_is_one_rejection_not_a_crash(adhoc, tmp, cap
 def test_reads_files_from_an_older_schema(revisions_run, tmp):
     """A store written before a column existed takes new rows; old ones read the column as null."""
     import pyarrow.parquet as pq
+
     files = sorted(p for p in revisions_run.glob("*.json") if not p.name.startswith("workorder-"))
     store = Store(tmp / "store.parquet")
     store.ingest_paths(files[:10])
@@ -604,6 +709,7 @@ def test_head(revisions_run, tmp):
 def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     """bx run writes result files and ingests exactly those into the one local store."""
     from benchx import cli
+
     build = make_build(tmp / "b", repo["wt-head"], cases())
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
@@ -620,8 +726,12 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
 
 def _working_tree_order(path, run_key, **target):
     document = order(path, None, run_key)
-    document["target"] = {"kind": "working_tree", "path": str(path),
-                          "source": {"uri": SOURCE_URI, "type": "git"}, **target}
+    document["target"] = {
+        "kind": "working_tree",
+        "path": str(path),
+        "source": {"uri": SOURCE_URI, "type": "git"},
+        **target,
+    }
     return document
 
 

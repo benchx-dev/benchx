@@ -33,8 +33,10 @@ def test_the_identity_policy_is_valid_and_pinned_to_its_name():
     the policy `benchx/benchx-identity/v1` names. Change both together."""
     assert validate(identity.POLICY_DATA) == []
     assert identity.IDENTITY_SCHEMA == "benchx/benchx-identity/v1"
-    assert core.sha256_hex(core.canonical(identity.POLICY_DATA)) == \
-        "8145df7d88c994ad86a47f190cff42a5e84da8c3744fd6cf9d708bbcafcecd1d"
+    assert (
+        core.sha256_hex(core.canonical(identity.POLICY_DATA))
+        == "8145df7d88c994ad86a47f190cff42a5e84da8c3744fd6cf9d708bbcafcecd1d"
+    )
 
 
 def test_adding_an_estimator_leaves_the_policy_and_its_series_alone():
@@ -71,33 +73,62 @@ def test_a_policy_normalizes_before_matching():
 
 
 def test_the_longest_path_wins_and_the_axis_wins_over_any_role():
-    sweep = Projection(DEFAULT, ["/coordinates/environment/system/os/kernel"],
-                       profile="test/kernel-sweep/v1", paths={"/provenance/subject_tree": "match"})
+    sweep = Projection(
+        DEFAULT,
+        ["/coordinates/environment/system/os/kernel"],
+        profile="test/kernel-sweep/v1",
+        paths={"/provenance/subject_tree": "match"},
+    )
     applied = sweep.apply(ARROW)
     assert applied.axis == ("6.8.0-31-generic",)
     assert "/coordinates/environment/system/os/kernel" not in applied.ignored
-    p = history({**DEFAULT, "paths": {"/coordinates/environment/system": "ignore",
-                                      "/coordinates/environment/system/runtime": "match"}})
+    p = history(
+        {
+            **DEFAULT,
+            "paths": {"/coordinates/environment/system": "ignore", "/coordinates/environment/system/runtime": "match"},
+        }
+    )
     assert "/coordinates/environment/system/runtime" in p.apply(ARROW).identity
 
 
 def test_points_along_a_value_axis_are_in_natural_order():
     """Sizes by value and versions as people read them, not as JSON text,
     where 1000 sorts before 20 and kernel 6.10 before 6.8."""
-    sizes = Projection(DEFAULT, ["/coordinates/workload/parameters/size"], profile="test/size-sweep/v1",
-                       paths={"/provenance/subject_tree": "match"})
+    sizes = Projection(
+        DEFAULT,
+        ["/coordinates/workload/parameters/size"],
+        profile="test/size-sweep/v1",
+        paths={"/provenance/subject_tree": "match"},
+    )
     assert sorted([1000, 20, 100, None, 2.5], key=lambda v: sizes.order_key((v,))) == [2.5, 20, 100, 1000, None]
-    kernels = Projection(DEFAULT, ["/coordinates/environment/system/os/kernel"], profile="test/kernel-sweep/v1",
-                         paths={"/provenance/subject_tree": "match"})
+    kernels = Projection(
+        DEFAULT,
+        ["/coordinates/environment/system/os/kernel"],
+        profile="test/kernel-sweep/v1",
+        paths={"/provenance/subject_tree": "match"},
+    )
     found = ["6.10.0-1-generic", "6.8.0-31-generic", "6.8.0-4-generic", "5.15.0"]
-    assert sorted(found, key=lambda v: kernels.order_key((v,))) == \
-        ["5.15.0", "6.8.0-4-generic", "6.8.0-31-generic", "6.10.0-1-generic"]
+    assert sorted(found, key=lambda v: kernels.order_key((v,))) == [
+        "5.15.0",
+        "6.8.0-4-generic",
+        "6.8.0-31-generic",
+        "6.10.0-1-generic",
+    ]
     # Values of different kinds, and several axis parts, still order without error.
-    two = Projection(DEFAULT, ["/coordinates/workload/parameters/role", "/coordinates/workload/parameters/size"],
-                     profile="test/two-factor/v1", paths={"/provenance/subject_tree": "match"})
+    two = Projection(
+        DEFAULT,
+        ["/coordinates/workload/parameters/role", "/coordinates/workload/parameters/size"],
+        profile="test/two-factor/v1",
+        paths={"/provenance/subject_tree": "match"},
+    )
     points = [("variant", 100), ("baseline", 1000), ("baseline", 20), ("variant", "x"), ("baseline", {"n": 1})]
-    assert sorted(points, key=two.order_key) == \
-        [("baseline", 20), ("baseline", 1000), ("baseline", {"n": 1}), ("variant", 100), ("variant", "x")]
+    assert sorted(points, key=two.order_key) == [
+        ("baseline", 20),
+        ("baseline", 1000),
+        ("baseline", {"n": 1}),
+        ("variant", 100),
+        ("variant", "x"),
+    ]
 
 
 def test_null_never_equals_anything():
@@ -116,11 +147,14 @@ def test_named_only_facts_are_considered_only_when_named():
     assert "/provenance/subject_tree" in compare.PROFILES["environments"].apply(ARROW).identity
 
 
-@pytest.mark.parametrize("axis, paths, message", [
-    (["/coordinates/environment/system/os/kernel"], None, "must match /provenance/subject_tree"),
-    (["/revision/key"], {"/provenance/run_key": "match"}, "not a reported coordinate"),
-    (["/provenance/info/x"], None, "outside"),
-])
+@pytest.mark.parametrize(
+    "axis, paths, message",
+    [
+        (["/coordinates/environment/system/os/kernel"], None, "must match /provenance/subject_tree"),
+        (["/revision/key"], {"/provenance/run_key": "match"}, "not a reported coordinate"),
+        (["/provenance/info/x"], None, "outside"),
+    ],
+)
 def test_projections_that_break_a_rule_are_refused(axis, paths, message):
     with pytest.raises(ProjectionError, match=message):
         Projection(DEFAULT, axis, profile="test/v1", paths=paths)
@@ -132,8 +166,9 @@ def test_a_profile_is_named_after_itself_and_its_policy():
     assert revisions.identity_schema == "benchx/profile/revisions/v1+benchx/benchx-identity/v1"
     a, b = history(), history({**DEFAULT, "identity_schema": "benchx/default/v2"})
     assert a.apply(ARROW).identity == b.apply(ARROW).identity
-    assert a.series_fingerprint(a.apply(ARROW), "wall-time", identity.MEDIAN) != \
-        b.series_fingerprint(b.apply(ARROW), "wall-time", identity.MEDIAN)
+    assert a.series_fingerprint(a.apply(ARROW), "wall-time", identity.MEDIAN) != b.series_fingerprint(
+        b.apply(ARROW), "wall-time", identity.MEDIAN
+    )
 
 
 def test_the_variants_profile_follows_one_workload_parameter():
@@ -169,8 +204,9 @@ def test_the_quantity_is_never_a_coordinate():
     other = copy.deepcopy(ARROW)
     other["measurement"]["quantity"] = {"name": "cpu-time", "unit": "s"}
     assert history().apply(ARROW).identity == history().apply(other).identity
-    assert identity.series_fingerprint(ARROW, "arrow", identity.MEDIAN, history()) != \
-        identity.series_fingerprint(other, "arrow", identity.MEDIAN, history())
+    assert identity.series_fingerprint(ARROW, "arrow", identity.MEDIAN, history()) != identity.series_fingerprint(
+        other, "arrow", identity.MEDIAN, history()
+    )
 
 
 def test_what_a_result_said_is_its_first_line_cut_to_a_width():

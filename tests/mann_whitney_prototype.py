@@ -21,7 +21,7 @@ def _doubled_midranks(pooled: list[float]) -> list[int]:
         j = i
         while j + 1 < len(order) and pooled[order[j + 1]] == pooled[order[i]]:
             j += 1
-        for position in order[i:j + 1]:
+        for position in order[i : j + 1]:
             ranks[position] = i + j + 2  # (i + 1 + j + 1) / 2, doubled
         i = j + 1
     return ranks
@@ -67,10 +67,19 @@ class MannWhitney(Method):
         "additionalProperties": False,
         "required": ["attempts"],
         "properties": {
-            "attempts": {"description": "Usable attempts per side, the reference side first",
-                         "type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2},
-            "smallest_p": {"description": "The smallest two-sided p-value this many attempts can reach",
-                           "type": "number", "minimum": 0, "maximum": 1},
+            "attempts": {
+                "description": "Usable attempts per side, the reference side first",
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+            "smallest_p": {
+                "description": "The smallest two-sided p-value this many attempts can reach",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+            },
             "reference_estimate": {"description": "Median of the reference side's estimates", "type": "number"},
             "u": {"description": "Mann-Whitney U of the target side", "type": "number", "minimum": 0},
             "p_value": {"type": "number", "minimum": 0, "maximum": 1},
@@ -104,8 +113,11 @@ class MannWhitney(Method):
         u, p = rank_test(before, after)
         details.update(u=u, p_value=p)
         shift = u - n * m / 2  # an exact tie has no direction, so it is no change whatever alpha says
-        verdict = (change_label(shift, evidence.quantity.get("direction")) if p <= config["alpha"] and shift
-                   else "no-change-detected")
+        verdict = (
+            change_label(shift, evidence.quantity.get("direction"))
+            if p <= config["alpha"] and shift
+            else "no-change-detected"
+        )
         effect = None if center == 0 else {"measure": "relative-median", "value": statistics.median(after) / center - 1}
         return Assessment(verdict, effect=effect, used=used, excluded=excluded, details=details)
 

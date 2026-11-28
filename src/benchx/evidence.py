@@ -40,24 +40,26 @@ def result_ref(doc: dict) -> dict:
 class Row:
     """One attempt's estimate. A row with an `exclusion` stays in the table,
     since it still says how the run was designed, but no method sees it."""
-    result: dict                 # producer and ingest_key
-    side: str                    # as the selector names it, such as baseline or target
-    columns: dict                # column name -> value, None where the result has none
+
+    result: dict  # producer and ingest_key
+    side: str  # as the selector names it, such as baseline or target
+    columns: dict  # column name -> value, None where the result has none
     estimate: float | None = None
     observations: tuple = ()
     exclusion: str | None = None
-    status: str = "success"      # how the attempt ended (schema §5.1)
+    status: str = "success"  # how the attempt ended (schema §5.1)
 
 
 @dataclass(frozen=True)
 class Evidence:
     """One unit: the rows of one series, and what the selector knows about them."""
-    series: str | None           # its series fingerprint; None when its results do not share one
+
+    series: str | None  # its series fingerprint; None when its results do not share one
     workload: dict
-    quantity: dict               # the measurement's quantity: name, unit, direction, ...
-    sides: tuple                 # in order: the reference side first
+    quantity: dict  # the measurement's quantity: name, unit, direction, ...
+    sides: tuple  # in order: the reference side first
     rows: tuple
-    missing: tuple = ()          # sides with no result, which the selector expected
+    missing: tuple = ()  # sides with no result, which the selector expected
     unmatched_differences: tuple | None = None
     caveats: tuple = ()
     # History evidence (comparator.md §2.2): `target` and `reference` are result
@@ -66,7 +68,7 @@ class Evidence:
     reference: tuple = ()
     ordering: str | None = None
     boundaries: tuple = ()
-    calibration: tuple = ()      # past comparisons in the series, for a method's threshold
+    calibration: tuple = ()  # past comparisons in the series, for a method's threshold
     # Why no verdict may be given though the unit has evidence, such as side-failed
     # (UC-02 §10). A selector's rule, not a statistic: every method returns
     # indeterminate with this reason, and the framework checks that it did.
@@ -82,28 +84,30 @@ NOT_COMPARABLE = frozenset({"benchmark-changed"})
 class Selection:
     """What a selector hands the framework: the units, and the facts about the
     request that hold for all of them."""
-    selector: dict               # name, version, params
+
+    selector: dict  # name, version, params
     estimator: dict
     identity_schema: str
     local_only: bool
     inputs: list
     units: list = field(default_factory=list)
     sides: dict | None = None
-    slots: str | None = None     # alternating, not-alternating, or absent, over the whole run
-    failed: list = field(default_factory=list)         # selector invariants
+    slots: str | None = None  # alternating, not-alternating, or absent, over the whole run
+    failed: list = field(default_factory=list)  # selector invariants
     disagreements: list = field(default_factory=list)  # selector invariants found after the method's run-level ones
     advice: dict = field(default_factory=dict)  # invariant -> what the selector adds to a method requirement's detail
-    stopped: bool = False        # a failure so basic that nothing else can be checked
+    stopped: bool = False  # a failure so basic that nothing else can be checked
 
 
 @dataclass(frozen=True)
 class Assessment:
     """What a method found. Deterministic given its inputs, method version, and configuration."""
+
     verdict: str
     reason: str | None = None
-    effect: dict | None = None   # measure and value
-    used: tuple = ()             # rows the verdict rests on
-    excluded: tuple = ()         # (row, reason): rows the method read and set aside
+    effect: dict | None = None  # measure and value
+    used: tuple = ()  # rows the verdict rests on
+    excluded: tuple = ()  # (row, reason): rows the method read and set aside
     details: dict = field(default_factory=dict)
 
 
@@ -111,6 +115,7 @@ class Method:
     """A comparison method owns all the statistics (comparator.md §4.1). It says
     what shape of evidence it needs in `dims`, and what its statistics assume of
     the run in `requires`: alternating-slots, equal-attempts, duplicate-points."""
+
     name: str
     version: str
     dims: tuple
@@ -135,12 +140,15 @@ class Method:
 
     def log_facts(self, unit: dict, config: dict) -> list[str]:
         """The facts of a unit the log records after its verdict and reason, such as `rounds 5`."""
-        return [*([f"effect {unit['effect']['measure']} {unit['effect']['value']:+.4g}"] if "effect" in unit else []),
-                *(f"{key} {value}" for key, value in unit["details"].items())]
+        return [
+            *([f"effect {unit['effect']['measure']} {unit['effect']['value']:+.4g}"] if "effect" in unit else []),
+            *(f"{key} {value}" for key, value in unit["details"].items()),
+        ]
 
 
 class Selector:
     """A selector forms the evidence (comparator.md §2.2, §2.3, §2.5)."""
+
     name: str
     version: str
 
@@ -149,6 +157,7 @@ class Selector:
 
 
 # -- what counting shows -------------------------------------------------------
+
 
 def _sides_by_value(rows, column) -> dict:
     found = {}
@@ -188,12 +197,14 @@ def slot_schedule(slots_and_sides) -> str:
 
 # -- layout --------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Layout:
     """A unit's usable rows over named dimensions. `cells` nests one list per
     dimension, in `dims` order, along `coords`. A leaf is the tuple of rows at
     those coordinates: empty means masked, and it holds several where a dimension
     does not tell rows apart, as `("side",)` does not."""
+
     dims: tuple
     coords: dict
     cells: Any
@@ -205,6 +216,7 @@ class Layout:
             else:
                 for child in node:
                     yield from walk(child, depth + 1)
+
         return walk(self.cells, 0)
 
 

@@ -28,11 +28,11 @@ from benchx.store import Store
 from conftest import SOURCE_URI, git
 
 WORK = {"base": 200, "head": 20000}  # what `toy.work()` does in each build, as a range length
-SUITE = textwrap.dedent('''
+SUITE = textwrap.dedent("""
     def bench_work():
         import toy
         toy.work()
-''')
+""")
 
 
 @pytest.fixture
@@ -69,18 +69,35 @@ def toy(tmp_path):
 def compare(tmp, toy, monkeypatch, *, reported, rounds=3):
     """`bx compare @base @head` over the toy builds; `reported` names the directory
     each provider answer gives as `target.path`: "build" or "package"."""
+
     def provider(spec, operation, provider=None):
         side = toy["sides"][spec.removeprefix("@")]
-        return {"schema_version": "benchx/target-description/0.1.0",
-                "target": {"kind": "build", "path": str(side[reported]),
-                           "source": {"uri": SOURCE_URI, "type": "git"}, "source_dir": str(side["checkout"])},
-                "how_built": f"toy build {spec}"}
+        return {
+            "schema_version": "benchx/target-description/0.1.0",
+            "target": {
+                "kind": "build",
+                "path": str(side[reported]),
+                "source": {"uri": SOURCE_URI, "type": "git"},
+                "source_dir": str(side["checkout"]),
+            },
+            "how_built": f"toy build {spec}",
+        }
 
     monkeypatch.setattr(session.target_mod, "resolve", provider)
     doc = session.compare_targets(
-        "@base", "@head", profile="revisions", suite=str(toy["suite"]), rounds=rounds, min_rounds=3, store=Store(tmp / "s.parquet"),
-        adapter="pyperf", flags={"processes": 2, "values": 2, "loops": 50, "warmups": 1},
-        filter=harnesses.exact_filter(["bench_work"]), out=tmp / "out", run_key="toy")
+        "@base",
+        "@head",
+        profile="revisions",
+        suite=str(toy["suite"]),
+        rounds=rounds,
+        min_rounds=3,
+        store=Store(tmp / "s.parquet"),
+        adapter="pyperf",
+        flags={"processes": 2, "values": 2, "loops": 50, "warmups": 1},
+        filter=harnesses.exact_filter(["bench_work"]),
+        out=tmp / "out",
+        run_key="toy",
+    )
     assert doc["failed_invariants"] == []
     assert [u["workload"]["name"] for u in doc["units"]] == ["bench_work"]
     return doc
@@ -96,7 +113,8 @@ def test_the_build_root_imports_nothing(tmp, toy, monkeypatch):
     assert unit["details"]["rounds"] == 0
     assert unit["verdict"] == "indeterminate"
     assert doc["exclusions"] and {e["reason"] for e in doc["exclusions"]} == {
-        "error: harness.error: ModuleNotFoundError: No module named 'toy'"}  # and says what the worker said
+        "error: harness.error: ModuleNotFoundError: No module named 'toy'"
+    }  # and says what the worker said
 
 
 def test_one_pythonpath_measures_one_build_on_both_sides(tmp, toy, monkeypatch):

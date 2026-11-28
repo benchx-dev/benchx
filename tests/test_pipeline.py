@@ -59,18 +59,14 @@ def test_structure_checked_before_rules(write, adhoc):
 
 
 def test_rules_run_when_structure_passes(write, adhoc):
-    adhoc["coordinates"]["subject"]["components"][0]["source"] = (
-        "https://example.org/other"
-    )
+    adhoc["coordinates"]["subject"]["components"][0]["source"] = "https://example.org/other"
     assert types(write(adhoc)) == [PrimarySourceMismatch]
 
 
 def test_error_rendering(write, adhoc):
     adhoc["procedure"]["slot"] = -1
     [issue] = errors(write(adhoc))
-    assert (
-        str(issue) == "malformed at /procedure/slot: -1 is less than the minimum of 0"
-    )
+    assert str(issue) == "malformed at /procedure/slot: -1 is less than the minimum of 0"
 
 
 def test_codes_serialize_as_strings():

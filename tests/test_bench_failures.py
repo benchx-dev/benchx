@@ -9,9 +9,11 @@ from benchx import bench, cli
 
 def result(name="bench_boom", status="error", reason="harness.error", message="ValueError: boom", parameters=None):
     workload = {"name": name, **({"parameters": parameters} if parameters else {})}
-    document = {"coordinates": {"workload": workload},
-                "measurement": {"status": status, **({"reason": reason} if reason else {})},
-                "provenance": {"info": {"message": message} if message else {}}}
+    document = {
+        "coordinates": {"workload": workload},
+        "measurement": {"status": status, **({"reason": reason} if reason else {})},
+        "provenance": {"info": {"message": message} if message else {}},
+    }
     if status == "success":
         document["measurement"]["observations"] = [1.0, 2.0]
     return document
@@ -46,15 +48,19 @@ def test_a_failed_case_is_named_with_what_it_said():
 
 def test_cases_that_said_the_same_are_one_line_with_three_names_at_most():
     rows = rows_of(*(result("bench_boom", parameters={"n": str(n)}) for n in (1, 10, 100, 1000, 10000)))
-    assert bench.failures(rows) == ("\nnot measured (5)\n"
-                                    "  ValueError: boom (5 cases: bench_boom [n=1], bench_boom [n=10], bench_boom [n=100], …)")
+    assert bench.failures(rows) == (
+        "\nnot measured (5)\n  ValueError: boom (5 cases: bench_boom [n=1], bench_boom [n=10], bench_boom [n=100], …)"
+    )
     three = rows_of(*(result("bench_boom", parameters={"n": str(n)}) for n in (1, 10, 100)))
     assert bench.failures(three).endswith("(3 cases: bench_boom [n=1], bench_boom [n=10], bench_boom [n=100])")
 
 
 def test_different_messages_are_different_lines_in_the_order_they_came():
-    rows = rows_of(result("a", message="KeyError: 'x'"), result("b", message="ValueError: boom"),
-                   result("c", status="skipped", reason="harness.skipped", message="KeyError: 'x'"))
+    rows = rows_of(
+        result("a", message="KeyError: 'x'"),
+        result("b", message="ValueError: boom"),
+        result("c", status="skipped", reason="harness.skipped", message="KeyError: 'x'"),
+    )
     assert bench.failures(rows) == ("\nnot measured (3)\n  KeyError: 'x' (2 cases: a, c)\n  b: ValueError: boom")
 
 
@@ -69,16 +75,33 @@ def test_bx_bench_says_why_a_benchmark_failed(tmp, monkeypatch, capsys):
     pytest.importorskip("pyperf")
     tree = tmp / "tree"
     tree.mkdir()
-    (tree / "mod.py").write_text(textwrap.dedent('''
+    (tree / "mod.py").write_text(
+        textwrap.dedent("""
         def bench_ok():
             sum(range(100))
 
         def bench_boom():
             raise ValueError("array has no axis 3")
-    '''))
+    """)
+    )
     monkeypatch.chdir(tree)
-    cli.main(["bench", "mod.py", "--adapter", "pyperf", "--run-key", "boom", "--no-ingest",
-              "--processes", "2", "--values", "2", "--loops", "20"])
+    cli.main(
+        [
+            "bench",
+            "mod.py",
+            "--adapter",
+            "pyperf",
+            "--run-key",
+            "boom",
+            "--no-ingest",
+            "--processes",
+            "2",
+            "--values",
+            "2",
+            "--loops",
+            "20",
+        ]
+    )
     out = capsys.readouterr().out
     assert "error (harness.error)" in out  # the status column is as it was
     assert "\nnot measured (1)\n  bench_boom: ValueError: array has no axis 3\n" in out
@@ -104,30 +127,37 @@ WARNING = """driver.py:34: SyntaxWarning: "is not" with 'int' literal. Did you m
 
 def test_the_message_is_the_exception_that_ended_the_workers_traceback():
     from benchx.adapters import pyperf
+
     stderr = TRACEBACK.format(last="KeyError: 'axis'") + MANAGER
     assert pyperf._failure_message(stderr) == "KeyError: 'axis'"  # not the manager's wrapper after it
 
 
 def test_a_warning_printed_before_the_traceback_is_not_the_message():
     from benchx.adapters import pyperf
+
     stderr = WARNING + WARNING + TRACEBACK.format(last="KeyError: 'axis'") + MANAGER
     assert pyperf._failure_message(stderr) == "KeyError: 'axis'"
 
 
 def test_a_chained_exception_gives_the_one_that_was_raised_last():
     from benchx.adapters import pyperf
-    chained = (TRACEBACK.format(last="KeyError: 'axis'")
-               + "\nThe above exception was the direct cause of the following exception:\n\n"
-               + TRACEBACK.format(last="ValueError: no such axis"))
+
+    chained = (
+        TRACEBACK.format(last="KeyError: 'axis'")
+        + "\nThe above exception was the direct cause of the following exception:\n\n"
+        + TRACEBACK.format(last="ValueError: no such axis")
+    )
     assert pyperf._failure_message(chained + MANAGER) == "ValueError: no such axis"
 
 
 def test_the_wrapper_is_the_message_only_when_nothing_else_was_said():
     from benchx.adapters import pyperf
+
     assert pyperf._failure_message(MANAGER) == "RuntimeError: /usr/bin/python failed with exit code 1"
 
 
 def test_without_a_traceback_the_first_line_said_is_the_message():
     from benchx.adapters import pyperf
+
     assert pyperf._failure_message("Killed\n") == "Killed"
     assert pyperf._failure_message(WARNING) == WARNING.splitlines()[0]  # nothing better was said

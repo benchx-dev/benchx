@@ -17,9 +17,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
 # Package data, so an installed copy finds them just as an editable install does.
-SCHEMAS = Path(
-    os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[1] / "schemas"
-)
+SCHEMAS = Path(os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[1] / "schemas")
 
 # The version string each document kind declares in its schema_version. Bump a
 # schema here and nowhere else in the code.
@@ -127,9 +125,7 @@ def lookup(kind: str, version: str) -> Draft202012Validator | None:
     if schema is None:
         return None
 
-    return Draft202012Validator(
-        schema, format_checker=_format_checker(schema), registry=_registry()
-    )
+    return Draft202012Validator(schema, format_checker=_format_checker(schema), registry=_registry())
 
 
 @cache
@@ -173,19 +169,14 @@ def _schemas_by_id() -> dict[str, dict]:
         for release in sorted(kind.iterdir())
         if release.is_dir()
     ]
-    return {
-        schema["$id"]: schema
-        for schema in schemas
-        if schema is not None and "$id" in schema
-    }
+    return {schema["$id"]: schema for schema in schemas if schema is not None and "$id" in schema}
 
 
 @cache
 def _registry() -> Registry:
     # Schemas refer to each other by $id, so each validator sees all of them.
     return Registry().with_resources(
-        (schema_id, Resource.from_contents(schema))
-        for schema_id, schema in _schemas_by_id().items()
+        (schema_id, Resource.from_contents(schema)) for schema_id, schema in _schemas_by_id().items()
     )
 
 

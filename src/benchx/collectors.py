@@ -76,8 +76,12 @@ def _collect(spec, cwd, env) -> tuple[dict | None, str | None]:
         return None, f"cannot run {spec['command'][0]!r}: {e}"
     except subprocess.TimeoutExpired as expired:  # the partial output comes back as bytes
         status, stdout, stderr = None, log.as_text(expired.stdout), log.as_text(expired.stderr)
-    logger.debug("collector %s: %s in %.1f s", name, "timed out" if status is None else f"exit {status}",
-                 time.monotonic() - started)
+    logger.debug(
+        "collector %s: %s in %.1f s",
+        name,
+        "timed out" if status is None else f"exit {status}",
+        time.monotonic() - started,
+    )
     failed = status is None or status != 0
     log.harness_output(logger, f"collector {name}", "stderr", stderr, failed=failed)
     if failed:  # on success stdout is the facts, which are kept as the collector-output artifact
@@ -112,7 +116,9 @@ def run_all(specs, *, declared, cwd, env, artifacts_dir, taken=()) -> Collected:
             out.warnings.append("collector-failed")
             problems.append(f"collector {name!r} failed: {why}")
             logger.info("collector %d/%d %s: failed, %.1f s", number, len(specs), name, took)
-            logger.warning("collector %s failed: %s", name, why)  # even when it only warns: the reason is lost otherwise
+            logger.warning(
+                "collector %s failed: %s", name, why
+            )  # even when it only warns: the reason is lost otherwise
         else:
             logger.info("collector %d/%d %s: ok, %.1f s", number, len(specs), name, took)
             digest = core.sha256_hex(core.canonical(facts))
@@ -125,7 +131,9 @@ def run_all(specs, *, declared, cwd, env, artifacts_dir, taken=()) -> Collected:
                 if isinstance(declared, dict):
                     problems += [f"collector {name!r}: how_built {d}" for d in _differences(declared, facts)]
                 else:
-                    problems.append(f"collector {name!r}: verify: how_built, but the target's how_built is not an object")
+                    problems.append(
+                        f"collector {name!r}: verify: how_built, but the target's how_built is not an object"
+                    )
             problems += [f"collector {name!r}: expect {d}" for d in _differences(spec.get("expect", {}), facts)]
             if problems:
                 out.warnings.append("collector-mismatch")

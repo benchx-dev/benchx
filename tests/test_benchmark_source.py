@@ -12,10 +12,10 @@ from benchx import adapters, cli, core, runner, snapshot
 from benchx.store import Store
 from conftest import git, requires_pyarrow
 
-SUITE = textwrap.dedent('''
+SUITE = textwrap.dedent("""
     def bench_a():
         sum(range(100))
-''')
+""")
 RESULTS = Path("results")  # the project root is the test directory
 FAST = ["--processes", "2", "--values", "2", "--loops", "20"]
 
@@ -55,8 +55,12 @@ def versioned_suite(tmp):
 
 
 def bench(subject, suite, run_key, *extra):
-    assert cli.main(["bench", str(subject), "--adapter", "pyperf", "--suite", str(suite), *FAST,
-                     "--run-key", run_key, *extra]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            ["bench", str(subject), "--adapter", "pyperf", "--suite", str(suite), *FAST, "--run-key", run_key, *extra]
+        )
+        == cli.EXIT_OK
+    )
     return json.loads(next(p for p in sorted((RESULTS / run_key / "orders").glob("*.json"))).read_text())
 
 
@@ -80,8 +84,12 @@ def test_a_suite_inside_the_subject_is_the_subjects_own(subject):
 
 def test_an_unversioned_suite_is_identified_by_its_file(subject, loose_suite):
     found = snapshot.benchmark_identity(loose_suite, subject)
-    assert found == {"uri": loose_suite.parent.as_uri(), "type": "directory", "tree": snapshot.blob_id(loose_suite),
-                     "dirty": "dirty"}
+    assert found == {
+        "uri": loose_suite.parent.as_uri(),
+        "type": "directory",
+        "tree": snapshot.blob_id(loose_suite),
+        "dirty": "dirty",
+    }
     assert found["tree"] == git(loose_suite.parent, "hash-object", loose_suite.name)  # git's own blob id
 
 

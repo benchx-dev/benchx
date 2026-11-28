@@ -20,7 +20,9 @@ def evaluate(docs, **config):
 
 
 def test_a_run_that_did_not_alternate_is_refused_by_the_default_and_compared_by_this_one():
-    docs = [result(BASE, r, r, VALUES[r]) for r in range(4)] + [result(HEAD, r, 4 + r, VALUES[r] * 1.5) for r in range(4)]
+    docs = [result(BASE, r, r, VALUES[r]) for r in range(4)] + [
+        result(HEAD, r, 4 + r, VALUES[r] * 1.5) for r in range(4)
+    ]
     assert invariants(compare.compare(docs, run_key="run", profile="revisions", baseline=BASE)) == ["alternating-slots"]
     unit = evaluate(docs)["units"][0]
     assert unit["verdict"] == "regressed" and unit["details"]["p_value"] == pytest.approx(2 / 70)
@@ -34,10 +36,13 @@ def test_a_design_that_cannot_reach_alpha_is_indeterminate():
     assert (unit["verdict"], unit["reason"]) == ("indeterminate", "insufficient-attempts")
 
 
-@pytest.mark.parametrize("a, b, u, p", [
-    ([1, 2, 3, 4], [5, 6, 7, 8], 16.0, 0.02857142857142857),  # scipy.stats.mannwhitneyu(b, a, method="exact")
-    ([1, 2, 2, 3], [2, 3, 3, 4], 13.0, 0.2857142857142857),   # brute force over midranks, with ties
-])
+@pytest.mark.parametrize(
+    "a, b, u, p",
+    [
+        ([1, 2, 3, 4], [5, 6, 7, 8], 16.0, 0.02857142857142857),  # scipy.stats.mannwhitneyu(b, a, method="exact")
+        ([1, 2, 2, 3], [2, 3, 3, 4], 13.0, 0.2857142857142857),  # brute force over midranks, with ties
+    ],
+)
 def test_exact_p_values(a, b, u, p):
     assert rank_test(a, b) == (u, pytest.approx(p))
 
@@ -52,5 +57,6 @@ def test_a_run_with_no_slots_is_compared_with_a_caveat_that_says_so():
 
 def test_alpha_must_be_below_one():
     import pytest as _pytest
+
     with _pytest.raises(compare.CompareError, match="maximum of 1"):
         compare._configure(METHOD, {"alpha": 1.0})

@@ -29,8 +29,13 @@ QUIET, NOISY = "BM_Quiet/1024", "BM_Noisy/1024"
 
 
 def git(cwd, *args) -> str:
-    out = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
-                         cwd=cwd, check=True, capture_output=True, text=True)
+    out = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return out.stdout.strip()
 
 
@@ -49,8 +54,7 @@ def repo(tmp_path):
     head = git(src, "rev-parse", "HEAD")
     for name, sha in (("wt-base", base), ("wt-head", head)):
         git(src, "worktree", "add", "-q", "--detach", str(tmp_path / name), sha)
-    return {"src": src, "base": base, "head": head,
-            "wt-base": tmp_path / "wt-base", "wt-head": tmp_path / "wt-head"}
+    return {"src": src, "base": base, "head": head, "wt-base": tmp_path / "wt-base", "wt-head": tmp_path / "wt-head"}
 
 
 def make_build(path: Path, source: Path, cases: dict, hardened=False, **config) -> Path:
@@ -62,7 +66,8 @@ def make_build(path: Path, source: Path, cases: dict, hardened=False, **config) 
         f"CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++\n"
         "CMAKE_PROJECT_NAME:STATIC=demo\n"
         f"DEMO_HARDENED:BOOL={'ON' if hardened else 'OFF'}\n"
-        f"DEMO_DATA_DIR:PATH={source}/data\n")
+        f"DEMO_DATA_DIR:PATH={source}/data\n"
+    )
     compiler = path / "CMakeFiles" / "3.30.0" / "CMakeCXXCompiler.cmake"
     compiler.parent.mkdir(parents=True)
     compiler.write_text('set(CMAKE_CXX_COMPILER_ID "AppleClang")\nset(CMAKE_CXX_COMPILER_VERSION "21.0.0")\n')
@@ -115,8 +120,19 @@ def run_rounds(tmp: Path, sides: list[dict], rounds: int, run_key: str, out: Pat
     for r in range(rounds):
         for side in sides:
             path = tmp / f"order-{run_key}-{slot}.json"
-            path.write_text(json.dumps(order(side["build"], side.get("source"), run_key, round=r, slot=slot,
-                                             labels=side.get("labels"), **extra)))
+            path.write_text(
+                json.dumps(
+                    order(
+                        side["build"],
+                        side.get("source"),
+                        run_key,
+                        round=r,
+                        slot=slot,
+                        labels=side.get("labels"),
+                        **extra,
+                    )
+                )
+            )
             runner.run(path, out)
             slot += 1
     return out

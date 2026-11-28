@@ -53,6 +53,7 @@ def asv_target(path, tree=None) -> tuple[str, str]:
     asv.conf.json (its `benchmark_dir`, default `benchmarks`, is the suite) or the
     benchmark directory itself; the target is its tree, as for a module."""
     from .adapters import asv
+
     benchmark_dir = Path(path).resolve()
     for name in asv.CONF_NAMES:
         if (benchmark_dir / name).is_file():
@@ -114,11 +115,18 @@ def _time(seconds) -> str:
 def render(rows, leading=()) -> str:
     """The table; `leading` names row keys to show as columns before the case."""
     header = (*leading, "case", "median", "mean ± sd", "min .. max", "n", "status")
-    body = [(*(str(r[key]) for key in leading), r["case"], _time(r["median"]),
-             f"{_time(r['mean'])} ± {_time(r['stdev'])}" if r["mean"] is not None else "-",
-             f"{_time(r['min'])} .. {_time(r['max'])}" if r["min"] is not None else "-",
-             str(r["n"]), r["status"] + (f"  [{', '.join(r['warnings'])}]" if r["warnings"] else ""))
-            for r in rows]
+    body = [
+        (
+            *(str(r[key]) for key in leading),
+            r["case"],
+            _time(r["median"]),
+            f"{_time(r['mean'])} ± {_time(r['stdev'])}" if r["mean"] is not None else "-",
+            f"{_time(r['min'])} .. {_time(r['max'])}" if r["min"] is not None else "-",
+            str(r["n"]),
+            r["status"] + (f"  [{', '.join(r['warnings'])}]" if r["warnings"] else ""),
+        )
+        for r in rows
+    ]
     widths = [max(len(row[i]) for row in [header, *body]) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip() for row in [header, *body]]
     return "\n".join([lines[0], "  ".join("-" * w for w in widths), *lines[1:]])
@@ -134,6 +142,10 @@ def failures(rows, names=3) -> str:
             said_by.setdefault(row["message"], []).append(row["case"])
     if not said_by:
         return ""
-    lines = [f"  {message} ({len(cases)} cases: {', '.join(cases[:names])}{', …' if len(cases) > names else ''})"
-             if len(cases) > 1 else f"  {cases[0]}: {message}" for message, cases in said_by.items()]
+    lines = [
+        f"  {message} ({len(cases)} cases: {', '.join(cases[:names])}{', …' if len(cases) > names else ''})"
+        if len(cases) > 1
+        else f"  {cases[0]}: {message}"
+        for message, cases in said_by.items()
+    ]
     return "\n".join(["", f"not measured ({sum(len(c) for c in said_by.values())})", *lines])

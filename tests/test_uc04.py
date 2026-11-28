@@ -18,10 +18,10 @@ from benchx import cli
 
 MODULE = "def bench_a():\n    sum(range(100))\n"
 FAST = ["--processes", "2", "--values", "2", "--loops", "20", "--no-project"]
-COLLECT = textwrap.dedent('''
+COLLECT = textwrap.dedent("""
     import json, os
     print(json.dumps({"summary": {"dep": os.environ.get("FAKE_DEP", "unset")}}))
-''')
+""")
 
 
 @pytest.fixture
@@ -46,8 +46,20 @@ def call(side, round_, slot, *, dep=None, setup=None, monkeypatch, run_key="S"):
         monkeypatch.setenv("FAKE_DEP", dep)
     if setup is not None:
         monkeypatch.setenv("BENCHX_SETUP_FILE", str(setup))
-    argv = ["bench", "mod.py", "bench_a", "--run-key", run_key, "--label", f"env={side}",
-            "--round", str(round_), "--slot", str(slot), *FAST]
+    argv = [
+        "bench",
+        "mod.py",
+        "bench_a",
+        "--run-key",
+        run_key,
+        "--label",
+        f"env={side}",
+        "--round",
+        str(round_),
+        "--slot",
+        str(slot),
+        *FAST,
+    ]
     assert cli.main(argv) == cli.EXIT_OK
 
 
@@ -61,8 +73,9 @@ def loop(sides, monkeypatch, rounds=3):
 
 
 def compare(capsys, baseline="a", run_key="S"):
-    code = cli.main(["compare", "--run", run_key, "--profile", "environments", "--label", "env",
-                     "--baseline", baseline])
+    code = cli.main(
+        ["compare", "--run", run_key, "--profile", "environments", "--label", "env", "--baseline", baseline]
+    )
     return code, capsys.readouterr().out
 
 
@@ -136,8 +149,9 @@ def test_tables_name_the_sides_by_their_label(tree, monkeypatch, capsys):
     write_config(tree, {})
     loop({"a": {"dep": "1.0"}, "b": {"dep": "2.0"}}, monkeypatch)
     capsys.readouterr()
-    code = cli.main(["compare", "--run", "S", "--profile", "environments", "--label", "env", "--baseline", "a",
-                     "--tables"])
+    code = cli.main(
+        ["compare", "--run", "S", "--profile", "environments", "--label", "env", "--baseline", "a", "--tables"]
+    )
     out = capsys.readouterr().out
     assert code == cli.EXIT_OK
     assert "env=a" in out and "env=b" in out and out.count("(3 rounds):") == 2

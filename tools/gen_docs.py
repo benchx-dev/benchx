@@ -49,10 +49,12 @@ _CODE_SPAN_OR_TAG = re.compile(r"(`[^`\n]*`)|(<(?!https?://|mailto:)(/?[a-zA-Z][
 
 def esc_prose(text: str) -> str:
     """Escape angle-bracket placeholders outside inline code so Markdown does not parse them as HTML tags."""
+
     def repl(m: re.Match) -> str:
         if m.group(1) is not None:
             return m.group(1)
         return f"&lt;{m.group(3)}&gt;"
+
     return _CODE_SPAN_OR_TAG.sub(repl, text)
 
 
@@ -74,6 +76,7 @@ def version_key(v: str) -> tuple[int, ...]:
 
 
 # --------------------------------------------------------------------------- $ref links
+
 
 def ref_link(ref: str, page: SchemaPage) -> str:
     """A Markdown link for a $ref, local (#/$defs/x) or cross-schema (urn:...)."""
@@ -113,6 +116,7 @@ def ref_link(ref: str, page: SchemaPage) -> str:
 
 
 # --------------------------------------------------------------------------- type summaries
+
 
 def type_str(s, page: SchemaPage) -> str:
     """One-line type summary for a subschema, with links for $refs."""
@@ -174,9 +178,13 @@ def type_str(s, page: SchemaPage) -> str:
     for k, label in (("minimum", ">="), ("exclusiveMinimum", ">"), ("maximum", "<="), ("exclusiveMaximum", "<")):
         if k in s:
             cons.append(f"{label} {s[k]}")
-    for k, label in (("minLength", "min length"), ("maxLength", "max length"),
-                     ("minItems", "min items"), ("maxItems", "max items"),
-                     ("minProperties", "min properties")):
+    for k, label in (
+        ("minLength", "min length"),
+        ("maxLength", "max length"),
+        ("minItems", "min items"),
+        ("maxItems", "max items"),
+        ("minProperties", "min properties"),
+    ):
         if k in s:
             cons.append(f"{label} {s[k]}")
     if s.get("uniqueItems"):
@@ -275,15 +283,25 @@ def consequence(s, page: SchemaPage, path: list[str] | None = None) -> str:
     if s is False:
         return "the document is invalid"
     req, forbid, other = [], [], []
+
     def dot(k):
         return "`" + ".".join(path + [k]) + "`"
+
     req += [dot(r) for r in s.get("required", [])]
     for k, v in s.get("properties", {}).items():
         if v is False:
             forbid.append(dot(k))
         elif isinstance(v, dict) and set(v) == {"contains"}:
             other.append(f"{dot(k)} contains an item that is {type_str(v['contains'], page)}")
-        elif isinstance(v, dict) and set(v) <= {"required", "not", "properties", "allOf", "anyOf", "$comment", "description"}:
+        elif isinstance(v, dict) and set(v) <= {
+            "required",
+            "not",
+            "properties",
+            "allOf",
+            "anyOf",
+            "$comment",
+            "description",
+        }:
             other.append(consequence(v, page, path + [k]))
         else:
             other.append(f"{dot(k)} must be {type_str(v, page)}")
@@ -348,6 +366,7 @@ def rules(s: dict, page: SchemaPage) -> list[str]:
 
 # --------------------------------------------------------------------------- objects
 
+
 def has_table(s) -> bool:
     return isinstance(s, dict) and bool(s.get("properties"))
 
@@ -377,7 +396,11 @@ def render_object(s: dict, page: SchemaPage, path: list[str], level: int, out: l
         out.append("No other properties are allowed.")
         out.append("")
     elif isinstance(ap, dict):
-        out.append(f"Other properties: {type_str(ap, page)}" + (f". {esc(ap.get('description', ''))}" if ap.get("description") else "") + ".")
+        out.append(
+            f"Other properties: {type_str(ap, page)}"
+            + (f". {esc(ap.get('description', ''))}" if ap.get("description") else "")
+            + "."
+        )
         out.append("")
         if wants_section(ap):
             nested.append(("*", ap))
@@ -411,6 +434,7 @@ def render_object(s: dict, page: SchemaPage, path: list[str], level: int, out: l
 
 
 # --------------------------------------------------------------------------- pages
+
 
 class SchemaPage:
     def __init__(self, name: str, version: str, schema: dict, examples: list[Path], older: list[str]):
@@ -489,22 +513,31 @@ def discover() -> list[SchemaPage]:
             continue
         latest = versions[-1]
         schema = json.loads((name_dir / latest / "schema.json").read_text())
-        examples = sorted((name_dir / latest / "examples").glob("*.json")) if (name_dir / latest / "examples").is_dir() else []
+        examples = (
+            sorted((name_dir / latest / "examples").glob("*.json")) if (name_dir / latest / "examples").is_dir() else []
+        )
         pages.append(SchemaPage(name_dir.name, latest, schema, examples, versions[:-1]))
     return pages
 
 
 def schema_index(pages: list[SchemaPage]) -> str:
-    out = ["# Schemas", "",
-           "The JSON schemas that define benchx's documents. Every component produces or "
-           "consumes one of these; the design documents explain the reasoning behind each.", "",
-           "| Schema | Version | Defines |", "|---|---|---|"]
+    out = [
+        "# Schemas",
+        "",
+        "The JSON schemas that define benchx's documents. Every component produces or "
+        "consumes one of these; the design documents explain the reasoning behind each.",
+        "",
+        "| Schema | Version | Defines |",
+        "|---|---|---|",
+    ]
     for p in pages:
         desc = esc(p.schema.get("description", ""))
         desc = desc.split(". ")[0].rstrip(".") + "." if desc else ""
         out.append(f"| [{p.schema.get('title', p.name)}]({p.name}.md) | {p.version} | {desc} |")
     out.append("")
-    out.append("Each page links the raw `schema.json` and its examples. Schemas are validated by the implementation's `bx validate`.")
+    out.append(
+        "Each page links the raw `schema.json` and its examples. Schemas are validated by the implementation's `bx validate`."
+    )
     return "\n".join(out)
 
 
@@ -551,7 +584,8 @@ def example_pages(executed: Path | None) -> dict[str, str]:
             raise SystemExit(
                 f"no executed page for examples/{name}: {page} is missing. An example needs a "
                 "leg in the matrix of the `examples` job of .github/workflows/docs.yml, or the "
-                "site would show it unexecuted.")
+                "site would show it unexecuted."
+            )
         pages[name] = page.read_text()
     return pages
 
@@ -567,9 +601,13 @@ def main() -> None:
     import shutil
 
     parser = argparse.ArgumentParser(description="Generate the documentation pages derived from other files.")
-    parser.add_argument("--executed", type=Path, metavar="DIR",
-                        help="a directory with <name>.md for each example, as tools/execute_markdown.py "
-                             "made them; without it the examples' pages are their committed READMEs")
+    parser.add_argument(
+        "--executed",
+        type=Path,
+        metavar="DIR",
+        help="a directory with <name>.md for each example, as tools/execute_markdown.py "
+        "made them; without it the examples' pages are their committed READMEs",
+    )
     args = parser.parse_args()
 
     left = [f"docs/{rel}" for rel in LEGACY if (DOCS / rel).exists()]
@@ -577,7 +615,8 @@ def main() -> None:
         raise SystemExit(
             f"{', '.join(left)}: left by an earlier tools/gen_docs.py, which wrote directly under "
             f"docs/. They would be copied into {OUT.relative_to(ROOT)}/ next to the pages generated "
-            "there. They are gitignored output, not source: delete them.")
+            "there. They are gitignored output, not source: delete them."
+        )
     if OUT.exists():
         shutil.rmtree(OUT)
 
@@ -609,8 +648,10 @@ def main() -> None:
     examples = example_pages(args.executed)
     for name, page in examples.items():
         write(f"examples/{name}.md", page)
-    print(f"generated {len(pages)} schema pages and {len(examples)} example pages "
-          f"({'executed' if args.executed else 'not executed'}) under {OUT.relative_to(ROOT)}/")
+    print(
+        f"generated {len(pages)} schema pages and {len(examples)} example pages "
+        f"({'executed' if args.executed else 'not executed'}) under {OUT.relative_to(ROOT)}/"
+    )
 
 
 if __name__ == "__main__":

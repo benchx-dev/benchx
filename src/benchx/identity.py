@@ -44,8 +44,9 @@ def comparison_identity(doc: dict, project: str, projection: Projection = POLICY
 
 
 def series_fingerprint(doc: dict, project: str, estimator: dict, projection: Projection = POLICY) -> str:
-    return projection.series_fingerprint(projection.apply(doc, project), doc["measurement"]["quantity"]["name"],
-                                         estimator)
+    return projection.series_fingerprint(
+        projection.apply(doc, project), doc["measurement"]["quantity"]["name"], estimator
+    )
 
 
 def points(doc: dict, project: str, projection: Projection = POLICY, estimators=ESTIMATORS) -> list[dict]:
@@ -63,7 +64,15 @@ def points(doc: dict, project: str, projection: Projection = POLICY, estimators=
         if summary["type"] == "estimate":
             found.append((summary["estimator"], summary["value"], "producer"))
     quantity = doc["measurement"]["quantity"]["name"]
-    return [{"series_fingerprint": projection.series_fingerprint(projected, quantity, estimator),
-             "estimator": estimator, "value": value, "source": source,
-             "axis": projected.axis, "identity": projected.identity, "ignored": projected.ignored}
-            for estimator, value, source in found]
+    return [
+        {
+            "series_fingerprint": projection.series_fingerprint(projected, quantity, estimator),
+            "estimator": estimator,
+            "value": value,
+            "source": source,
+            "axis": projected.axis,
+            "identity": projected.identity,
+            "ignored": projected.ignored,
+        }
+        for estimator, value, source in found
+    ]

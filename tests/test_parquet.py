@@ -59,8 +59,10 @@ def _reported(data_type, value):
         if not isinstance(value, dict):  # a bare observation number
             value = {"value": value}
         # A key the struct lacks is left as it is, so the comparison shows it as dropped.
-        return {k: _reported(data_type.field(k).type, v) if data_type.get_field_index(k) >= 0 else v
-                for k, v in value.items()}
+        return {
+            k: _reported(data_type.field(k).type, v) if data_type.get_field_index(k) >= 0 else v
+            for k, v in value.items()
+        }
     if pa.types.is_list(data_type):
         return [_reported(data_type.value_type, v) for v in value]
     return datetime.fromisoformat(value) if data_type == parquet.TIMESTAMP else value
@@ -135,8 +137,11 @@ def test_the_documented_listing_is_the_derived_schema():
             structs.setdefault(path.rsplit(".", 1)[-1], field.type)
     for path, name in same.items():
         assert derived[path].type == structs[name], f"{path} is not as {name}"
-    assert listed == {path: _type_name(field.type) + "*" * (not field.nullable) for path, field in derived.items()
-                      if not any(path.startswith(f"{abbreviated}.") for abbreviated in same)}
+    assert listed == {
+        path: _type_name(field.type) + "*" * (not field.nullable)
+        for path, field in derived.items()
+        if not any(path.startswith(f"{abbreviated}.") for abbreviated in same)
+    }
 
 
 def test_metadata_names_the_message_schema(table):
@@ -156,18 +161,21 @@ def closed(json_type):
     return {"type": "object", "additionalProperties": False, "properties": {"x": {"type": json_type}}}
 
 
-@pytest.mark.parametrize("node", [
-    {"const": True},
-    {"enum": ["a", 1]},
-    {"oneOf": [{"type": "string"}, {"type": "integer"}]},
-    {"oneOf": [closed("string"), closed("integer")]},
-    {"oneOf": [closed("string"), {"type": "object", "properties": {"y": {"type": "string"}}}]},  # open
-    {"oneOf": [closed("string"), {"type": "object", "additionalProperties": False}]},  # no properties
-    {"oneOf": [{"type": "string"}, closed("string")]},  # a bare value that is not a number
-    {"oneOf": [{"type": "number"}, closed("number")]},  # no `value` to hold the bare number
-    {"oneOf": [{"type": "number"}, closed("number"), closed("number")]},
-    {"allOf": [{"minLength": 1}, closed("string")]},  # no leading reference
-])
+@pytest.mark.parametrize(
+    "node",
+    [
+        {"const": True},
+        {"enum": ["a", 1]},
+        {"oneOf": [{"type": "string"}, {"type": "integer"}]},
+        {"oneOf": [closed("string"), closed("integer")]},
+        {"oneOf": [closed("string"), {"type": "object", "properties": {"y": {"type": "string"}}}]},  # open
+        {"oneOf": [closed("string"), {"type": "object", "additionalProperties": False}]},  # no properties
+        {"oneOf": [{"type": "string"}, closed("string")]},  # a bare value that is not a number
+        {"oneOf": [{"type": "number"}, closed("number")]},  # no `value` to hold the bare number
+        {"oneOf": [{"type": "number"}, closed("number"), closed("number")]},
+        {"allOf": [{"minLength": 1}, closed("string")]},  # no leading reference
+    ],
+)
 def test_unsupported_nodes_fail(node):
     with pytest.raises(ValueError):
         parquet.arrow_type(node, {}, pa.json_())

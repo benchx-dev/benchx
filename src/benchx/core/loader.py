@@ -74,9 +74,7 @@ def _parse(text: str, errors: list[ReadError]) -> Any:
             value = int(literal)
         except ValueError:
             # Beyond Python's integer string conversion limit (4300 digits).
-            errors.append(
-                BadNumber(literal=literal[:20] + "…", reason="integer too large")
-            )
+            errors.append(BadNumber(literal=literal[:20] + "…", reason="integer too large"))
             return 0
 
         if abs(value) > MAX_EXACT_INTEGER:

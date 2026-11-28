@@ -12,9 +12,7 @@ def _json_pointer(parts: PathParts) -> str:
     """Format path components as an RFC 6901 JSON Pointer, or '/' for the root."""
     if not parts:
         return "/"
-    return "/" + "/".join(
-        str(part).replace("~", "~0").replace("/", "~1") for part in parts
-    )
+    return "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
 
 
 class Code(StrEnum):
@@ -115,10 +113,7 @@ class PrimarySourceMismatch(RuleViolation):
 
     @property
     def message(self) -> str:
-        return (
-            f"primary component source {self.reported!r} "
-            f"differs from source {self.expected!r}"
-        )
+        return f"primary component source {self.reported!r} differs from source {self.expected!r}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -159,9 +154,7 @@ class CompletedExceedsAttempted(RuleViolation):
 
     @property
     def message(self) -> str:
-        return (
-            f"{self.completed} completed repetitions exceed {self.attempted} attempted"
-        )
+        return f"{self.completed} completed repetitions exceed {self.attempted} attempted"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -202,10 +195,7 @@ class UnitConflict(Conflict):
 
     @property
     def message(self) -> str:
-        return (
-            f"quantity {self.quantity!r} is {self.known!r} in {self.project}, "
-            f"got {self.reported!r}"
-        )
+        return f"quantity {self.quantity!r} is {self.known!r} in {self.project}, got {self.reported!r}"
 
 
 @dataclass(frozen=True, kw_only=True)

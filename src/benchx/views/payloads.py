@@ -23,7 +23,13 @@ from .inputs import UTC, ViewError, _require_pyarrow, safe_path_segment, short_s
 from .marts import is_failed_status, is_measured
 
 VIEWS_FORMATS = ("json", "parquet")
-PARQUET_VIEW_FILES = ("series.parquet", "commits.parquet", "commit_nodes.parquet", "changes.parquet", "failures.parquet")
+PARQUET_VIEW_FILES = (
+    "series.parquet",
+    "commits.parquet",
+    "commit_nodes.parquet",
+    "changes.parquet",
+    "failures.parquet",
+)
 PARQUET_VIEW_ROW_GROUP_SIZE = 10_000
 
 NOTABLE = 0.05
@@ -156,45 +162,118 @@ def _parquet_view_schemas():
     pa, _ = _require_pyarrow("writing Parquet views")
     i32, f64, s, b = pa.int32(), pa.float64(), pa.string(), pa.bool_()
     return {
-        "series": pa.schema([
-            ("suite", s), ("case", s), ("params", s), ("quantity", s),
-            ("unit", s), ("direction", s), ("node", s), ("sha", s),
-            ("commit_order", i32), ("first_order", i32), ("committer_date", s),
-            ("points", i32), ("estimate", f64), ("vs_prev", f64),
-            ("vs_10", f64), ("vs_100", f64), ("noise", f64), ("cv", f64),
-            ("noise_rank", f64), ("status", s), ("reason", s),
-            ("attempt_order", i32), ("attempt_sha", s),
-        ]),
-        "history": pa.schema([
-            ("case", s), ("params", s), ("quantity", s), ("unit", s),
-            ("direction", s), ("node", s), ("commit_order", i32),
-            ("estimate", f64), ("min", f64), ("max", f64), ("n", i32),
-            ("status", s), ("reason", s),
-        ]),
-        "commits": pa.schema([
-            ("sha", s), ("short", s), ("subject", s), ("committer_date", s),
-            ("parent", s), ("commit_order", i32),
-            ("changes_start", i32), ("changes_end", i32),
-            ("failures_start", i32), ("failures_end", i32),
-        ]),
-        "commit_nodes": pa.schema([
-            ("sha", s), ("short", s), ("parent", s), ("subject", s),
-            ("committer_date", s), ("node", s), ("state", s), ("reason", s),
-            ("started_at", s), ("finished_at", s), ("suites_ok", i32),
-            ("suites_failed", i32), ("results", i32), ("commit_order", i32),
-            ("has_log", b), ("regressed", i32), ("improved", i32),
-            ("compared", i32), ("failed_results", i32),
-        ]),
-        "changes": pa.schema([
-            ("sha", s), ("suite", s), ("case", s), ("params", s),
-            ("quantity", s), ("unit", s), ("direction", s), ("node", s),
-            ("estimate", f64), ("prev_estimate", f64), ("rel_change", f64),
-            ("prev_sha", s), ("prev_is_parent", b), ("gap", i32), ("noise", f64),
-        ]),
-        "failures": pa.schema([
-            ("sha", s), ("suite", s), ("case", s), ("params", s),
-            ("quantity", s), ("node", s), ("status", s), ("reason", s),
-        ]),
+        "series": pa.schema(
+            [
+                ("suite", s),
+                ("case", s),
+                ("params", s),
+                ("quantity", s),
+                ("unit", s),
+                ("direction", s),
+                ("node", s),
+                ("sha", s),
+                ("commit_order", i32),
+                ("first_order", i32),
+                ("committer_date", s),
+                ("points", i32),
+                ("estimate", f64),
+                ("vs_prev", f64),
+                ("vs_10", f64),
+                ("vs_100", f64),
+                ("noise", f64),
+                ("cv", f64),
+                ("noise_rank", f64),
+                ("status", s),
+                ("reason", s),
+                ("attempt_order", i32),
+                ("attempt_sha", s),
+            ]
+        ),
+        "history": pa.schema(
+            [
+                ("case", s),
+                ("params", s),
+                ("quantity", s),
+                ("unit", s),
+                ("direction", s),
+                ("node", s),
+                ("commit_order", i32),
+                ("estimate", f64),
+                ("min", f64),
+                ("max", f64),
+                ("n", i32),
+                ("status", s),
+                ("reason", s),
+            ]
+        ),
+        "commits": pa.schema(
+            [
+                ("sha", s),
+                ("short", s),
+                ("subject", s),
+                ("committer_date", s),
+                ("parent", s),
+                ("commit_order", i32),
+                ("changes_start", i32),
+                ("changes_end", i32),
+                ("failures_start", i32),
+                ("failures_end", i32),
+            ]
+        ),
+        "commit_nodes": pa.schema(
+            [
+                ("sha", s),
+                ("short", s),
+                ("parent", s),
+                ("subject", s),
+                ("committer_date", s),
+                ("node", s),
+                ("state", s),
+                ("reason", s),
+                ("started_at", s),
+                ("finished_at", s),
+                ("suites_ok", i32),
+                ("suites_failed", i32),
+                ("results", i32),
+                ("commit_order", i32),
+                ("has_log", b),
+                ("regressed", i32),
+                ("improved", i32),
+                ("compared", i32),
+                ("failed_results", i32),
+            ]
+        ),
+        "changes": pa.schema(
+            [
+                ("sha", s),
+                ("suite", s),
+                ("case", s),
+                ("params", s),
+                ("quantity", s),
+                ("unit", s),
+                ("direction", s),
+                ("node", s),
+                ("estimate", f64),
+                ("prev_estimate", f64),
+                ("rel_change", f64),
+                ("prev_sha", s),
+                ("prev_is_parent", b),
+                ("gap", i32),
+                ("noise", f64),
+            ]
+        ),
+        "failures": pa.schema(
+            [
+                ("sha", s),
+                ("suite", s),
+                ("case", s),
+                ("params", s),
+                ("quantity", s),
+                ("node", s),
+                ("status", s),
+                ("reason", s),
+            ]
+        ),
     }
 
 
@@ -271,18 +350,20 @@ def _write_commit_parquet(
             f_total += len(sha_failures)
             f_end = f_total
 
-            commit_rows.append({
-                "sha": sha,
-                "short": head["short"],
-                "subject": head["subject"],
-                "committer_date": head["committer_date"],
-                "parent": head["parent"],
-                "commit_order": head["commit_order"],
-                "changes_start": c_start,
-                "changes_end": c_end,
-                "failures_start": f_start,
-                "failures_end": f_end,
-            })
+            commit_rows.append(
+                {
+                    "sha": sha,
+                    "short": head["short"],
+                    "subject": head["subject"],
+                    "committer_date": head["committer_date"],
+                    "parent": head["parent"],
+                    "commit_order": head["commit_order"],
+                    "changes_start": c_start,
+                    "changes_end": c_end,
+                    "failures_start": f_start,
+                    "failures_end": f_end,
+                }
+            )
 
         _flush(c_writer, c_buf, schemas["changes"])
         _flush(f_writer, f_buf, schemas["failures"])
@@ -471,25 +552,27 @@ def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> d
         if ch["rel_change"] is None or ch["commit_order"] != top_change_order.get(ch["node"]):
             continue
         lt = latest_by_key.get(series_key(ch))
-        top_movers.append({
-            "suite": ch["suite"],
-            "case": ch["case"],
-            "params": ch["params"],
-            "quantity": ch["quantity"],
-            "unit": ch["unit"],
-            "direction": ch["direction"],
-            "node": ch["node"],
-            "sha": ch["sha"],
-            "short": short_sha(ch["sha"]),
-            "estimate": ch["estimate"],
-            "prev_estimate": ch["prev_estimate"],
-            "rel_change": ch["rel_change"],
-            "prev_sha": ch["prev_sha"],
-            "prev_is_parent": ch["prev_is_parent"],
-            "gap": ch["gap"],
-            "noise": lt["noise"] if lt else None,
-            "points": lt["points"] if lt else None,
-        })
+        top_movers.append(
+            {
+                "suite": ch["suite"],
+                "case": ch["case"],
+                "params": ch["params"],
+                "quantity": ch["quantity"],
+                "unit": ch["unit"],
+                "direction": ch["direction"],
+                "node": ch["node"],
+                "sha": ch["sha"],
+                "short": short_sha(ch["sha"]),
+                "estimate": ch["estimate"],
+                "prev_estimate": ch["prev_estimate"],
+                "rel_change": ch["rel_change"],
+                "prev_sha": ch["prev_sha"],
+                "prev_is_parent": ch["prev_is_parent"],
+                "gap": ch["gap"],
+                "noise": lt["noise"] if lt else None,
+                "points": lt["points"] if lt else None,
+            }
+        )
     top_movers.sort(key=lambda m: abs(m["rel_change"]), reverse=True)
 
     regressed: list[dict] = []
@@ -509,17 +592,19 @@ def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> d
         top = newest_by_node.get(key[4])
         if top and a["attempt_sha"] == top["sha"] and is_failed_status(a["status"]):
             last_ok = latest_by_key[key]
-            failures.append({
-                "suite": key[0],
-                "case": key[1],
-                "params": key[2],
-                "quantity": key[3],
-                "node": key[4],
-                "status": a["status"],
-                "reason": a["reason"],
-                "sha": a["attempt_sha"],
-                "last_success_sha": last_ok["sha"] if last_ok.get("points") else None,
-            })
+            failures.append(
+                {
+                    "suite": key[0],
+                    "case": key[1],
+                    "params": key[2],
+                    "quantity": key[3],
+                    "node": key[4],
+                    "status": a["status"],
+                    "reason": a["reason"],
+                    "sha": a["attempt_sha"],
+                    "last_success_sha": last_ok["sha"] if last_ok.get("points") else None,
+                }
+            )
 
     noisiest = sorted(
         (
@@ -556,15 +641,17 @@ def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> d
     for (suite, node, sha), pts in suite_groups.items():
         times = [p["started_at"] for p in pts if p["started_at"] is not None]
         seconds = int((max(times) - min(times)).total_seconds()) if len(times) >= 2 else 0
-        suite_time.append({
-            "suite": suite,
-            "node": node,
-            "sha": sha,
-            "short": short_sha(sha),
-            "cases": len(pts),
-            "failed": sum(1 for p in pts if is_failed_status(p["status"])),
-            "seconds": seconds,
-        })
+        suite_time.append(
+            {
+                "suite": suite,
+                "node": node,
+                "sha": sha,
+                "short": short_sha(sha),
+                "cases": len(pts),
+                "failed": sum(1 for p in pts if is_failed_status(p["status"])),
+                "seconds": seconds,
+            }
+        )
     suite_time.sort(key=lambda r: (-r["seconds"], r["suite"], r["node"]))
 
     nodes = sorted({c["node"] for c in commits})
@@ -614,24 +701,26 @@ def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> d
             lt = latest_by_key.get(key, {})
             a = attempts[key]
             head = pts[-1]
-            spark_series.append({
-                "suite": head["suite"],
-                "case": head["case"],
-                "params": head["params"],
-                "quantity": head["quantity"],
-                "unit": head["unit"],
-                "direction": head["direction"],
-                "node": head["node"],
-                "latest": lt.get("estimate"),
-                "vs_prev": lt.get("vs_prev"),
-                "noise": lt.get("noise"),
-                "points": lt.get("points"),
-                "sha": lt.get("sha"),
-                "orders": [p["commit_order"] for p in pts],
-                "estimates": [p["estimate"] for p in pts],
-                "status": a["status"],
-                "reason": a["reason"],
-            })
+            spark_series.append(
+                {
+                    "suite": head["suite"],
+                    "case": head["case"],
+                    "params": head["params"],
+                    "quantity": head["quantity"],
+                    "unit": head["unit"],
+                    "direction": head["direction"],
+                    "node": head["node"],
+                    "latest": lt.get("estimate"),
+                    "vs_prev": lt.get("vs_prev"),
+                    "noise": lt.get("noise"),
+                    "points": lt.get("points"),
+                    "sha": lt.get("sha"),
+                    "orders": [p["commit_order"] for p in pts],
+                    "estimates": [p["estimate"] for p in pts],
+                    "status": a["status"],
+                    "reason": a["reason"],
+                }
+            )
         _dump({"axis": spark_axis, "series": spark_series}, out / "sparks.json")
         counts["sparks"] = len(spark_series)
     else:
@@ -742,15 +831,17 @@ def build_views(marts: dict, data_dir: Path, *, views_format: str = "json") -> d
     failures_by_sha: dict[str, list[dict]] = defaultdict(list)
     for pt in points:
         if is_failed_status(pt["status"]):
-            failures_by_sha[pt["sha"]].append({
-                "suite": pt["suite"],
-                "case": pt["case"],
-                "params": pt["params"],
-                "quantity": pt["quantity"],
-                "node": pt["node"],
-                "status": pt["status"],
-                "reason": pt["reason"],
-            })
+            failures_by_sha[pt["sha"]].append(
+                {
+                    "suite": pt["suite"],
+                    "case": pt["case"],
+                    "params": pt["params"],
+                    "quantity": pt["quantity"],
+                    "node": pt["node"],
+                    "status": pt["status"],
+                    "reason": pt["reason"],
+                }
+            )
 
     if views_format == "parquet":
         counts["commit_pages"] = _write_commit_parquet(

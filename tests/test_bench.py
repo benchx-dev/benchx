@@ -14,7 +14,7 @@ from benchx.errors import SessionError
 from benchx.store import Store
 from conftest import SOURCE_URI, requires_pyarrow
 
-MODULE = textwrap.dedent('''
+MODULE = textwrap.dedent("""
     def bench_a():
         sum(range(100))
 
@@ -23,7 +23,7 @@ MODULE = textwrap.dedent('''
 
     def helper():
         pass
-''')
+""")
 FAST = ["--processes", "2", "--values", "2", "--loops", "20"]
 
 
@@ -33,8 +33,9 @@ def levels(precision):
 
 def write_config(directory, precision):
     path = directory / "benchx.conf.json"
-    path.write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
-                                "adapter": {"name": "pyperf", "precision": precision}}))
+    path.write_text(
+        json.dumps({"schema_version": "benchx/config/0.1.0", "adapter": {"name": "pyperf", "precision": precision}})
+    )
     return path
 
 
@@ -52,9 +53,18 @@ def test_order_holds_the_resolved_precision(tree):
     cfg = config.load(tree)
     harness, precision = session._harness("pyperf", {"values": 5}, cfg.adapter["precision"])
     side = session._side(str(tree), "mod.py", "describe", harness)
-    order = session._order(side, harness=harness, suite="mod.py", filter=harnesses.exact_filter(["bench_a"]),
-                           quantities=["wall-time"], precision=precision, environment_variables=None, project=None,
-                           run_key="r", source_uri=SOURCE_URI)
+    order = session._order(
+        side,
+        harness=harness,
+        suite="mod.py",
+        filter=harnesses.exact_filter(["bench_a"]),
+        quantities=["wall-time"],
+        precision=precision,
+        environment_variables=None,
+        project=None,
+        run_key="r",
+        source_uri=SOURCE_URI,
+    )
     assert cfg.path == tree / "benchx.conf.json"
     assert core.check(order, "work-order") == []
     assert levels(order["precision"]) == {"process": 7, "value": 5}
@@ -74,30 +84,42 @@ def test_bench_command_runs_and_ingests(tree, capsys):
     out = capsys.readouterr()
     assert "bench_a" in out.out and "success" in out.out and "bench_b" not in out.out
     assert "2 processes x 2 values" in out.err
-    results = [d for d in Store(tree / "store.parquet").documents("cli") if d["measurement"]["quantity"]["name"] == "wall-time"]
+    results = [
+        d for d in Store(tree / "store.parquet").documents("cli") if d["measurement"]["quantity"]["name"] == "wall-time"
+    ]
     assert [d["coordinates"]["workload"]["name"] for d in results] == ["bench_a"]
     order = json.loads(next((tree / "results" / "cli").glob("workorder-*.json")).read_text())
     assert levels(order["precision"]) == {"process": 2, "value": 2}
 
 
 def test_a_function_with_params_is_named_by_itself_or_by_one_combination(tree, capsys):
-    (tree / "mod.py").write_text(textwrap.dedent('''
+    (tree / "mod.py").write_text(
+        textwrap.dedent("""
         def bench_sort(n, key):
             sorted(range(n))
 
         bench_sort.params = ([10, 100], ["a", "b"])
         bench_sort.param_names = ["n", "key"]
-    '''))
+    """)
+    )
 
     def ran(run_key):
-        found = [json.loads(p.read_text()) for p in (tree / "results" / run_key).glob("*.json")
-                 if not p.name.startswith("workorder-")]
-        return sorted(d["coordinates"]["workload"]["parameters"]["n"] + d["coordinates"]["workload"]["parameters"]["key"]
-                      for d in found if d["measurement"].get("kind") != "condition")
+        found = [
+            json.loads(p.read_text())
+            for p in (tree / "results" / run_key).glob("*.json")
+            if not p.name.startswith("workorder-")
+        ]
+        return sorted(
+            d["coordinates"]["workload"]["parameters"]["n"] + d["coordinates"]["workload"]["parameters"]["key"]
+            for d in found
+            if d["measurement"].get("kind") != "condition"
+        )
 
     assert cli.main(["bench", "mod.py", "bench_sort", "--run-key", "all", "--no-ingest", *FAST]) == cli.EXIT_OK
     assert ran("all") == ["10'a'", "10'b'", "100'a'", "100'b'"]  # the name alone: every combination
-    assert cli.main(["bench", "mod.py", "bench_sort(100, 'a')", "--run-key", "one", "--no-ingest", *FAST]) == cli.EXIT_OK
+    assert (
+        cli.main(["bench", "mod.py", "bench_sort(100, 'a')", "--run-key", "one", "--no-ingest", *FAST]) == cli.EXIT_OK
+    )
     assert ran("one") == ["100'a'"]
     assert cli.main(["bench", "mod.py", "bench_srot", "--run-key", "typo", "--no-ingest", *FAST]) == cli.EXIT_REFUSED
     assert "selects no case in mod.py\n  similar: bench_sort\n" in capsys.readouterr().err
@@ -106,20 +128,30 @@ def test_a_function_with_params_is_named_by_itself_or_by_one_combination(tree, c
 def test_shorthand_order_is_stable(tree):
     """The order `bx bench MODULE.py FUNCTION` writes; unchanged by how bench is wired inside. The
     name may be followed by `(…)`, the arguments of one combination of a function with params."""
-    assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "snap", "--no-ingest", "-e", "A=1", *FAST]) == cli.EXIT_OK
+    assert (
+        cli.main(["bench", "mod.py", "bench_a", "--run-key", "snap", "--no-ingest", "-e", "A=1", *FAST]) == cli.EXIT_OK
+    )
     order = json.loads((tree / "results" / "snap" / "orders" / "order.json").read_text())
     here = str(tree.resolve())
     assert order.pop("work_order_id").startswith("urn:uuid:")
     assert order == {
-        "schema_version": "benchx/work-order/0.1.0", "state": "resolved",
+        "schema_version": "benchx/work-order/0.1.0",
+        "state": "resolved",
         "suites": [{"adapter": "pyperf", "suite": "mod.py", "filter": r"^(bench_a)(\(.*\))?$"}],
-        "target": {"kind": "working_tree", "path": here, "source_dir": here,
-                   "source": {"uri": f"file://{here}", "type": "git"}},
+        "target": {
+            "kind": "working_tree",
+            "path": here,
+            "source_dir": here,
+            "source": {"uri": f"file://{here}", "type": "git"},
+        },
         "quantities": ["wall-time"],
-        "precision": {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
-                      "calibration": {"mode": "fixed", "n_iterations": 20},
-                      "warmup": {"mode": "count", "n_warmup": 1}},
-        "timeouts": {"case_s": 60, "order_s": 600}, "run_key": "snap",
+        "precision": {
+            "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
+            "calibration": {"mode": "fixed", "n_iterations": 20},
+            "warmup": {"mode": "count", "n_warmup": 1},
+        },
+        "timeouts": {"case_s": 60, "order_s": 600},
+        "run_key": "snap",
         "requester": {"kind": "workbench", "name": "bx"},
         "plan": [{"id": "p0", "case": "*", "quantity": "wall-time"}],
         "environment_variables": {"A": "1"},
@@ -128,8 +160,11 @@ def test_shorthand_order_is_stable(tree):
 
 def test_unversioned_benchmark_is_identified_by_its_tree(tree):
     assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "nogit", "--no-ingest", *FAST]) == cli.EXIT_OK
-    documents = [json.loads(p.read_text()) for p in (tree / "results" / "nogit").glob("*.json")
-                 if not p.name.startswith("workorder-")]
+    documents = [
+        json.loads(p.read_text())
+        for p in (tree / "results" / "nogit").glob("*.json")
+        if not p.name.startswith("workorder-")
+    ]
     assert documents
     for document in documents:
         assert core.check(document, "measurement-result") == []
@@ -158,18 +193,21 @@ def test_bench_rejects_a_missing_module_and_bad_env(tree, capsys):
     assert not (tree / "results").exists()
 
 
-@pytest.mark.parametrize("remote, uri", [
-    ("git@github.com:ev-br/benchx.git", "ssh://git@github.com/~/ev-br/benchx.git"),
-    ("git@host:/srv/git/benchx.git", "ssh://git@host/srv/git/benchx.git"),
-    ("host:repos/x.git", "ssh://host/~/repos/x.git"),
-    ("git@[::1]:repo.git", "ssh://git@[::1]/~/repo.git"),
-    ("git@[::1]:/srv/repo.git", "ssh://git@[::1]/srv/repo.git"),
-    ("https://github.com/ev-br/benchx.git", "https://github.com/ev-br/benchx.git"),
-    ("ssh://git@github.com/ev-br/benchx.git", "ssh://git@github.com/ev-br/benchx.git"),
-    ("/srv/git/benchx.git", "file:///srv/git/benchx.git"),
-    ("C:\\src\\benchx", "file:///C:/src/benchx"),
-    ("file:///srv/git/benchx.git", "file:///srv/git/benchx.git"),
-])
+@pytest.mark.parametrize(
+    "remote, uri",
+    [
+        ("git@github.com:ev-br/benchx.git", "ssh://git@github.com/~/ev-br/benchx.git"),
+        ("git@host:/srv/git/benchx.git", "ssh://git@host/srv/git/benchx.git"),
+        ("host:repos/x.git", "ssh://host/~/repos/x.git"),
+        ("git@[::1]:repo.git", "ssh://git@[::1]/~/repo.git"),
+        ("git@[::1]:/srv/repo.git", "ssh://git@[::1]/srv/repo.git"),
+        ("https://github.com/ev-br/benchx.git", "https://github.com/ev-br/benchx.git"),
+        ("ssh://git@github.com/ev-br/benchx.git", "ssh://git@github.com/ev-br/benchx.git"),
+        ("/srv/git/benchx.git", "file:///srv/git/benchx.git"),
+        ("C:\\src\\benchx", "file:///C:/src/benchx"),
+        ("file:///srv/git/benchx.git", "file:///srv/git/benchx.git"),
+    ],
+)
 def test_remotes_become_uris(remote, uri):
     assert normalize_remote(remote) == uri
     assert normalize_remote(uri) == uri  # idempotent
@@ -180,8 +218,22 @@ def test_relative_local_remotes_resolve_against_base(tmp_path):
 
 
 def test_source_uri_flag_overrides_the_remote(tree):
-    assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "uri", "--no-ingest", "--source-uri",
-                     "https://example.org/r.git", *FAST]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                "mod.py",
+                "bench_a",
+                "--run-key",
+                "uri",
+                "--no-ingest",
+                "--source-uri",
+                "https://example.org/r.git",
+                *FAST,
+            ]
+        )
+        == cli.EXIT_OK
+    )
     order = json.loads((tree / "results" / "uri" / "orders" / "order.json").read_text())
     assert order["target"]["source"]["uri"] == "https://example.org/r.git"
 
@@ -190,8 +242,26 @@ def test_bench_places_calls_in_a_session(tree):
     """--label, --round and --slot make separate `bx bench` calls the sides of one session."""
     sides = [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
     for slot, (side, round_) in enumerate(sides):
-        assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "S", "--label", f"env={side}",
-                         "--round", str(round_), "--slot", str(slot), "--no-ingest", *FAST]) == cli.EXIT_OK
+        assert (
+            cli.main(
+                [
+                    "bench",
+                    "mod.py",
+                    "bench_a",
+                    "--run-key",
+                    "S",
+                    "--label",
+                    f"env={side}",
+                    "--round",
+                    str(round_),
+                    "--slot",
+                    str(slot),
+                    "--no-ingest",
+                    *FAST,
+                ]
+            )
+            == cli.EXIT_OK
+        )
     out = tree / "results" / "S"
     assert sorted(p.name for p in (out / "orders").glob("*.json")) == [f"order-{n:04d}.json" for n in range(4)]
     found = []
@@ -200,26 +270,32 @@ def test_bench_places_calls_in_a_session(tree):
         if path.name.startswith("workorder-") or document["measurement"].get("kind") == "condition":
             continue
         assert core.check(document, "measurement-result") == []
-        found.append((document["procedure"]["slot"], document["procedure"]["round"],
-                      document["provenance"]["labels"]))
-    assert sorted(found, key=lambda f: f[0]) == [(0, 0, {"env": "a"}), (1, 0, {"env": "b"}),
-                                                  (2, 1, {"env": "a"}), (3, 1, {"env": "b"})]
+        found.append((document["procedure"]["slot"], document["procedure"]["round"], document["provenance"]["labels"]))
+    assert sorted(found, key=lambda f: f[0]) == [
+        (0, 0, {"env": "a"}),
+        (1, 0, {"env": "b"}),
+        (2, 1, {"env": "a"}),
+        (3, 1, {"env": "b"}),
+    ]
 
 
-@pytest.mark.parametrize("extra, message", [
-    (["--label", "env=a", "--round", "0", "--slot", "0"], "explicit --run-key"),
-    (["--slot", "0"], "explicit --run-key"),
-    (["--run-key", "S", "--label", "env=a"], "need --slot"),
-    (["--run-key", "S", "--round", "0"], "need --slot"),
-    (["--run-key", "S", "--slot", "0", "--label", "env"], "NAME=VALUE"),
-    (["--run-key", "S", "--slot", "0", "--label", "env=a", "--label", "env=b"], "given twice"),
-    (["--run-key", "S", "--slot", "-1"], "from 0"),
-    (["--run-key", "S", "--slot", "0", "--round", "-1"], "from 0"),
-    (["--run-key", "S", "--slot", "0", "--round", "5/5"], "numbered 0 to 4"),
-    (["--run-key", "S", "--slot", "0", "--round", "0/0"], "at least 1 round, not 0"),
-    (["--run-key", "S", "--slot", "0", "--round", "a"], "R/N"),
-    (["--run-key", "S", "--slot", "0", "--round", "1/x"], "R/N"),
-])
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        (["--label", "env=a", "--round", "0", "--slot", "0"], "explicit --run-key"),
+        (["--slot", "0"], "explicit --run-key"),
+        (["--run-key", "S", "--label", "env=a"], "need --slot"),
+        (["--run-key", "S", "--round", "0"], "need --slot"),
+        (["--run-key", "S", "--slot", "0", "--label", "env"], "NAME=VALUE"),
+        (["--run-key", "S", "--slot", "0", "--label", "env=a", "--label", "env=b"], "given twice"),
+        (["--run-key", "S", "--slot", "-1"], "from 0"),
+        (["--run-key", "S", "--slot", "0", "--round", "-1"], "from 0"),
+        (["--run-key", "S", "--slot", "0", "--round", "5/5"], "numbered 0 to 4"),
+        (["--run-key", "S", "--slot", "0", "--round", "0/0"], "at least 1 round, not 0"),
+        (["--run-key", "S", "--slot", "0", "--round", "a"], "R/N"),
+        (["--run-key", "S", "--slot", "0", "--round", "1/x"], "R/N"),
+    ],
+)
 def test_session_flags_are_refused_before_anything_runs(extra, message, tree, capsys):
     assert cli.main(["bench", "mod.py", "bench_a", "--no-ingest", *extra, *FAST]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err

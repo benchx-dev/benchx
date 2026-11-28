@@ -104,9 +104,7 @@ def expected_status(attributes: list[str], language: str) -> int:
         return 0
 
     if language not in {"sh", "bash"}:
-        raise ValueError(
-            f"{given[0]}: only sh and bash blocks take exit=; a {language} block fails by raising"
-        )
+        raise ValueError(f"{given[0]}: only sh and bash blocks take exit=; a {language} block fails by raising")
 
     if len(given) > 1:
         raise ValueError(f"{' '.join(given)}: a block has one exit=")
@@ -134,7 +132,7 @@ def page_fence(fence_lines: list[str], token) -> list[str]:
 
     opening = fence_lines[0]
     indent = opening[: len(opening) - len(opening.lstrip(" "))]
-    newline = opening[len(opening.rstrip("\r\n")):]
+    newline = opening[len(opening.rstrip("\r\n")) :]
 
     return [f"{indent}{token.markup}{' '.join(kept)}{newline}", *fence_lines[1:]]
 
@@ -164,8 +162,7 @@ def failed_results(workdir: Path) -> dict[str, str] | None:
 
     if done.returncode:
         raise RuntimeError(
-            f"bx head could not read the store (status {done.returncode}): "
-            f"{(done.stderr or done.stdout).strip()}"
+            f"bx head could not read the store (status {done.returncode}): {(done.stderr or done.stdout).strip()}"
         )
 
     failed = {}
@@ -181,7 +178,9 @@ def failed_results(workdir: Path) -> dict[str, str] | None:
         parameters = ", ".join(f"{k}={v}" for k, v in (workload.get("parameters") or {}).items())
         case = workload["name"] + (f" [{parameters}]" if parameters else "")
         message = (result["provenance"].get("info") or {}).get("message")
-        said = f"{measurement['status']} ({measurement['reason']})" if "reason" in measurement else measurement["status"]
+        said = (
+            f"{measurement['status']} ({measurement['reason']})" if "reason" in measurement else measurement["status"]
+        )
 
         failed[result["ingest_key"]] = (
             f"{result['provenance']['run_key']}: {case}, {measurement['quantity']['name']}: {said}"
@@ -205,14 +204,17 @@ def execute_bash(
     chunks = []
     before = failed_results(workdir) if expected == 0 else None
 
-    with logfile.open("w", encoding="utf-8") as log, subprocess.Popen(
-        ["bash", "-e", "-o", "pipefail", "-c", code],
-        cwd=workdir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    ) as process:
+    with (
+        logfile.open("w", encoding="utf-8") as log,
+        subprocess.Popen(
+            ["bash", "-e", "-o", "pipefail", "-c", code],
+            cwd=workdir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        ) as process,
+    ):
         assert process.stdout is not None
 
         for line in process.stdout:
@@ -225,9 +227,7 @@ def execute_bash(
 
     if status != expected:
         marked = f", not the exit={expected} of the block" if expected else ""
-        raise RuntimeError(
-            f"Bash exited with status {status}{marked}; see {logfile}"
-        )
+        raise RuntimeError(f"Bash exited with status {status}{marked}; see {logfile}")
 
     if expected:
         print(f"[exit status {status}, as the block says]", flush=True)
@@ -284,25 +284,17 @@ def github_annotation(
     message: str,
 ) -> None:
     """Emit a GitHub Actions error annotation for a source line."""
+
     def escape(value: str, property: bool = False) -> str:
-        value = (
-            str(value)
-            .replace("%", "%25")
-            .replace("\r", "%0D")
-            .replace("\n", "%0A")
-        )
+        value = str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
         if property:
-            value = (
-                value.replace(":", "%3A")
-                .replace(",", "%2C")
-            )
+            value = value.replace(":", "%3A").replace(",", "%2C")
 
         return value
 
     print(
-        f"::error file={escape(source, True)},"
-        f"line={line}::{escape(message)}",
+        f"::error file={escape(source, True)},line={line}::{escape(message)}",
         flush=True,
     )
 
@@ -341,12 +333,7 @@ def run(
     # markdown-it-py identifies fences and headings.
     # Do not filter on token.level: valid fenced blocks may
     # have a nonzero nesting level.
-    events = [
-        token
-        for token in tokens
-        if token.map is not None
-        and token.type in {"fence", "heading_open"}
-    ]
+    events = [token for token in tokens if token.map is not None and token.type in {"fence", "heading_open"}]
 
     rendered = []
     cursor = 0
@@ -376,10 +363,7 @@ def run(
                 parts = token.info.strip().split()
                 language = parts[0] if parts else ""
 
-                executable = (
-                    language in EXECUTABLE_LANGUAGES
-                    and "noexec" not in parts[1:]
-                )
+                executable = language in EXECUTABLE_LANGUAGES and "noexec" not in parts[1:]
 
                 if language in SNAPSHOT_LANGUAGES and awaiting_output:
                     # Remove the first committed text or json output
@@ -408,8 +392,7 @@ def run(
                     rendered.extend(page_fence(lines[start:end], token))
 
                     print(
-                        f"\n[{block_number}] "
-                        f"{source}:{line} ({' '.join(parts)})",
+                        f"\n[{block_number}] {source}:{line} ({' '.join(parts)})",
                         flush=True,
                     )
 
@@ -434,9 +417,7 @@ def run(
 
                     except BaseException as exc:
                         try:
-                            relative_source = (
-                                source.relative_to(repository_root)
-                            )
+                            relative_source = source.relative_to(repository_root)
                         except ValueError:
                             relative_source = source
 
@@ -447,8 +428,7 @@ def run(
                         )
 
                         print(
-                            f"Failed block {block_number}."
-                            + (f" Diagnostics: {logfile}" if logfile.exists() else ""),
+                            f"Failed block {block_number}." + (f" Diagnostics: {logfile}" if logfile.exists() else ""),
                             file=sys.stderr,
                         )
                         raise
@@ -492,9 +472,7 @@ def run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Execute Markdown examples and capture outputs"
-    )
+    parser = argparse.ArgumentParser(description="Execute Markdown examples and capture outputs")
 
     parser.add_argument(
         "--source",

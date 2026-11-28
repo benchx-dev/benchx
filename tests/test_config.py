@@ -29,6 +29,7 @@ def tree(tmp):
 
 # --- where it is found -------------------------------------------------------------
 
+
 def test_without_a_file_the_working_directory_is_the_root(tree):
     cfg = config.load(tree)
     assert (cfg.path, cfg.root, cfg.data) == (None, tree.resolve(), {})
@@ -69,15 +70,19 @@ def test_the_provider_runs_in_the_root(tree):
 
 # --- what is refused ---------------------------------------------------------------
 
-@pytest.mark.parametrize("content, message", [
-    ({"adapter": {"name": "nonesuch"}}, "no adapter named"),
-    ({"adapter": {"name": "pyperf", "quantities": ["cpu-time"]}}, "does not report cpu-time"),
-    ({"adapter": {"name": "pyperf", "precision": {"calibration": {"mode": "fixed"}}}}, "n_iterations"),
-    ({"adapter": {"name": "pyperf", "precision": {"warmups": 3}}}, "warmups"),
-    ({"adapter": {"suite": "s"}}, "name"),
-    ({"provider": {"command": []}}, "command"),
-    ({"speed": "fast"}, "speed"),
-])
+
+@pytest.mark.parametrize(
+    "content, message",
+    [
+        ({"adapter": {"name": "nonesuch"}}, "no adapter named"),
+        ({"adapter": {"name": "pyperf", "quantities": ["cpu-time"]}}, "does not report cpu-time"),
+        ({"adapter": {"name": "pyperf", "precision": {"calibration": {"mode": "fixed"}}}}, "n_iterations"),
+        ({"adapter": {"name": "pyperf", "precision": {"warmups": 3}}}, "warmups"),
+        ({"adapter": {"suite": "s"}}, "name"),
+        ({"provider": {"command": []}}, "command"),
+        ({"speed": "fast"}, "speed"),
+    ],
+)
 def test_a_bad_file_is_refused(tree, content, message):
     write_config(tree, **content)
     with pytest.raises(config.ConfigError, match=message):
@@ -102,6 +107,7 @@ def test_the_old_files_are_not_read_and_not_ignored(tree, legacy):
 
 # --- picking a value ---------------------------------------------------------------
 
+
 def test_the_command_line_wins_then_the_file_then_the_default(tree):
     cfg = config.load(tree)
     assert cfg.pick("flag", "file", "default", flag="--x", key="x") == "flag"
@@ -112,10 +118,14 @@ def test_the_command_line_wins_then_the_file_then_the_default(tree):
 
 
 def test_a_missing_required_value_names_the_flag_and_the_key(tree):
-    with pytest.raises(config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*none found"):
+    with pytest.raises(
+        config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*none found"
+    ):
         config.load(tree).pick(None, None, flag="--suite", key="adapter.suite")
     write_config(tree)
-    with pytest.raises(config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*benchx\.conf\.json"):
+    with pytest.raises(
+        config.ConfigError, match=r"--suite is required: give it, or set adapter\.suite in .*benchx\.conf\.json"
+    ):
         config.load(tree).pick(None, None, flag="--suite", key="adapter.suite")
 
 
@@ -125,8 +135,14 @@ def test_a_provider_is_needed_only_when_a_target_asks_for_it(tree):
         cfg.require_provider("@plain")
 
 
-@pytest.mark.parametrize("text, names", [("wall-time", ["wall-time"]), ("wall-time,cpu-time", ["wall-time", "cpu-time"]),
-                                         (" wall-time , cpu-time ", ["wall-time", "cpu-time"])])
+@pytest.mark.parametrize(
+    "text, names",
+    [
+        ("wall-time", ["wall-time"]),
+        ("wall-time,cpu-time", ["wall-time", "cpu-time"]),
+        (" wall-time , cpu-time ", ["wall-time", "cpu-time"]),
+    ],
+)
 def test_quantities_are_a_comma_separated_list(text, names):
     assert config.parse_quantities(text) == names
 
@@ -139,9 +155,12 @@ def test_empty_and_repeated_quantities_are_refused(text):
 
 # --- precision ---------------------------------------------------------------------
 
+
 def test_the_file_overrides_the_defaults_and_flags_override_the_file(tree):
-    file_precision = {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 7}]},
-                      "calibration": {"mode": "fixed", "n_iterations": 30}}
+    file_precision = {
+        "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 7}]},
+        "calibration": {"mode": "fixed", "n_iterations": 30},
+    }
     pyperf = harnesses.PYPERF
     assert levels(pyperf.precision({})) == {"process": 20, "value": 3}
     precision = pyperf.precision({}, file_precision)
@@ -163,6 +182,7 @@ def test_google_benchmark_precision_comes_from_the_same_layers():
 
 
 # --- bx config -----------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("adapter", sorted(harnesses.HARNESSES))
 def test_init_writes_a_valid_file_that_states_the_defaults(tree, adapter, capsys):
@@ -186,11 +206,14 @@ def test_show_says_where_each_value_comes_from(tree, monkeypatch, capsys):
 
 # --- one file for the adapters that share a precision ---------------------------------
 
-TIMING = {"quantities": ["wall-time"],
-          "precision": {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 5},
-                                                                    {"unit": "value", "n": 3}]},
-                        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.1},
-                        "warmup": {"mode": "count", "n_warmup": 1}}}
+TIMING = {
+    "quantities": ["wall-time"],
+    "precision": {
+        "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 5}, {"unit": "value", "n": 3}]},
+        "calibration": {"mode": "adaptive", "minimum_sample_seconds": 0.1},
+        "warmup": {"mode": "count", "n_warmup": 1},
+    },
+}
 
 
 def settle(tree, monkeypatch, *argv):
@@ -223,9 +246,18 @@ def test_without_an_adapter_flag_the_files_adapter_is_used(tree, monkeypatch):
     assert settle(tree, monkeypatch, "--suite", "s")["adapter"] == "asv"
 
 
-@pytest.mark.parametrize("named, given", [("google-benchmark", "pyperf"), ("google-benchmark", "asv"),
-                                          ("pyperf", "google-benchmark"), ("asv", "google-benchmark")])
+@pytest.mark.parametrize(
+    "named, given",
+    [
+        ("google-benchmark", "pyperf"),
+        ("google-benchmark", "asv"),
+        ("pyperf", "google-benchmark"),
+        ("asv", "google-benchmark"),
+    ],
+)
 def test_an_adapter_of_another_family_is_refused(tree, monkeypatch, named, given):
     write_config(tree, adapter={"name": named})
-    with pytest.raises(config.ConfigError, match=rf"adapter {given!r}, but .* sets adapter\.name to {named!r}.*precision"):
+    with pytest.raises(
+        config.ConfigError, match=rf"adapter {given!r}, but .* sets adapter\.name to {named!r}.*precision"
+    ):
         settle(tree, monkeypatch, "--adapter", given, "--suite", "s")

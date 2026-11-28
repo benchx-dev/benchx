@@ -22,20 +22,20 @@ PYPERF = ["--processes", "2", "--values", "2", "--loops", "20", "--no-project"]
 ASV = ["--processes", "2", "--values", "2", "--warmups", "0", "--min-time", "0.001", "--no-project"]
 
 # §2 of the plan: one function, and the two values of `role` select what it runs.
-ONE_PARAMETER = textwrap.dedent('''
+ONE_PARAMETER = textwrap.dedent("""
     def bench_truncate(role):
         sum(range(10 if role == "baseline" else 2000))
 
     bench_truncate.params = ["baseline", "variant"]
     bench_truncate.param_names = ["role"]
-''')
-TWO_PARAMETERS = textwrap.dedent('''
+""")
+TWO_PARAMETERS = textwrap.dedent("""
     def bench_truncate(role, size):
         sum(range(size if role == "baseline" else 20 * size))
 
     bench_truncate.params = [["baseline", "variant"], [10, 100]]
     bench_truncate.param_names = ["role", "size"]
-''')
+""")
 
 
 def make_tree(root, files):
@@ -95,7 +95,11 @@ def test_the_loop_compares_the_two_values(tree, capsys):
     assert doc["sides"]["varying"] == "coordinates.workload.parameters.role"
     assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (BASELINE, VARIANT)
     [unit] = doc["units"]
-    assert unit["workload"] == {"name": "bench_truncate"} and unit["details"]["rounds"] == 3 and unit["effect"]["value"] > 0
+    assert (
+        unit["workload"] == {"name": "bench_truncate"}
+        and unit["details"]["rounds"] == 3
+        and unit["effect"]["value"] > 0
+    )
     assert doc["local_only"] is False  # a clean tree: the store and the results are not part of it
 
 
@@ -124,7 +128,8 @@ def test_a_second_parameter_makes_one_unit_per_value_of_it(tmp, monkeypatch, cap
     assert code == cli.EXIT_OK and doc["failed_invariants"] == [] and "varying:" not in err
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "bench_truncate", "parameters": {"size": "10"}},
-        {"name": "bench_truncate", "parameters": {"size": "100"}}]
+        {"name": "bench_truncate", "parameters": {"size": "100"}},
+    ]
     assert all(u["effect"]["value"] > 0 for u in doc["units"])
     cli.main(["compare", "--run", RUN, "--profile", "variants", "--baseline", BASELINE, "--vary", "role"])
     shown = capsys.readouterr().out
@@ -166,31 +171,33 @@ def test_an_uncommitted_edit_is_compared_and_named(tree, capsys):
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
     # The suite is in the subject's tree, so the benchmark is dirty as the subject is (#89).
     assert doc["local_only"] is True and set(doc["units"][0]["caveats"]) == {
-        f"{side}: dirty-{what}-tree" for side in ("baseline", "contender") for what in ("subject", "benchmark")}
+        f"{side}: dirty-{what}-tree" for side in ("baseline", "contender") for what in ("subject", "benchmark")
+    }
 
 
 # --- the same with an asv benchmark directory ---------------------------------------------------
 
 ASV_CONF = '{"version": 1, "project": "uc02", "benchmark_dir": "benchmarks"}\n'
-ASV_ONE = textwrap.dedent('''
+ASV_ONE = textwrap.dedent("""
     def time_truncate(role):
         sum(range(10 if role == "baseline" else 2000))
 
     time_truncate.params = ["baseline", "variant"]
     time_truncate.param_names = ["role"]
-''')
-ASV_TWO = textwrap.dedent('''
+""")
+ASV_TWO = textwrap.dedent("""
     def time_truncate(role, size):
         sum(range(size if role == "baseline" else 20 * size))
 
     time_truncate.params = [["baseline", "variant"], [10, 100]]
     time_truncate.param_names = ["role", "size"]
-''')
+""")
 
 
 def asv_tree(tmp, monkeypatch, source):
-    path = make_tree(tmp / "proj", {"asv.conf.json": ASV_CONF, "benchmarks/__init__.py": "",
-                                    "benchmarks/trunc.py": source})
+    path = make_tree(
+        tmp / "proj", {"asv.conf.json": ASV_CONF, "benchmarks/__init__.py": "", "benchmarks/trunc.py": source}
+    )
     monkeypatch.chdir(path)
     return path
 
@@ -213,15 +220,35 @@ def test_the_loop_with_an_asv_suite_and_a_second_parameter(tmp, monkeypatch, cap
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "trunc.time_truncate", "parameters": {"size": "10"}},
-        {"name": "trunc.time_truncate", "parameters": {"size": "100"}}]
+        {"name": "trunc.time_truncate", "parameters": {"size": "100"}},
+    ]
 
 
 # --- measure mode: the same loop in one command (§1) --------------------------------------------
 
+
 def measure(capsys, *extra):
     capsys.readouterr()
-    code = cli.main(["compare", ".", "--profile", "variants", "--suite", "mod.py", "--adapter", "pyperf",
-                     "--rounds", "3", *FEW, "--run-key", RUN, "--json", *PYPERF, *extra])
+    code = cli.main(
+        [
+            "compare",
+            ".",
+            "--profile",
+            "variants",
+            "--suite",
+            "mod.py",
+            "--adapter",
+            "pyperf",
+            "--rounds",
+            "3",
+            *FEW,
+            "--run-key",
+            RUN,
+            "--json",
+            *PYPERF,
+            *extra,
+        ]
+    )
     captured = capsys.readouterr()
     return code, (json.loads(captured.out) if captured.out.strip() else None), captured.err
 
@@ -232,7 +259,11 @@ def test_measure_mode_runs_the_loop_in_one_command_and_equals_read_mode(tree, ca
     assert "varying: role (the only parameter)" in err and "round 3/3 role='variant'" in err
     assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (BASELINE, VARIANT) and doc["local_only"] is False
     [unit] = doc["units"]
-    assert unit["workload"] == {"name": "bench_truncate"} and unit["details"]["rounds"] == 3 and unit["effect"]["value"] > 0
+    assert (
+        unit["workload"] == {"name": "bench_truncate"}
+        and unit["details"]["rounds"] == 3
+        and unit["effect"]["value"] > 0
+    )
     # What the session stored compares to the same document when read back (criterion 8).
     code, again, _ = compare(capsys)
     assert code == cli.EXIT_OK and again == doc
@@ -241,7 +272,9 @@ def test_measure_mode_runs_the_loop_in_one_command_and_equals_read_mode(tree, ca
 def test_measure_mode_takes_the_baseline_value(tree, capsys):
     code, doc, _ = measure(capsys, "--baseline", VARIANT)
     assert code == cli.EXIT_OK and doc["failed_invariants"] == []
-    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (VARIANT, BASELINE) and doc["units"][0]["effect"]["value"] < 0
+    assert (doc["sides"]["baseline"], doc["sides"]["contender"]) == (VARIANT, BASELINE) and doc["units"][0]["effect"][
+        "value"
+    ] < 0
 
 
 def test_measure_mode_refuses_a_baseline_that_is_not_a_value_before_running(tree, capsys):

@@ -10,7 +10,7 @@ from benchx import collectors, compare, config, core, runner
 from conftest import git, warnings_of
 
 
-def spec(name="facts", script='print(\'{"a": 1}\')', **extra):
+def spec(name="facts", script="print('{\"a\": 1}')", **extra):
     return {"name": name, "command": [sys.executable, "-c", script], **extra}
 
 
@@ -28,16 +28,27 @@ def test_facts_are_recorded_in_full_and_in_summary(tmp):
     collected = run_all([spec(script=script)], tmp)
     assert collected.warnings == [] and collected.refusals == []
     assert collected.system["facts"]["version"] == "9"
-    assert collected.system["facts"]["sha256"] == core.sha256_hex(core.canonical({"big": [1, 2], "summary": {"version": "9"}}))
+    assert collected.system["facts"]["sha256"] == core.sha256_hex(
+        core.canonical({"big": [1, 2], "summary": {"version": "9"}})
+    )
     ((kind, media_type, path),) = collected.artifacts
     assert (kind, media_type) == ("collector-output", "application/json")
     assert json.loads(path.read_text())["big"] == [1, 2]
 
 
-@pytest.mark.parametrize("script", ["import sys; sys.exit(3)", "print('not json')", "print('[1, 2]')",
-                                    "print('{\"a\": NaN}')", "print('{\"a\": 1e999}')",
-                                    "print('{\"a\": 1, \"a\": 2}')", "print('{\"a\": 9007199254740993}')",
-                                    "import time; time.sleep(5)"])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "import sys; sys.exit(3)",
+        "print('not json')",
+        "print('[1, 2]')",
+        "print('{\"a\": NaN}')",
+        "print('{\"a\": 1e999}')",
+        'print(\'{"a": 1, "a": 2}\')',
+        "print('{\"a\": 9007199254740993}')",
+        "import time; time.sleep(5)",
+    ],
+)
 def test_a_failed_collector_adds_no_facts_and_only_warns(tmp, script):
     collected = run_all([spec(script=script, timeout_s=1)], tmp)
     assert collected.warnings == ["collector-failed"] and collected.system == {} and collected.refusals == []
@@ -69,8 +80,9 @@ def test_expect_compares_by_value(tmp):
     assert "expect /a: declared 2, observed 1" in messages(collected)[0]
 
 
-@pytest.mark.parametrize("declared, printed", [(True, "1"), (1, "true"), (False, "0"), ([True], "[1]"),
-                                               ({"k": 1}, '{"k": true}')])
+@pytest.mark.parametrize(
+    "declared, printed", [(True, "1"), (1, "true"), (False, "0"), ([True], "[1]"), ({"k": 1}, '{"k": true}')]
+)
 def test_a_bool_is_not_an_int_in_a_comparison(tmp, declared, printed):
     script = f"print('{{\"a\": {printed}}}')"
     for check in ({"expect": {"a": declared}}, {"verify": "how_built"}):
@@ -109,6 +121,7 @@ def test_comparison_shows_structured_how_built_as_json_text():
 
 # --- configuration and the runner ---------------------------------------------------
 
+
 def write_config(directory, **collectors):
     path = directory / config.CONFIG_FILE
     path.write_text(json.dumps({"schema_version": "benchx/config/0.1.0", "collectors": collectors}))
@@ -121,8 +134,15 @@ def test_the_root_is_substituted_in_a_collector_command(tmp):
     assert entry == {"name": "numpy", "command": ["python", f"{tmp.resolve()}/facts.py"], "verify": "how_built"}
 
 
-@pytest.mark.parametrize("bad", [{"command": []}, {"command": ["x"], "on_fail": "ignore"},
-                                 {"command": ["x"], "verify": "activation"}, {"command": ["x"], "speed": 1}])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"command": []},
+        {"command": ["x"], "on_fail": "ignore"},
+        {"command": ["x"], "verify": "activation"},
+        {"command": ["x"], "speed": 1},
+    ],
+)
 def test_a_bad_collector_is_refused(tmp, bad):
     write_config(tmp, c=bad)
     with pytest.raises(config.ConfigError):
@@ -149,29 +169,41 @@ def project(tmp, monkeypatch):
     root = tmp / "proj"
     root.mkdir()
     (root / "bench_a.py").write_text(SUITE)
-    (root / "provider.py").write_text(textwrap.dedent(f'''
+    (root / "provider.py").write_text(
+        textwrap.dedent(f'''
         import json, sys
         sys.stdin.read()
         print(json.dumps({{"schema_version": "benchx/target-description/0.1.0",
                           "target": {{"kind": "build", "path": "{subject}", "source_dir": "{subject}",
                                      "source": {{"uri": "https://example.org/subject.git", "type": "git"}}}},
                           "how_built": {{"k": 1}}}}))
-    '''))
-    (root / "facts.py").write_text("import json, os; print(json.dumps({'k': int(os.environ.get('K', 1)), 'summary': {'s': 1}}))\n")
+    ''')
+    )
+    (root / "facts.py").write_text(
+        "import json, os; print(json.dumps({'k': int(os.environ.get('K', 1)), 'summary': {'s': 1}}))\n"
+    )
     monkeypatch.chdir(root)
     return root
 
 
 def configure(root, **collector):
-    (root / config.CONFIG_FILE).write_text(json.dumps({
-        "schema_version": "benchx/config/0.1.0",
-        "provider": {"command": [sys.executable, "provider.py"]},
-        "adapter": {"name": "pyperf", "suite": str(root / "bench_a.py")},
-        "collectors": {"facts": {"command": [sys.executable, "{root}/facts.py"], "verify": "how_built", **collector}}}))
+    (root / config.CONFIG_FILE).write_text(
+        json.dumps(
+            {
+                "schema_version": "benchx/config/0.1.0",
+                "provider": {"command": [sys.executable, "provider.py"]},
+                "adapter": {"name": "pyperf", "suite": str(root / "bench_a.py")},
+                "collectors": {
+                    "facts": {"command": [sys.executable, "{root}/facts.py"], "verify": "how_built", **collector}
+                },
+            }
+        )
+    )
 
 
 def result_of(run_key):
     from pathlib import Path
+
     path = next(p for p in sorted(Path("results", run_key).glob("*_wall-time.json")))
     return json.loads(path.read_text())
 
@@ -181,7 +213,10 @@ def test_bench_runs_the_collector_and_records_its_facts(project):
     assert cli.main(["bench", "@x", *FAST, "--run-key", "c1", "--no-ingest"]) == cli.EXIT_OK
     document = result_of("c1")
     assert core.check(document, "measurement-result") == []
-    assert document["coordinates"]["environment"]["system"]["facts"]["s"] == 1 and "sha256" in document["coordinates"]["environment"]["system"]["facts"]
+    assert (
+        document["coordinates"]["environment"]["system"]["facts"]["s"] == 1
+        and "sha256" in document["coordinates"]["environment"]["system"]["facts"]
+    )
     assert document["provenance"]["info"]["how_built"] == {"k": 1}
     assert "collector-output" in {a["kind"] for a in document["provenance"]["artifacts"]}
     assert warnings_of(document) == []

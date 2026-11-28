@@ -25,10 +25,11 @@ print(json.dumps(doc))
 
 
 def describe(directory, source, **fields):
-    return {"schema_version": "benchx/target-description/0.1.0",
-            "target": {"kind": "build", "path": str(directory), "source": {"uri": SOURCE_URI},
-                       "source_dir": str(source)},
-            **fields}
+    return {
+        "schema_version": "benchx/target-description/0.1.0",
+        "target": {"kind": "build", "path": str(directory), "source": {"uri": SOURCE_URI}, "source_dir": str(source)},
+        **fields,
+    }
 
 
 def write_sidecar(directory, source, **fields):
@@ -38,9 +39,9 @@ def write_sidecar(directory, source, **fields):
 def test_text_drops_every_empty_spelling():
     assert target_mod.text({"how_built": "", "activation": None, "shell": "  \n"}) == {}
     assert target_mod.text({}) == {} and target_mod.text(None) == {}
-    assert target_mod.text({"how_built": "make", "activation": "source x", "shell": "bash",
-                            "provider": {"name": "p"}}) == {
-        "how_built": "make", "activation": "source x", "shell": "bash", "provider": {"name": "p"}}
+    assert target_mod.text(
+        {"how_built": "make", "activation": "source x", "shell": "bash", "provider": {"name": "p"}}
+    ) == {"how_built": "make", "activation": "source x", "shell": "bash", "provider": {"name": "p"}}
 
 
 def test_sidecar_is_validated_and_belongs_to_its_directory(repo, tmp):
@@ -73,17 +74,27 @@ def provider(repo, tmp, monkeypatch):
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3, noisy=2.06e-3), hardened=True)
     descriptions = tmp / "descriptions.json"
-    descriptions.write_text(json.dumps({
-        "plain": describe(plain, repo["wt-head"], how_built="cmake plain", activation=""),
-        "hardened": describe(hardened, repo["wt-head"], how_built="cmake -DDEMO_HARDENED=ON\nmake",
-                             activation="source env.sh", shell="bash"),
-    }))
+    descriptions.write_text(
+        json.dumps(
+            {
+                "plain": describe(plain, repo["wt-head"], how_built="cmake plain", activation=""),
+                "hardened": describe(
+                    hardened,
+                    repo["wt-head"],
+                    how_built="cmake -DDEMO_HARDENED=ON\nmake",
+                    activation="source env.sh",
+                    shell="bash",
+                ),
+            }
+        )
+    )
     script = tmp / "proj" / "provider.py"
     script.parent.mkdir()
     script.write_text(PROVIDER.format(python=sys.executable, descriptions=str(descriptions)))
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    (tmp / "proj" / "benchx.conf.json").write_text(json.dumps({"schema_version": "benchx/config/0.1.0",
-                                                          "provider": {"command": [str(script)]}}))
+    (tmp / "proj" / "benchx.conf.json").write_text(
+        json.dumps({"schema_version": "benchx/config/0.1.0", "provider": {"command": [str(script)]}})
+    )
     monkeypatch.chdir(tmp / "proj")
     return {"plain": plain, "hardened": hardened}
 
@@ -114,9 +125,20 @@ def test_provider_failure_and_missing_provider_are_errors(provider, tmp):
 @requires_pyarrow
 def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, provider):
     store = Store(tmp / "store.parquet")
-    doc = session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=4,
-                                  label=("build", "plain", "hardened"), project="demo", store=store,
-                                  run_key="t1", out=tmp / "out", provider=provider_of("."))
+    doc = session.compare_targets(
+        "@plain",
+        "@hardened",
+        profile="environments",
+        adapter="google-benchmark",
+        suite="demo-bench",
+        rounds=4,
+        label=("build", "plain", "hardened"),
+        project="demo",
+        store=store,
+        run_key="t1",
+        out=tmp / "out",
+        provider=provider_of("."),
+    )
     orders = [json.loads(p.read_text()) for p in sorted((tmp / "out" / "orders").glob("*.json"))]
     plain_target, hardened_target = orders[0]["target"], orders[1]["target"]
     assert plain_target["how_built"] == "cmake plain"
@@ -132,16 +154,30 @@ def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, prov
     assert "activation" not in results["plain"]["provenance"]["info"]
 
     assert core.check(doc, "comparison-document") == []
-    assert doc["sides"]["declared"]["baseline"] == {"how_built": "cmake plain", "target_provider": info["target_provider"]}
+    assert doc["sides"]["declared"]["baseline"] == {
+        "how_built": "cmake plain",
+        "target_provider": info["target_provider"],
+    }
     assert doc["sides"]["declared"]["contender"]["activation"] == "source env.sh"
     assert "hardened: activation: source env.sh" in compare.render(doc)
 
 
 @requires_pyarrow
 def test_no_build_asks_the_provider_to_describe(repo, tmp, provider):
-    session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
-                            label=("build", "plain", "hardened"), store=Store(tmp / "store.parquet"),
-                            run_key="t2", out=tmp / "out", build=False, provider=provider_of("."))
+    session.compare_targets(
+        "@plain",
+        "@hardened",
+        profile="environments",
+        adapter="google-benchmark",
+        suite="demo-bench",
+        rounds=3,
+        label=("build", "plain", "hardened"),
+        store=Store(tmp / "store.parquet"),
+        run_key="t2",
+        out=tmp / "out",
+        build=False,
+        provider=provider_of("."),
+    )
     result = next(p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-"))
     assert json.loads(result.read_text())["provenance"]["info"]["target_provider"]["version"] == "describe"
 
@@ -151,10 +187,19 @@ def test_sidecar_route_needs_no_provider(repo, tmp):
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3), hardened=True)
     write_sidecar(hardened, repo["wt-head"], how_built="by hand")
-    doc = session.compare_targets(str(plain), str(hardened), profile="environments", adapter="google-benchmark", suite="demo-bench",
-                                  rounds=3, label=("build", "plain", "hardened"),
-                                  store=Store(tmp / "store.parquet"), run_key="t3", out=tmp / "out",
-                                  source_uri=SOURCE_URI)  # one side has no description to name it
+    doc = session.compare_targets(
+        str(plain),
+        str(hardened),
+        profile="environments",
+        adapter="google-benchmark",
+        suite="demo-bench",
+        rounds=3,
+        label=("build", "plain", "hardened"),
+        store=Store(tmp / "store.parquet"),
+        run_key="t3",
+        out=tmp / "out",
+        source_uri=SOURCE_URI,
+    )  # one side has no description to name it
     assert doc["sides"]["declared"] == {"baseline": {}, "contender": {"how_built": "by hand"}}
 
 
@@ -164,9 +209,18 @@ def test_a_declared_build_is_refused_before_anything_runs(repo, tmp):
     write_sidecar(build, repo["wt-head"], build={"type": "Release"})
     other = make_build(tmp / "o", repo["wt-head"], cases())
     with pytest.raises(session.SessionError, match="declared build is deferred"):
-        session.compare_targets(str(build), str(other), profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
-                                label=("build", "a", "b"), store=Store(tmp / "s.parquet"), run_key="t4",
-                                out=tmp / "out")
+        session.compare_targets(
+            str(build),
+            str(other),
+            profile="environments",
+            adapter="google-benchmark",
+            suite="demo-bench",
+            rounds=3,
+            label=("build", "a", "b"),
+            store=Store(tmp / "s.parquet"),
+            run_key="t4",
+            out=tmp / "out",
+        )
     assert not (tmp / "out").exists()
 
 
@@ -202,8 +256,18 @@ class _Stop(Exception):
 
 def _compare(tmp):
     from benchx.results import MemoryStore
-    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, adapter="pyperf", store=MemoryStore(),
-                                   run_key="u", out=tmp / "out")
+
+    return session.compare_targets(
+        "a",
+        "b",
+        profile="revisions",
+        suite="s",
+        rounds=1,
+        adapter="pyperf",
+        store=MemoryStore(),
+        run_key="u",
+        out=tmp / "out",
+    )
 
 
 def test_equivalent_remote_spellings_are_one_source(monkeypatch, tmp):
