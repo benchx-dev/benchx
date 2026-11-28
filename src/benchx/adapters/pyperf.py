@@ -32,16 +32,27 @@ passed, and warns `env-mismatch` when the two differ.
 import hashlib
 import json
 import logging
-import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
-                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
+from .base import (
+    Unsupported,
+    check_filter,
+    kill_group,
+    last_json,
+    name_only_note,
+    no_cases,
+    note_case,
+    note_case_ended,
+    note_cases,
+    note_parameters,
+    parametrized_workload,
+    run_bounded,
+    stop_group,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -215,7 +215,7 @@ def test_tables_after_a_measure_mode_comparison_and_the_same_in_read_mode(repo, 
     measured = capsys.readouterr().out
     assert measured.index("REGRESSED") < measured.index(f"commit {repo['base'][:8]}") < measured.index("| Change")
     assert f"commit {repo['head'][:8]} (5 rounds):" in measured and "BM_Quiet/1024" in measured
-    assert f"| + " in measured and f"Before [{repo['base'][:8]}]" in measured
+    assert "| + " in measured and f"Before [{repo['base'][:8]}]" in measured
     assert cli.main(["compare", "--run", "t-1", *common, "--baseline", repo["base"][:10], "--tables"]) == cli.EXIT_OK
     assert capsys.readouterr().out == measured
 

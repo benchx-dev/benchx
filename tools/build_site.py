@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "tools"
 
 sys.path.insert(0, str(TOOLS))
-from gen_docs import example_names  # the one definition of what an example is
+from gen_docs import example_names  # noqa: E402  # the one definition of what an example is
 
 
 def fail(message: str) -> int:

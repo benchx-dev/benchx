@@ -35,7 +35,8 @@ def test_quantities_set_quantities_and_plan():
 
 
 def test_each_order_gets_its_own_id():
-    make = lambda: orders.make_order(suite=SUITE, target=TARGET, precision={"repetitions": 1}, run_key="rk")
+    def make():
+        return orders.make_order(suite=SUITE, target=TARGET, precision={"repetitions": 1}, run_key="rk")
     assert make()["work_order_id"] != make()["work_order_id"]
 
 

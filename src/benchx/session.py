@@ -23,8 +23,9 @@ import os
 import time
 from pathlib import Path
 
-from . import adapters, harnesses, orders, runner, snapshot, target as target_mod
+from . import adapters, harnesses, orders, runner, snapshot
 from . import compare as compare_mod
+from . import target as target_mod
 from .adapters import benchx_params
 from .adapters.base import Unsupported
 from .errors import SessionError

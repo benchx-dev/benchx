@@ -2,15 +2,14 @@
 counting shows, the layout a method asked for, and who owns which check."""
 
 import copy
-import json
 
 import pytest
 
 from benchx import compare, core, methods
-from benchx.methods import paired_relative
 from benchx.core import catalog
 from benchx.evidence import Assessment, Evidence, Method, NotApplicable, Row, pivot, relation, slot_schedule
 from benchx.key import Key
+from benchx.methods import paired_relative
 from test_comparator import BASE, HEAD, evaluate, invariants, labeled, result, run
 
 

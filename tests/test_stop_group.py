@@ -61,7 +61,7 @@ def test_a_group_that_ignores_sigint_is_killed_when_the_grace_is_over(tmp_path):
 
 def test_a_second_ctrl_c_ends_the_wait_at_once(tmp_path):
     proc, manager, grandchild, _ = start(tmp_path, "ignore")
-    timer = signal.setitimer(signal.ITIMER_REAL, 0.3)  # a second Ctrl-C, 0.3 s into a grace of 20
+    signal.setitimer(signal.ITIMER_REAL, 0.3)  # a second Ctrl-C, 0.3 s into a grace of 20
     previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
     started = time.monotonic()
     try:

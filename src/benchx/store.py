@@ -13,12 +13,12 @@ a temporary file beside it, fsynced, then renamed over it) so an acknowledgment
 means validated and durable.
 """
 
-from datetime import datetime
 import json
 import logging
 import os
 import statistics
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import core, identity

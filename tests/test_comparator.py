@@ -799,7 +799,8 @@ def test_a_failed_invariant_of_the_run_is_in_words_too():
 
 
 def test_missing_results_are_one_line_for_each_side_with_a_few_names():
-    where = lambda name, side: {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
+    def where(name, side):
+        return {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
     doc = {**rendered_doc(), "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"),
                                          where("d", "contender"), where("e", "baseline")]}
     assert compare.render(doc).endswith(

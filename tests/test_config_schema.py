@@ -1,7 +1,6 @@
 """The config schema, its recommended examples, and the paths benchx keeps out of a tree's identity."""
 
 import json
-from pathlib import Path
 
 import pytest
 

@@ -75,7 +75,7 @@ def version_key(v: str) -> tuple[int, ...]:
 
 # --------------------------------------------------------------------------- $ref links
 
-def ref_link(ref: str, page: "SchemaPage") -> str:
+def ref_link(ref: str, page: SchemaPage) -> str:
     """A Markdown link for a $ref, local (#/$defs/x) or cross-schema (urn:...)."""
     if ref.startswith("#"):
         frag, prefix = ref[1:], ""
@@ -114,7 +114,7 @@ def ref_link(ref: str, page: "SchemaPage") -> str:
 
 # --------------------------------------------------------------------------- type summaries
 
-def type_str(s, page: "SchemaPage") -> str:
+def type_str(s, page: SchemaPage) -> str:
     """One-line type summary for a subschema, with links for $refs."""
     if s is True:
         return "any"
@@ -197,7 +197,7 @@ def type_str(s, page: "SchemaPage") -> str:
 PREDICATE_KEYS = {"properties", "required", "not", "anyOf", "allOf", "contains"}
 
 
-def condition(s, page: "SchemaPage", path: list[str] | None = None) -> str:
+def condition(s, page: SchemaPage, path: list[str] | None = None) -> str:
     """Prose for an `if` schema (or any small predicate). Falls back to JSON."""
     path = path or []
     if s is True:
@@ -267,7 +267,7 @@ def _required_only(s) -> list[str] | None:
     return None
 
 
-def consequence(s, page: "SchemaPage", path: list[str] | None = None) -> str:
+def consequence(s, page: SchemaPage, path: list[str] | None = None) -> str:
     """Prose for a `then`/`else` schema. Falls back to JSON."""
     path = path or []
     if s is True:
@@ -275,7 +275,8 @@ def consequence(s, page: "SchemaPage", path: list[str] | None = None) -> str:
     if s is False:
         return "the document is invalid"
     req, forbid, other = [], [], []
-    dot = lambda k: "`" + ".".join(path + [k]) + "`"
+    def dot(k):
+        return "`" + ".".join(path + [k]) + "`"
     req += [dot(r) for r in s.get("required", [])]
     for k, v in s.get("properties", {}).items():
         if v is False:
@@ -310,7 +311,7 @@ def consequence(s, page: "SchemaPage", path: list[str] | None = None) -> str:
     return "; ".join(parts)
 
 
-def rules(s: dict, page: "SchemaPage") -> list[str]:
+def rules(s: dict, page: SchemaPage) -> list[str]:
     """Bullet list of object-level rules: if/then, allOf, anyOf, oneOf, not, contains."""
     out = []
     if "if" in s:
@@ -356,7 +357,7 @@ def wants_section(s) -> bool:
     return has_table(s) or (isinstance(s, dict) and any(k in s for k in ("oneOf", "anyOf", "$comment")))
 
 
-def render_object(s: dict, page: "SchemaPage", path: list[str], level: int, out: list[str]) -> None:
+def render_object(s: dict, page: SchemaPage, path: list[str], level: int, out: list[str]) -> None:
     """Property table for one object, then a subsection per nested object."""
     required = set(s.get("required", []))
     props = s.get("properties", {})

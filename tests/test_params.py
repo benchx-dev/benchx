@@ -3,7 +3,8 @@
 import re
 from pathlib import Path
 
-from benchx.adapters import asv_runtime, base, benchx_params as params
+from benchx.adapters import asv_runtime, base
+from benchx.adapters import benchx_params as params
 
 
 def test_stable_repr_drops_a_default_address_and_nothing_else():

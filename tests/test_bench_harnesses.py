@@ -13,7 +13,7 @@ import pytest
 
 from benchx import bench, cli, core
 from benchx.store import Store
-from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build, requires_pyarrow
+from conftest import EXAMPLES, NOISY, QUIET, cases, git, make_build, requires_pyarrow
 from test_config import write_config
 from test_target import PROVIDER, describe
 

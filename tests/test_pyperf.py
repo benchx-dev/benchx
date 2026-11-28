@@ -9,7 +9,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import textwrap
 import warnings

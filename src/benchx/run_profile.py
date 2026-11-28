@@ -18,8 +18,8 @@ from .core import canonical
 from .evidence import COLUMNS, CompareError, Evidence, Row, Selection, Selector, result_ref, slot_schedule
 from .key import escape, get
 from .projection import Projection, axis_order, declared_workload, estimate, said, values
-from .snapshot import DIRTY_WARNINGS
 from .results import store_project
+from .snapshot import DIRTY_WARNINGS
 
 logger = logging.getLogger(__name__)
 

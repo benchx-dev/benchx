@@ -11,10 +11,11 @@ import pytest
 
 from benchx import cli, views
 from benchx.store import Store
-from benchx.views import inputs, marts as marts_mod, payloads, site
+from benchx.views import inputs, payloads, site
+from benchx.views import marts as marts_mod
 from conftest import NOISY, QUIET, cases, make_build, requires_pyarrow, run_rounds
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 SHAS = [f"{i}" * 40 for i in range(1, 5)]
 
 

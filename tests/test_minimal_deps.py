@@ -4,7 +4,6 @@ import importlib
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 from jsonschema import FormatChecker

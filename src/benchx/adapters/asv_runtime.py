@@ -31,7 +31,6 @@ import time
 import traceback
 
 
-
 def _load_params():
     """benchx_params.py, beside this file: by its path and under its own module name, so that
     nothing on sys.path (a benchmark's own `params` module, say) can stand in for it."""

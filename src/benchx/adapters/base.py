@@ -83,7 +83,6 @@ from .. import log
 from ..core import Refusal, Rejected
 from .benchx_params import combination, search_name
 
-
 logger = logging.getLogger(__name__)
 
 

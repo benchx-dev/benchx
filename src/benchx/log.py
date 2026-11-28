@@ -66,7 +66,7 @@ class _Full(logging.Formatter):
         super().__init__(_FORMAT)
 
     def formatTime(self, record, datefmt=None):
-        moment = datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc)
+        moment = datetime.datetime.fromtimestamp(record.created, datetime.UTC)
         return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(record.msecs):03d}Z"
 
     def format(self, record):

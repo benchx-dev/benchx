@@ -14,7 +14,7 @@ import statistics
 import time
 import urllib.parse
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__, adapters, collectors, core, log, snapshot
@@ -47,7 +47,7 @@ DEFERRED = {
 
 
 def _timestamp(epoch: float) -> str:
-    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _quote(text: str) -> str:

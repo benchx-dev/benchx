@@ -8,8 +8,7 @@ subject's own checkout, so that revision is the subject revision, the axis,
 and matching it would split every series at every commit.
 """
 
-from .projection import (Projection, normalize_remote, reported_coordinates_fingerprint,  # noqa: F401
-                         estimate, values)
+from .projection import Projection, estimate, normalize_remote, reported_coordinates_fingerprint, values  # noqa: F401
 
 # Any change to POLICY_DATA other than its description needs a new
 # identity_schema; tests/test_projection.py pins the two together.

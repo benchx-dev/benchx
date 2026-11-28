@@ -14,7 +14,8 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from . import inputs, marts as marts_mod, payloads
+from . import inputs, payloads
+from . import marts as marts_mod
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_FILES = (

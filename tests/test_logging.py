@@ -6,12 +6,11 @@ Google Benchmark runs against the fake binary, so these run anywhere.
 import argparse
 import logging
 import re
-from pathlib import Path
 
 import pytest
 
 from benchx import cli, log, snapshot
-from conftest import QUIET, NOISY, cases, make_build
+from conftest import NOISY, QUIET, cases, make_build
 from test_config import write_config
 
 GBENCH = ["--adapter", "google-benchmark", "--suite", "demo-bench"]

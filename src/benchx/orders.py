@@ -7,7 +7,7 @@ every order is checked against its schema before anything runs it.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import core
 
@@ -22,7 +22,7 @@ class OrderError(Exception):
 
 def default_run_key(prefix: str) -> str:
     """`PREFIX-<UTC timestamp>`, the run key when the user names none."""
-    return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    return f"{prefix}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
 
 
 def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quantities=("wall-time",),

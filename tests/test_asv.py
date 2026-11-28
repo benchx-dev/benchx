@@ -408,7 +408,8 @@ def test_timeout_is_the_benchmarks_own(suite):
 def test_discovery_agrees_with_asv_runner(suite):
     """Names, parameter strings, versions and setup_cache keys as asv itself reports them."""
     pytest.importorskip("asv_runner")
-    import contextlib, io, subprocess, sys
+    import subprocess
+    import sys
     probe = textwrap.dedent("""
         import contextlib, io, json, sys
         sys.path.insert(0, sys.argv[2])

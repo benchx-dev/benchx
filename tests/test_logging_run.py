@@ -52,7 +52,7 @@ def test_a_case_that_failed_is_a_warning_with_its_message_and_its_output(build, 
     broken = record(lines, "WARNING", "BM_Broken: error (harness.error)")
     assert re.search(r"error \(harness\.error\): fake failure, exit 0, [\d.]+ s", broken)
     skipped = record(lines, "INFO", "BM_Skipped: skipped (harness.skipped)")  # expected: not a warning
-    assert skipped.endswith(("fake skip, exit 0, " + skipped.rsplit("exit 0, ", 1)[1]))
+    assert skipped.endswith("fake skip, exit 0, " + skipped.rsplit("exit 0, ", 1)[1])
     assert any(" WARNING " in l and "BM_Broken: stdout| " in l or " WARNING " in l and "BM_Broken: stdout, " in l
                for l in lines)  # a failed case's output is a WARNING, a successful one's DEBUG
     assert any(" DEBUG " in l and "BM_Quiet/1024: stdout, " in l for l in lines)

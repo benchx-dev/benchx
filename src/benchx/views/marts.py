@@ -89,7 +89,7 @@ def _order_shas(runs: list[dict]) -> dict[str, int]:
     # Fallback if synthetic metadata ever contains a cycle.
     if len(order) < len(all_shas):
         remaining = sorted(
-            ((date_by_sha[sha], sha) for sha in all_shas if sha not in order)
+            (date_by_sha[sha], sha) for sha in all_shas if sha not in order
         )
         for _, sha in remaining:
             order[sha] = len(order) + 1

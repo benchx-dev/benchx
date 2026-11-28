@@ -3,7 +3,6 @@ comparison's verdicts and what it dropped, a read-mode comparison in the run's l
 the store."""
 
 import logging
-import os
 import re
 from pathlib import Path
 

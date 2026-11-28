@@ -24,7 +24,7 @@ import rfc8785
 from .. import identity, projection
 from ..results import MemoryStore
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 _HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _PATH_UNSAFE_RE = re.compile(r'[/\\\x00:*?"<>|]+')

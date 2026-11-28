@@ -107,6 +107,7 @@ def tree(tmp_path):
 def test_the_listing_carries_the_version_of_each_function(tree):
     pytest.importorskip("pyperf")
     import os
+
     from benchx.adapters import pyperf as adapter
     env = dict(os.environ)
     runnable = adapter.locate(tree, "mod.py", env)
