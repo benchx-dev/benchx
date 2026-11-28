@@ -129,7 +129,9 @@ class Pyperf(Harness):
 
     def describe_precision(self, precision, config_path=None):
         reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
-        return f"{reps['process']} processes x {reps['value']} values (config: {config_path or 'none, pyperf defaults'})"
+        return (
+            f"{reps['process']} processes x {reps['value']} values (config: {config_path or 'none, pyperf defaults'})"
+        )
 
 
 class Asv(Pyperf):
@@ -142,7 +144,9 @@ class Asv(Pyperf):
 
     def describe_precision(self, precision, config_path=None):
         reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
-        return f"{reps['process']} rounds x {reps.get('value', 'per-benchmark')} repeat (config: {config_path or 'none'})"
+        return (
+            f"{reps['process']} rounds x {reps.get('value', 'per-benchmark')} repeat (config: {config_path or 'none'})"
+        )
 
 
 GOOGLE_BENCHMARK = GoogleBenchmark()

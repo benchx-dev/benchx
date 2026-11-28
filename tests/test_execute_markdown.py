@@ -71,7 +71,7 @@ def test_a_heading_or_another_fence_ends_the_association(repo, between):
 
 
 def test_a_json_snapshot_is_replaced_by_the_output_in_a_json_fence(repo):
-    page = page_of(repo, "# T\n\n```sh\necho '{\"new\": 1}'\n```\n\nSome prose.\n\n```json\n{\"old\": 0}\n```\n\nafter\n")
+    page = page_of(repo, '# T\n\n```sh\necho \'{"new": 1}\'\n```\n\nSome prose.\n\n```json\n{"old": 0}\n```\n\nafter\n')
     assert '```json\n{"new": 1}\n```' in page  # the output, once, in the language of the snapshot
     assert "old" not in page and "```text" not in page
     assert "Some prose." in page and page.rstrip().endswith("after")
@@ -84,7 +84,7 @@ def test_only_the_first_snapshot_is_replaced(repo):
 
 
 def test_a_json_fence_after_a_heading_or_of_another_language_is_not_a_snapshot(repo):
-    after_heading = page_of(repo, "```sh\necho a\n```\n\n## Next\n\n```json\n{\"keep\": 1}\n```\n")
+    after_heading = page_of(repo, '```sh\necho a\n```\n\n## Next\n\n```json\n{"keep": 1}\n```\n')
     assert '```json\n{"keep": 1}\n```' in after_heading and "```text\na\n```" in after_heading
     other_language = page_of(repo, "```sh\necho a\n```\n\n```jsonc\n// keep\n```\n")
     assert "```jsonc\n// keep\n```" in other_language and "```text\na\n```" in other_language
@@ -122,12 +122,16 @@ def test_stderr_is_part_of_the_output(repo):
 
 
 def test_ansi_escapes_and_the_checkout_path_are_left_out_of_the_page_but_not_of_the_log(repo):
-    page = page_of(repo, (
-        "```sh\n"
-        "printf '\\033[36m$ bx run\\033[0m\\n'\n"
-        'echo "config: $(pwd -P)/benchx.conf.json"\n'
-        'echo "root: $(cd ../.. && pwd -P)"\n'
-        "```\n"))
+    page = page_of(
+        repo,
+        (
+            "```sh\n"
+            "printf '\\033[36m$ bx run\\033[0m\\n'\n"
+            'echo "config: $(pwd -P)/benchx.conf.json"\n'
+            'echo "root: $(cd ../.. && pwd -P)"\n'
+            "```\n"
+        ),
+    )
     assert "```text\n$ bx run\nconfig: examples/ex/benchx.conf.json\nroot: .\n```" in page
     assert "\x1b" not in page and str(repo) not in page
     log = (repo.parent / "logs" / "block-001.log").read_text()
@@ -145,9 +149,10 @@ def test_a_failing_block_raises_with_an_annotation_and_writes_no_page(repo, caps
 
 
 def test_a_block_marked_exit_is_expected_to_fail_and_the_run_goes_on(repo):
-    page = page_of(repo, (
-        "# T\n\n```sh exit=1\necho before\nfalse\necho never\n```\n\n```text\nOLD\n```\n\n"
-        "```sh\necho next\n```\n"))
+    page = page_of(
+        repo,
+        ("# T\n\n```sh exit=1\necho before\nfalse\necho never\n```\n\n```text\nOLD\n```\n\n```sh\necho next\n```\n"),
+    )
     assert "```sh\necho before\nfalse\necho never\n```" in page  # the block is kept, without its marker
     assert "```text\nbefore\n```" in page  # `false` stopped the script (-e): "never" is not in the output
     assert "OLD" not in page and "```text\nnext\n```" in page  # the snapshot is replaced, the next block ran
@@ -159,12 +164,16 @@ def test_the_marker_is_left_out_of_every_fence_of_the_page_and_the_fence_is_kept
     assert page == "~~~sh\nexit 2\n~~~\n\n```sh noexec\nexit 1\n```\n"  # a noexec block is not run, so not checked
 
 
-@pytest.mark.parametrize(("marked", "script", "said"), [
-    ("exit=1", "true", r"status 0, not the exit=1"),
-    ("exit=1", "exit 2", r"status 2, not the exit=1"),
-    ("exit=2", "exit 1", r"status 1, not the exit=2"),
-    ("exit=0", "exit 1", r"status 1;"),
-], ids=["a-success", "another-failure", "a-lower-one", "zero-is-the-default"])
+@pytest.mark.parametrize(
+    ("marked", "script", "said"),
+    [
+        ("exit=1", "true", r"status 0, not the exit=1"),
+        ("exit=1", "exit 2", r"status 2, not the exit=1"),
+        ("exit=2", "exit 1", r"status 1, not the exit=2"),
+        ("exit=0", "exit 1", r"status 1;"),
+    ],
+    ids=["a-success", "another-failure", "a-lower-one", "zero-is-the-default"],
+)
 def test_a_block_that_does_not_end_with_its_marked_status_fails_the_run(repo, capsys, marked, script, said):
     source = source_of(repo, f"# T\n\n```sh {marked}\n{script}\n```\n\n```sh\ntouch ran\n```\n")
     output = repo.parent / "out" / "ex.md"
@@ -174,8 +183,11 @@ def test_a_block_that_does_not_end_with_its_marked_status_fails_the_run(repo, ca
     assert not output.exists() and not (repo / "examples" / "ex" / "ran").exists()
 
 
-@pytest.mark.parametrize("marked", ["exit=", "exit=x", "exit=-1", "exit=256", "exit=1 exit=2"],
-                         ids=["empty", "word", "negative", "too-large", "twice"])
+@pytest.mark.parametrize(
+    "marked",
+    ["exit=", "exit=x", "exit=-1", "exit=256", "exit=1 exit=2"],
+    ids=["empty", "word", "negative", "too-large", "twice"],
+)
 def test_a_malformed_marker_fails_the_run_before_the_block_runs(repo, capsys, marked):
     source = source_of(repo, f"```sh {marked}\ntouch ran\n```\n")
     with pytest.raises(ValueError, match="exit="):
@@ -213,8 +225,16 @@ def test_the_source_is_not_modified_and_cannot_be_the_output(repo):
 def test_the_command_line(repo):
     source = source_of(repo, "```sh\necho cli\n```\n")
     output = repo.parent / "out" / "ex.md"
-    args = [sys.executable, str(TOOL), "--source", str(source), "--output", str(output),
-            "--logs", str(repo.parent / "logs")]
+    args = [
+        sys.executable,
+        str(TOOL),
+        "--source",
+        str(source),
+        "--output",
+        str(output),
+        "--logs",
+        str(repo.parent / "logs"),
+    ]
     done = subprocess.run(args, cwd=repo, capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stderr
     assert "```text\ncli\n```" in output.read_text()
@@ -233,10 +253,11 @@ def fake_bx(tmp_path, monkeypatch):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "bx").write_text(
-        '#!/bin/sh\n'
+        "#!/bin/sh\n"
         '[ "$1" = head ] || exit 64\n'
         'if [ -n "$FAKE_BX_ERROR" ]; then echo "$FAKE_BX_ERROR" >&2; exit 2; fi\n'
-        'if [ -f "$FAKE_STORE" ]; then cat "$FAKE_STORE"; fi\n')
+        'if [ -f "$FAKE_STORE" ]; then cat "$FAKE_STORE"; fi\n'
+    )
     (scripts / "bx").chmod(0o755)
     monkeypatch.setenv("PATH", f"{scripts}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_STORE", str(tmp_path / "store.jsonl"))
@@ -246,11 +267,14 @@ def result(status, case="bench_x", quantity="wall-time", reason=None, kind=None,
     """One line of `bx head --json`, with the fields that the runner reads."""
     measurement = {"status": status, "quantity": {"name": quantity}}
     measurement.update({k: v for k, v in {"reason": reason, "kind": kind}.items() if v})
-    return json.dumps({
-        "ingest_key": f"r:{case}:{quantity}:{status}",
-        "provenance": {"run_key": "r", "info": {"message": message} if message else {}},
-        "coordinates": {"workload": {"name": case, "parameters": {"n": "10"}}},
-        "measurement": measurement})
+    return json.dumps(
+        {
+            "ingest_key": f"r:{case}:{quantity}:{status}",
+            "provenance": {"run_key": "r", "info": {"message": message} if message else {}},
+            "coordinates": {"workload": {"name": case, "parameters": {"n": "10"}}},
+            "measurement": measurement,
+        }
+    )
 
 
 def stores(*lines):
@@ -262,30 +286,43 @@ def stores(*lines):
 def test_a_block_that_exits_0_but_stored_a_failed_result_fails_the_run(repo, fake_bx, status):
     source = source_of(repo, f"```sh\n{stores(result(status, reason='harness.error', message='boom'))}\n```\n")
     output = repo.parent / "out" / "ex.md"
-    with pytest.raises(RuntimeError, match=rf"status 0, but 1 result\(s\) it stored failed:\n  "
-                                           rf"r: bench_x \[n=10\], wall-time: {status} \(harness.error\): boom"):
+    with pytest.raises(
+        RuntimeError,
+        match=rf"status 0, but 1 result\(s\) it stored failed:\n  "
+        rf"r: bench_x \[n=10\], wall-time: {status} \(harness.error\): boom",
+    ):
         runner.run(source, output, repo.parent / "logs")
     assert not output.exists()
 
 
 def test_results_that_did_not_fail_and_the_load_average_do_not_fail_the_run(repo, fake_bx):
-    rows = [result("success"),
-            result("success", quantity="load-average", kind="condition"),
-            result("skipped", quantity="load-average", kind="condition", reason="probe-unavailable")]
+    rows = [
+        result("success"),
+        result("success", quantity="load-average", kind="condition"),
+        result("skipped", quantity="load-average", kind="condition", reason="probe-unavailable"),
+    ]
     page_of(repo, f"```sh\n{stores(*rows)}\n```\n")
 
 
 def test_a_failure_stored_before_a_block_is_not_blamed_on_it_and_a_marked_block_is_not_checked(repo, fake_bx):
-    page = page_of(repo, (
-        f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
-        f"```sh\n{stores(result('success', case='other'))}\n```\n"))
+    page = page_of(
+        repo,
+        (
+            f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
+            f"```sh\n{stores(result('success', case='other'))}\n```\n"
+        ),
+    )
     assert "exit=" not in page
 
 
 def test_a_new_failure_is_found_though_an_earlier_block_stored_one_too(repo, fake_bx):
-    source = source_of(repo, (
-        f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
-        f"```sh\n{stores(result('error', case='other'))}\n```\n"))
+    source = source_of(
+        repo,
+        (
+            f"```sh exit=1\n{stores(result('error'))}\nfalse\n```\n\n"
+            f"```sh\n{stores(result('error', case='other'))}\n```\n"
+        ),
+    )
     with pytest.raises(RuntimeError, match=r"1 result\(s\) it stored failed:\n  r: other "):
         runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
 
@@ -314,12 +351,14 @@ def bench_example(repo, monkeypatch):
         pytest.skip("bx is not installed next to this Python")
     monkeypatch.setenv("PATH", f"{scripts}{os.pathsep}{os.environ['PATH']}")
     example = repo / "examples" / "ex"
-    (example / "benchx.conf.json").write_text(json.dumps({
-        "schema_version": "benchx/config/0.1.0", "paths": {"store": "out/store.jsonl", "results": "out"}}))
+    (example / "benchx.conf.json").write_text(
+        json.dumps({"schema_version": "benchx/config/0.1.0", "paths": {"store": "out/store.jsonl", "results": "out"}})
+    )
     (example / "bench_x.py").write_text(
         "import importlib\n\n\n"
         "def bench_ok():\n    sum(range(10))\n\n\n"
-        "def bench_needs_a_library():\n    importlib.import_module('no_such_library_for_the_test')\n")
+        "def bench_needs_a_library():\n    importlib.import_module('no_such_library_for_the_test')\n"
+    )
 
 
 QUICK = "--processes 1 --values 1 --min-time 0.01"
@@ -327,9 +366,12 @@ QUICK = "--processes 1 --values 1 --min-time 0.01"
 
 def test_a_case_that_bx_bench_could_not_measure_fails_the_run(bench_example, repo):
     source = source_of(repo, f"```sh\nbx bench bench_x.py {QUICK} --run-key bad\n```\n")
-    with pytest.raises(RuntimeError, match=r"status 0, but \d+ result\(s\) it stored failed:\n"
-                                           r"  bad: bench_needs_a_library, wall-time: error \(harness.error\): "
-                                           r"ModuleNotFoundError: No module named 'no_such_library_for_the_test'"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"status 0, but \d+ result\(s\) it stored failed:\n"
+        r"  bad: bench_needs_a_library, wall-time: error \(harness.error\): "
+        r"ModuleNotFoundError: No module named 'no_such_library_for_the_test'",
+    ):
         runner.run(source, repo.parent / "out" / "ex.md", repo.parent / "logs")
 
 

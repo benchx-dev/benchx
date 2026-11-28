@@ -9,7 +9,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import textwrap
 import warnings
@@ -24,9 +23,12 @@ from benchx.adapters import pyperf as adapter
 from conftest import SOURCE_URI, order, warnings_of
 
 FIXTURES = Path(__file__).parent / "fixtures"
-PRECISION = {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
-             "calibration": {"mode": "fixed", "n_iterations": 50}, "warmup": {"mode": "count", "n_warmup": 1}}
-MODULE = textwrap.dedent('''
+PRECISION = {
+    "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
+    "calibration": {"mode": "fixed", "n_iterations": 50},
+    "warmup": {"mode": "count", "n_warmup": 1},
+}
+MODULE = textwrap.dedent("""
     import os, time
 
     def f():
@@ -41,7 +43,7 @@ MODULE = textwrap.dedent('''
 
     def _private():
         pass
-''')
+""")
 
 
 def results(directory: Path) -> list[dict]:
@@ -64,8 +66,12 @@ def tree(tmp):
 
 def pyperf_order(tree, run_key, case_filter="^f$", **extra):
     document = order(tree, None, run_key, **extra)
-    document["target"] = {"kind": "working_tree", "path": str(tree), "source_dir": str(tree),
-                          "source": {"uri": SOURCE_URI, "type": "git"}}
+    document["target"] = {
+        "kind": "working_tree",
+        "path": str(tree),
+        "source_dir": str(tree),
+        "source": {"uri": SOURCE_URI, "type": "git"},
+    }
     document["suites"] = [{"adapter": "pyperf", "suite": "mod.py", "filter": case_filter}]
     document["precision"] = copy.deepcopy(PRECISION)
     return document
@@ -80,6 +86,7 @@ def run_order(tmp, document, name):
 
 # --- the driving half, end to end -------------------------------------------------
 
+
 def test_end_to_end_result(tmp, tree):
     docs = run_order(tmp, pyperf_order(tree, "e2e"), "e2e")
     assert [d["coordinates"]["workload"]["name"] for d in docs] == ["f"]
@@ -93,8 +100,10 @@ def test_end_to_end_result(tmp, tree):
     assert doc["procedure"]["inner_iterations"] == 50
     assert doc["procedure"]["attempted_repetitions"] == doc["procedure"]["completed_repetitions"] == 4
     assert doc["procedure"]["warmups_performed"] == 2  # one per worker, dropped
-    assert doc["procedure"]["repetition_levels"] == [{"unit": "process", "attempted": 2, "completed": 2},
-                                                     {"unit": "value", "attempted": 4, "completed": 4}]
+    assert doc["procedure"]["repetition_levels"] == [
+        {"unit": "process", "attempted": 2, "completed": 2},
+        {"unit": "value", "attempted": 4, "completed": 4},
+    ]
     protocol = doc["coordinates"]["protocol"]
     assert protocol["repetitions"]["levels"] == PRECISION["repetitions"]["levels"]
     assert protocol["environment"] == "inherit-all"
@@ -107,16 +116,24 @@ def test_end_to_end_result(tmp, tree):
 
 
 def test_default_cases_are_bench_prefixed_functions(tmp, tree):
-    (tree / "mod.py").write_text("def bench_a():\n    pass\n\ndef benchmark_b():\n    pass\n\ndef helper():\n    pass\n")
-    docs = run_order(tmp, pyperf_order(tree, "default-cases", case_filter=None) | {"suites": [
-        {"adapter": "pyperf", "suite": "mod.py"}]}, "default-cases")
+    (tree / "mod.py").write_text(
+        "def bench_a():\n    pass\n\ndef benchmark_b():\n    pass\n\ndef helper():\n    pass\n"
+    )
+    docs = run_order(
+        tmp,
+        pyperf_order(tree, "default-cases", case_filter=None) | {"suites": [{"adapter": "pyperf", "suite": "mod.py"}]},
+        "default-cases",
+    )
     assert sorted(d["coordinates"]["workload"]["name"] for d in docs) == ["bench_a", "benchmark_b"]
 
 
-@pytest.mark.parametrize("case_filter, message", [
-    ("^nosuchfunction$", "filter '^nosuchfunction$' selects no case in mod.py"),
-    (None, "no case to run in mod.py"),  # none of the module's functions is named bench_* or benchmark_*
-])
+@pytest.mark.parametrize(
+    "case_filter, message",
+    [
+        ("^nosuchfunction$", "filter '^nosuchfunction$' selects no case in mod.py"),
+        (None, "no case to run in mod.py"),  # none of the module's functions is named bench_* or benchmark_*
+    ],
+)
 def test_a_plan_with_no_case_is_refused(tmp, tree, case_filter, message):
     document = pyperf_order(tree, "no-case", case_filter=case_filter)
     if case_filter is None:
@@ -128,7 +145,7 @@ def test_a_plan_with_no_case_is_refused(tmp, tree, case_filter, message):
     assert results(tmp / "out") == []
 
 
-PARAM_MODULE = textwrap.dedent('''
+PARAM_MODULE = textwrap.dedent("""
     from pathlib import Path
 
     def bench_sort(n, key):
@@ -145,7 +162,7 @@ PARAM_MODULE = textwrap.dedent('''
         pass
 
     helper.params = 5  # not a benchmark, and not a params list: nobody asks
-''')
+""")
 COMBINATIONS = [("bench_sort", {"n": n, "key": key}) for n in ("10", "100") for key in ("'a'", "'b'")]
 
 
@@ -166,10 +183,16 @@ def planned(tree, case_filter):
 
 def test_a_function_with_params_is_one_case_per_combination(param_tree):
     assert planned(param_tree, "bench_sort") == [
-        (f"bench_sort-{i}", name, parameters) for i, (name, parameters) in enumerate(COMBINATIONS)]
+        (f"bench_sort-{i}", name, parameters) for i, (name, parameters) in enumerate(COMBINATIONS)
+    ]
     # With no filter the cases are the bench_* functions, helper (no prefix) and its odd `params` excluded.
     assert [case for case, _, _ in planned(param_tree, None)] == [
-        "bench_plain", "bench_sort-0", "bench_sort-1", "bench_sort-2", "bench_sort-3"]
+        "bench_plain",
+        "bench_sort-0",
+        "bench_sort-1",
+        "bench_sort-2",
+        "bench_sort-3",
+    ]
     assert planned(param_tree, "bench_plain") == [("bench_plain", "bench_plain", {})]
 
 
@@ -177,7 +200,8 @@ def test_a_filter_is_searched_in_the_function_and_its_arguments(param_tree):
     assert [case for case, _, _ in planned(param_tree, r"bench_sort\(100, 'a'\)")] == ["bench_sort-2"]
     assert [case for case, _, _ in planned(param_tree, r"\(10, ")] == ["bench_sort-0", "bench_sort-1"]
     assert [case for case, _, _ in planned(param_tree, r"^(bench_sort)(\(.*\))?$")] == [
-        f"bench_sort-{i}" for i in range(4)]  # what `bx bench mod.py bench_sort` asks for
+        f"bench_sort-{i}" for i in range(4)
+    ]  # what `bx bench mod.py bench_sort` asks for
 
 
 def test_a_filter_that_matches_a_name_but_no_arguments_is_refused_with_a_hint(param_tree):
@@ -235,9 +259,10 @@ def test_a_refusal_names_a_suite_that_lives_outside_the_target(tmp, tree):
 
 def test_each_combination_runs_with_its_own_arguments(tmp, param_tree):
     docs = run_order(tmp, pyperf_order(param_tree, "params", case_filter="bench_sort"), "params")
-    assert sorted((d["coordinates"]["workload"]["name"], json.dumps(d["coordinates"]["workload"]["parameters"],
-                                                                    sort_keys=True)) for d in docs) == sorted(
-        (name, json.dumps(parameters, sort_keys=True)) for name, parameters in COMBINATIONS)
+    assert sorted(
+        (d["coordinates"]["workload"]["name"], json.dumps(d["coordinates"]["workload"]["parameters"], sort_keys=True))
+        for d in docs
+    ) == sorted((name, json.dumps(parameters, sort_keys=True)) for name, parameters in COMBINATIONS)
     assert {d["measurement"]["status"] for d in docs} == {"success"}
     # The function gets the values themselves (the string `a`, the int 10); the result records their repr().
     assert sorted(p.name for p in (tmp / "seen").iterdir()) == ["10-a", "10-b", "100-a", "100-b"]
@@ -298,8 +323,7 @@ def _case_run(tmp, tree, flags, case, env=None):
     applied, invocation = adapter.protocol(PRECISION)
     native = tmp / "case" / "0000.native.json"
     native.parent.mkdir(exist_ok=True)
-    return runnable, env, adapter.run_case(runnable, case, flags if flags is not None else invocation,
-                                           env, 60, native)
+    return runnable, env, adapter.run_case(runnable, case, flags if flags is not None else invocation, env, 60, native)
 
 
 def test_scrubbing_is_real_without_copy_env(tmp, tree):
@@ -338,9 +362,11 @@ def test_digest_mismatch_with_a_fake_native_file(tmp, tree):
 
 def test_driver_digest_matches_the_adapters(tmp, tree):
     _, env, run = _case_run(tmp, tree, None, "f")
-    digests = {md.get(adapter.ENV_DIGEST_KEY) for md in [run["native"]["metadata"],
-                                                         *(r["metadata"] for r in run["native"]["benchmarks"][0]["runs"])]
-               if adapter.ENV_DIGEST_KEY in md}
+    digests = {
+        md.get(adapter.ENV_DIGEST_KEY)
+        for md in [run["native"]["metadata"], *(r["metadata"] for r in run["native"]["benchmarks"][0]["runs"])]
+        if adapter.ENV_DIGEST_KEY in md
+    }
     assert digests == {adapter.env_digest(env)} == {run["passed_env_digest"]}  # over the whole environment
     assert adapter.env_digest(run["worker_env"]) != adapter.env_digest(env)  # the capture is filtered
 
@@ -405,8 +431,10 @@ def test_python_comes_from_the_childs_path_not_sys_executable(tmp, tree, monkeyp
 
 
 def test_pyperf_must_be_importable_or_the_order_is_refused(tmp, tree, monkeypatch):
-    path = _fake_python(tmp / "nopyperf", 'case "$*" in *"import pyperf"*) echo "No module named pyperf" >&2; exit 1;; esac\n'
-                                          f'exec {sys.executable} "$@"')
+    path = _fake_python(
+        tmp / "nopyperf",
+        f'case "$*" in *"import pyperf"*) echo "No module named pyperf" >&2; exit 1;; esac\nexec {sys.executable} "$@"',
+    )
     monkeypatch.setenv("PATH", path["PATH"])
     file = tmp / "o.json"
     file.write_text(json.dumps(pyperf_order(tree, "no-pyperf")))
@@ -415,14 +443,19 @@ def test_pyperf_must_be_importable_or_the_order_is_refused(tmp, tree, monkeypatc
     assert not (tmp / "no-pyperf").exists() or not list((tmp / "no-pyperf").glob("*.json"))
 
 
-@pytest.mark.parametrize("change, message", [
-    (lambda o: o.update(quantities=["cpu-time"]), "quantities"),
-    (lambda o: o["precision"].update(repetitions=5), "two levels"),
-    (lambda o: o["precision"].update(warmup={"mode": "time", "seconds": 1}), "count-based"),
-    (lambda o: o["precision"].update(repetitions={"mode": "fixed", "levels": [{"unit": "repetition", "n": 3}]}),
-     "'process' and 'value'"),
-    (lambda o: o["suites"][0].update(suite="missing.py"), "not found"),
-])
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda o: o.update(quantities=["cpu-time"]), "quantities"),
+        (lambda o: o["precision"].update(repetitions=5), "two levels"),
+        (lambda o: o["precision"].update(warmup={"mode": "time", "seconds": 1}), "count-based"),
+        (
+            lambda o: o["precision"].update(repetitions={"mode": "fixed", "levels": [{"unit": "repetition", "n": 3}]}),
+            "'process' and 'value'",
+        ),
+        (lambda o: o["suites"][0].update(suite="missing.py"), "not found"),
+    ],
+)
 def test_refusals(tmp, tree, change, message):
     document = pyperf_order(tree, "refused")
     change(document)
@@ -442,6 +475,7 @@ def test_an_unimportable_module_is_refused_with_the_reason(tmp, tree):
 
 # --- the translating half, on captured native output -------------------------------
 
+
 def _translate(native, attempted=4, exit_status=0, **run):
     record = {"exit_status": exit_status, "timed_out": False, "stdout": "", "stderr": "", "native": native, **run}
     return adapter.translate("f", ["wall-time"], record, attempted)[0]
@@ -452,12 +486,15 @@ def test_translating_captured_output():
     out = _translate(native)
     assert out["measurement"]["status"] == "success"
     assert [o["group"] for o in out["measurement"]["observations"]] == ["0", "0", "1", "1"]
-    assert out["procedure"] == {"attempted_repetitions": 4, "completed_repetitions": 4, "inner_iterations": 50,
-                                "warmups_performed": 2}
+    assert out["procedure"] == {
+        "attempted_repetitions": 4,
+        "completed_repetitions": 4,
+        "inner_iterations": 50,
+        "warmups_performed": 2,
+    }
     system, info = adapter.context_facts(native)
     assert info["library_version"] == "2.10.0" and "config" in system["cpu"] and system["runtime"]["python"]
     assert adapter.harness(info) == {"name": "pyperf", "version": "2.10.0"}
-
 
 
 def test_boot_time_is_provenance_not_environment():
@@ -466,6 +503,7 @@ def test_boot_time_is_provenance_not_environment():
     system, info = adapter.context_facts(native)
     assert system == {"os": {"platform": "Linux"}}
     assert info["boot_time"] == "2026-11-16 16:28:41"
+
 
 def test_translation_is_idempotent_and_does_not_mutate_input():
     native = json.loads((FIXTURES / "pyperf-native.json").read_text())
@@ -500,13 +538,17 @@ def test_a_lost_process_shows_at_the_process_level():
     native = json.loads((FIXTURES / "pyperf-native.json").read_text())
     assert [lv["completed"] for lv in _levels(native)] == [2, 4]
     del native["benchmarks"][0]["runs"][-1]
-    assert _levels(native) == [{"unit": "process", "attempted": 2, "completed": 1},
-                               {"unit": "value", "attempted": 4, "completed": 2}]
+    assert _levels(native) == [
+        {"unit": "process", "attempted": 2, "completed": 1},
+        {"unit": "value", "attempted": 4, "completed": 2},
+    ]
 
 
 def test_no_output_completes_no_level():
-    assert _levels(None) == [{"unit": "process", "attempted": 2, "completed": 0},
-                             {"unit": "value", "attempted": 4, "completed": 0}]
+    assert _levels(None) == [
+        {"unit": "process", "attempted": 2, "completed": 0},
+        {"unit": "value", "attempted": 4, "completed": 0},
+    ]
 
 
 def test_a_missing_output_file_is_an_error_result():

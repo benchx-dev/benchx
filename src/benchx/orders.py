@@ -7,7 +7,7 @@ every order is checked against its schema before anything runs it.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import core
 
@@ -22,13 +22,27 @@ class OrderError(Exception):
 
 def default_run_key(prefix: str) -> str:
     """`PREFIX-<UTC timestamp>`, the run key when the user names none."""
-    return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    return f"{prefix}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
 
 
-def make_order(*, suite: dict, target: dict, precision: dict, run_key: str, quantities=("wall-time",),
-               case_s: float = CASE_TIMEOUT_S, order_s: float = ORDER_TIMEOUT_S, project=None, labels=None,
-               environment_variables=None, round_=None, slot=None, benchmark=None,
-               collectors=None, harness_verbosity=0) -> dict:
+def make_order(
+    *,
+    suite: dict,
+    target: dict,
+    precision: dict,
+    run_key: str,
+    quantities=("wall-time",),
+    case_s: float = CASE_TIMEOUT_S,
+    order_s: float = ORDER_TIMEOUT_S,
+    project=None,
+    labels=None,
+    environment_variables=None,
+    round_=None,
+    slot=None,
+    benchmark=None,
+    collectors=None,
+    harness_verbosity=0,
+) -> dict:
     """One resolved work order. Optional fields that are None or empty are left out.
 
     Raises OrderError when the result is not a valid work order.

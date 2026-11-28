@@ -21,13 +21,23 @@ def result(side, round_, slot, value, workload="BM_W", **changes):
         "revision": {"key": side},
         "coordinates": {
             "workload": {"name": workload},
-            "subject": {"name": "demo", "components": [{"role": "primary"}], "configuration": {"build_type": "Release"}},
+            "subject": {
+                "name": "demo",
+                "components": [{"role": "primary"}],
+                "configuration": {"build_type": "Release"},
+            },
             "protocol": {"harness": {"name": "google-benchmark"}},
-            "environment": {"schema_version": "machine/v1", "identity": {"runner": "host"},
-                            "system": {"os": {"kernel": "6.8"}}},
+            "environment": {
+                "schema_version": "machine/v1",
+                "identity": {"runner": "host"},
+                "system": {"os": {"kernel": "6.8"}},
+            },
         },
-        "measurement": {"quantity": {"name": "wall-time", "unit": "s", "direction": "lower-is-better"},
-                        "status": "success", "observations": [value]},
+        "measurement": {
+            "quantity": {"name": "wall-time", "unit": "s", "direction": "lower-is-better"},
+            "status": "success",
+            "observations": [value],
+        },
         "procedure": {"round": round_, "slot": slot},
         "provenance": {"run_key": "run", "subject_dirty": "clean", "benchmark_dirty": "clean", "subject_tree": side},
     }
@@ -119,8 +129,11 @@ def test_anything_not_named_must_agree():
 def test_exclusions():
     """C6: a failed attempt is listed and its round drops out of the pairing."""
     docs = run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
-    docs[2]["measurement"] = {"quantity": docs[2]["measurement"]["quantity"], "status": "error",
-                              "reason": "harness.error"}
+    docs[2]["measurement"] = {
+        "quantity": docs[2]["measurement"]["quantity"],
+        "status": "error",
+        "reason": "harness.error",
+    }
     doc = evaluate(docs)
     result = {"producer": "benchx/gbench-adapter", "ingest_key": docs[2]["ingest_key"]}
     assert doc["exclusions"] == [{"result": result, "reason": "error: harness.error"}]
@@ -171,8 +184,12 @@ def test_condition_measurements_are_not_compared():
         load = copy.deepcopy(d)
         load["ingest_key"] = d["ingest_key"].replace("wall-time", "load-average")
         load["coordinates"]["protocol"] = {"probe": {"name": "os.getloadavg"}}
-        load["measurement"] = {"quantity": {"name": "load-average", "unit": "1"}, "kind": "condition",
-                               "status": "success", "observations": [5.0]}
+        load["measurement"] = {
+            "quantity": {"name": "load-average", "unit": "1"},
+            "kind": "condition",
+            "status": "success",
+            "observations": [5.0],
+        }
         docs.append(load)
     doc = evaluate(docs)
     assert [u["quantity"] for u in doc["units"]] == ["wall-time"] and len(doc["inputs"]) == 6
@@ -212,17 +229,21 @@ def labeled(docs, configurations=("plain", "hardened")):
 
 
 def test_environments_sides_are_named_by_label():
-    doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build",
-                          **FEW)
+    doc = compare.compare(labeled(run()), run_key="run", profile="environments", baseline="plain", label="build", **FEW)
     assert core.check(doc, "comparison-document") == []
-    assert (doc["sides"]["varying"], doc["sides"]["baseline"], doc["sides"]["contender"]) == ("provenance.labels.build", "plain", "hardened")
+    assert (doc["sides"]["varying"], doc["sides"]["baseline"], doc["sides"]["contender"]) == (
+        "provenance.labels.build",
+        "plain",
+        "hardened",
+    )
     assert doc["failed_invariants"] == [] and doc["units"][0]["verdict"] == "regressed"
     assert doc["units"][0]["unmatched_differences"] == ["/coordinates/subject/configuration/hardening"]
 
 
 def test_environments_sides_must_differ_beyond_their_label():
-    doc = compare.compare(labeled(run(), ("same", "same")), run_key="run", profile="environments",
-                          baseline="plain", label="build")
+    doc = compare.compare(
+        labeled(run(), ("same", "same")), run_key="run", profile="environments", baseline="plain", label="build"
+    )
     assert invariants(doc) == ["sides-differ"]
 
 
@@ -378,15 +399,24 @@ def variants_run(rounds=3, sizes=(None,), ratio=1.1, base_values=(1.0, 2.0, 3.0)
         for value, scale in zip(values, (1, ratio)):
             for size in sizes:
                 parameters = {name: value, **({"size": size} if size is not None else {})}
-                docs.append(result(HEAD, r, slot, base_values[r] * scale, ingest_key=f"run:{slot}:{size}",
-                                   coordinates__workload={"name": "bench_truncate", "parameters": parameters}))
+                docs.append(
+                    result(
+                        HEAD,
+                        r,
+                        slot,
+                        base_values[r] * scale,
+                        ingest_key=f"run:{slot}:{size}",
+                        coordinates__workload={"name": "bench_truncate", "parameters": parameters},
+                    )
+                )
             slot += 1
     return docs
 
 
 def vevaluate(docs, parameter="role", baseline="'baseline'", **kwargs):
-    doc = compare.compare(docs, run_key="run", profile="variants", baseline=baseline, parameter=parameter,
-                          **{**FEW, **kwargs})
+    doc = compare.compare(
+        docs, run_key="run", profile="variants", baseline=baseline, parameter=parameter, **{**FEW, **kwargs}
+    )
     assert core.check(doc, "comparison-document") == []
     return doc
 
@@ -413,7 +443,8 @@ def test_variants_another_parameter_makes_one_unit_per_value_of_it():
     assert invariants(doc) == []
     assert [u["workload"] for u in doc["units"]] == [
         {"name": "bench_truncate", "parameters": {"size": "1000"}},
-        {"name": "bench_truncate", "parameters": {"size": "100000"}}]  # no `role` in either
+        {"name": "bench_truncate", "parameters": {"size": "100000"}},
+    ]  # no `role` in either
     shown = compare.render(doc)
     assert "bench_truncate [size=1000]" in shown and "bench_truncate [size=100000]" in shown
     assert "role" not in shown.split("\n", 1)[1]
@@ -426,8 +457,16 @@ def test_variants_no_parameter_name_is_special():
 
 def test_variants_a_third_value_is_a_third_side():
     docs = variants_run()
-    docs.append(result(HEAD, 3, 6, 1.0, ingest_key="run:6", coordinates__workload={
-        "name": "bench_truncate", "parameters": {"role": "'other'"}}))
+    docs.append(
+        result(
+            HEAD,
+            3,
+            6,
+            1.0,
+            ingest_key="run:6",
+            coordinates__workload={"name": "bench_truncate", "parameters": {"role": "'other'"}},
+        )
+    )
     doc = vevaluate(docs)
     assert invariants(doc) == ["two-sides"] and doc["units"] == []
 
@@ -456,15 +495,26 @@ def test_the_other_profiles_do_not_name_variants_in_the_alternation_detail():
 
 def test_variants_unequal_attempts():
     docs = variants_run()
-    docs.append(result(HEAD, 3, 6, 4.0, ingest_key="run:6", coordinates__workload={
-        "name": "bench_truncate", "parameters": {"role": VALUES[0]}}))
+    docs.append(
+        result(
+            HEAD,
+            3,
+            6,
+            4.0,
+            ingest_key="run:6",
+            coordinates__workload={"name": "bench_truncate", "parameters": {"role": VALUES[0]}},
+        )
+    )
     doc = vevaluate(docs)
     assert invariants(doc) == ["equal-attempts"] and doc["units"] == []
 
 
 def fail(doc, status):
-    doc["measurement"] = {"quantity": doc["measurement"]["quantity"], "status": status,
-                          **({"reason": "timeout"} if status != "partial" else {"reason": "timeout", "observations": [1.0]})}
+    doc["measurement"] = {
+        "quantity": doc["measurement"]["quantity"],
+        "status": status,
+        **({"reason": "timeout"} if status != "partial" else {"reason": "timeout", "observations": [1.0]}),
+    }
     return doc
 
 
@@ -554,6 +604,7 @@ def test_variants_needs_a_parameter_that_is_a_token(parameter):
 
 # --- which parameter to vary, in read mode ------------------------------------------------------
 
+
 def test_infer_parameter_takes_the_only_one():
     assert compare.infer_parameter(variants_run(), "run") == "role"
     assert compare.infer_parameter(variants_run(name="impl"), "run") == "impl"  # no name is special
@@ -583,14 +634,22 @@ def test_infer_parameter_refuses_a_run_with_no_parameter():
 
 def test_infer_parameter_reads_only_the_run_and_only_measurands():
     docs = variants_run()
-    other = result(HEAD, 0, 0, 1.0, ingest_key="other", coordinates__workload={
-        "name": "x", "parameters": {"size": "1"}}, provenance__run_key="another")
+    other = result(
+        HEAD,
+        0,
+        0,
+        1.0,
+        ingest_key="other",
+        coordinates__workload={"name": "x", "parameters": {"size": "1"}},
+        provenance__run_key="another",
+    )
     assert compare.infer_parameter([*docs, other], "run") == "role"
     with pytest.raises(compare.CompareError, match="no results for run"):
         compare.infer_parameter(docs, "missing")
 
 
 # --- units are listed in natural order ----------------------------------------------------------
+
 
 def test_units_are_listed_with_numbers_in_natural_order():
     """`n=50` before `n=100`, as people read sizes, though "100" sorts before "50" as text."""
@@ -624,10 +683,15 @@ def test_units_with_more_than_one_other_parameter_are_ordered_by_name_then_value
                 extra.append(clone)
     doc = vevaluate(extra)
     assert [(u["workload"]["parameters"]["n"], u["workload"]["parameters"]["size"]) for u in doc["units"]] == [
-        ("2", "20"), ("2", "100"), ("10", "20"), ("10", "100")]
+        ("2", "20"),
+        ("2", "100"),
+        ("10", "20"),
+        ("10", "100"),
+    ]
 
 
 # --- one benchmark that cannot be compared does not stop the others -------------------------
+
 
 def run_two(rounds=3, ratio=1.1):
     """Two workloads measured in every call; the head takes `ratio` times the base's time."""
@@ -658,7 +722,11 @@ def test_an_edited_benchmark_is_not_comparable_and_the_others_are_compared():
     doc = evaluate(docs)
     assert invariants(doc) == []
     edited = by_name(doc)["BM_B"]
-    assert (edited["verdict"], edited["reason"], edited["details"]["rounds"]) == ("indeterminate", "benchmark-changed", 0)
+    assert (edited["verdict"], edited["reason"], edited["details"]["rounds"]) == (
+        "indeterminate",
+        "benchmark-changed",
+        0,
+    )
     assert edited["attempts"] == {"baseline": {"success": 3}, "contender": {"success": 3}}
     assert "effect" not in edited
     assert by_name(doc)["BM_A"]["verdict"] == "regressed"
@@ -723,6 +791,7 @@ def test_a_failure_of_the_whole_run_still_leaves_no_units():
 
 # --- what the output says about what was left out (FAILURE_MESSAGES_PLAN.md, decisions 8 and 9) ---
 
+
 def failing_head(docs, workload="BM_B", message="ValueError: array has no axis 3"):
     """The head's attempts of a workload fail, the worker having said `message`."""
     for d in of_head(docs, workload):
@@ -752,8 +821,11 @@ def test_excluded_results_that_failed_differently_are_lines_of_their_own():
     docs = failing_head(run_two(), message="ValueError: array has no axis 3")
     docs[docs.index(of_head(docs, "BM_B")[0])]["provenance"]["info"]["message"] = "KeyError: 'x'"
     lines = compare.render(evaluate(docs)).splitlines()
-    assert lines[-3:] == ["excluded (3)", "  error: harness.error: KeyError: 'x'  (1 result)",
-                          "  error: harness.error: ValueError: array has no axis 3  (2 results)"]
+    assert lines[-3:] == [
+        "excluded (3)",
+        "  error: harness.error: KeyError: 'x'  (1 result)",
+        "  error: harness.error: ValueError: array has no axis 3  (2 results)",
+    ]
 
 
 def test_a_message_in_the_reason_is_one_line_and_cut():
@@ -767,8 +839,10 @@ def test_a_failed_invariant_of_one_unit_names_the_unit_in_words():
     docs = run_two()
     for d in docs:
         if d["coordinates"]["workload"]["name"] == "BM_B":
-            d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark",
-                                                       "version": "1.9" if d["revision"]["key"] == HEAD else "1.8"}
+            d["coordinates"]["protocol"]["harness"] = {
+                "name": "google-benchmark",
+                "version": "1.9" if d["revision"]["key"] == HEAD else "1.8",
+            }
     text = compare.render(evaluate(docs))
     assert text.endswith("\nfailed invariants (1)\n  BM_B: sides-agree: /coordinates/protocol/harness/version differ")
     assert "'invariant'" not in text
@@ -777,40 +851,65 @@ def test_a_failed_invariant_of_one_unit_names_the_unit_in_words():
 def test_units_that_failed_an_invariant_alike_are_one_line():
     docs = run_two()
     for d in docs:
-        d["coordinates"]["protocol"]["harness"] = {"name": "google-benchmark",
-                                                   "version": "1.9" if d["revision"]["key"] == HEAD else "1.8"}
+        d["coordinates"]["protocol"]["harness"] = {
+            "name": "google-benchmark",
+            "version": "1.9" if d["revision"]["key"] == HEAD else "1.8",
+        }
     text = compare.render(evaluate(docs))
-    assert text.endswith("\nfailed invariants (2)\n"
-                         "  sides-agree: /coordinates/protocol/harness/version differ  (2 units: BM_A, BM_B)")
+    assert text.endswith(
+        "\nfailed invariants (2)\n  sides-agree: /coordinates/protocol/harness/version differ  (2 units: BM_A, BM_B)"
+    )
 
 
 def rendered_doc():
     """The least of a comparison document that `render` reads, with nothing in its lists."""
-    return {"selector": {"name": "benchx/run-profile", "version": "v1",
-                         "params": {"run_key": "r", "profile": "revisions", "baseline": BASE}},
-            "sides": {"varying": "provenance.subject_tree", "baseline": BASE, "contender": HEAD},
-            "local_only": False, "units": [], "missing": [], "failed_invariants": [], "exclusions": []}
+    return {
+        "selector": {
+            "name": "benchx/run-profile",
+            "version": "v1",
+            "params": {"run_key": "r", "profile": "revisions", "baseline": BASE},
+        },
+        "sides": {"varying": "provenance.subject_tree", "baseline": BASE, "contender": HEAD},
+        "local_only": False,
+        "units": [],
+        "missing": [],
+        "failed_invariants": [],
+        "exclusions": [],
+    }
 
 
 def test_a_failed_invariant_of_the_run_is_in_words_too():
-    doc = {**rendered_doc(), "failed_invariants": [{"invariant": "equal-attempts",
-                                                     "detail": "3 against 2: run the same number of rounds"}]}
-    assert compare.render(doc).endswith("\nfailed invariants (1)\n  equal-attempts: 3 against 2: run the same number of rounds")
+    doc = {
+        **rendered_doc(),
+        "failed_invariants": [{"invariant": "equal-attempts", "detail": "3 against 2: run the same number of rounds"}],
+    }
+    assert compare.render(doc).endswith(
+        "\nfailed invariants (1)\n  equal-attempts: 3 against 2: run the same number of rounds"
+    )
 
 
 def test_missing_results_are_one_line_for_each_side_with_a_few_names():
-    where = lambda name, side: {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
-    doc = {**rendered_doc(), "missing": [where("a", "contender"), where("b", "contender"), where("c", "contender"),
-                                         where("d", "contender"), where("e", "baseline")]}
-    assert compare.render(doc).endswith(
-        "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)")
+    def where(name, side):
+        return {"workload": {"name": name, "parameters": {"n": "1"}}, "quantity": "wall-time", "side": side}
 
+    doc = {
+        **rendered_doc(),
+        "missing": [
+            where("a", "contender"),
+            where("b", "contender"),
+            where("c", "contender"),
+            where("d", "contender"),
+            where("e", "baseline"),
+        ],
+    }
+    assert compare.render(doc).endswith(
+        "\nmissing (5)\n  not on baseline: e [n=1]\n  not on contender: a [n=1], b [n=1], c [n=1], … (+1 more)"
+    )
 
 
 def skip(docs, indexes, status="skipped", reason="harness.skipped"):
     for i in indexes:
-        docs[i]["measurement"] = {"quantity": docs[i]["measurement"]["quantity"], "status": status,
-                                  "reason": reason}
+        docs[i]["measurement"] = {"quantity": docs[i]["measurement"]["quantity"], "status": status, "reason": reason}
     return docs
 
 

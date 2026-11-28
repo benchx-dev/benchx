@@ -37,8 +37,15 @@ HARNESS_VERBOSITY_ENV = "BENCHX_HARNESS_VERBOSITY"
 DEFAULT_LOG = "{out}/bx.log"
 # benchx's own control variables: every one the code reads. They are settings someone typed for benchx, a fixed
 # list, so the log gives their values; the rest of the inherited environment is never dumped.
-CONTROL_ENV = ("BENCHX_HOME", "BENCHX_VERBOSE", "BENCHX_LOG_LEVEL", "BENCHX_HARNESS_VERBOSITY", "BENCHX_SETUP_FILE",
-               "BENCHX_ENV_ALLOWLIST", "BENCHX_SCHEMAS")
+CONTROL_ENV = (
+    "BENCHX_HOME",
+    "BENCHX_VERBOSE",
+    "BENCHX_LOG_LEVEL",
+    "BENCHX_HARNESS_VERBOSITY",
+    "BENCHX_SETUP_FILE",
+    "BENCHX_ENV_ALLOWLIST",
+    "BENCHX_SCHEMAS",
+)
 OUTCOMES = {EXIT_OK: "ok", EXIT_INVALID: "invalid", EXIT_REFUSED: "refused"}
 
 say = log.console(__name__)  # what `bx` shows its user: console messages
@@ -107,8 +114,14 @@ def _harness_verbosity(cfg, args) -> tuple[int, str]:
     label = None
     if given is None and extra and from_flag:
         given, label = extra, "flag: -v past -vv"
-    value, source = cfg.pick_with_source(given, cfg.adapter.get("verbosity"), 0, flag="--harness-verbosity",
-                                         key="adapter.verbosity", env=HARNESS_VERBOSITY_ENV)
+    value, source = cfg.pick_with_source(
+        given,
+        cfg.adapter.get("verbosity"),
+        0,
+        flag="--harness-verbosity",
+        key="adapter.verbosity",
+        env=HARNESS_VERBOSITY_ENV,
+    )
     if source == "env":
         try:
             value = int(value)
@@ -124,8 +137,9 @@ def _harness_verbosity(cfg, args) -> tuple[int, str]:
 def _log_level(cfg, args) -> tuple[int, str]:
     """The level the log keeps, and where it came from: the flag, $BENCHX_LOG_LEVEL, the file's
     `log_level`, else debug."""
-    value, source = cfg.pick_with_source(args.log_level, cfg.data.get("log_level"), "debug", flag="--log-level",
-                                         key="log_level", env=LOG_LEVEL_ENV)
+    value, source = cfg.pick_with_source(
+        args.log_level, cfg.data.get("log_level"), "debug", flag="--log-level", key="log_level", env=LOG_LEVEL_ENV
+    )
     if value.lower() not in log.LEVELS:
         origin = f"{LOG_LEVEL_ENV}={value}" if source == "env" else f"log_level in {cfg.path}"
         raise UsageError(f"{origin}: not one of {', '.join(log.LEVELS)}")
@@ -136,8 +150,7 @@ def _log_setting(cfg, args, out, command):
     """What the switch says for this command, and where that came from: False (off), True
     (stderr) or the resolved log file. A command with no output folder (`out` None) logs only
     when a flag asks: the file, the environment and the default are ignored."""
-    setting, source = cfg.pick_with_source(args.log, cfg.data.get("logging"), DEFAULT_LOG, flag="--log",
-                                           key="logging")
+    setting, source = cfg.pick_with_source(args.log, cfg.data.get("logging"), DEFAULT_LOG, flag="--log", key="logging")
     if out is None and source != "flag":
         return False, source
     if isinstance(setting, str):
@@ -200,8 +213,15 @@ def _start_logging(cfg, args, out, command, *, read_config=True, lenient=False):
     _log_arguments(args)
     _log_environment()
     shown = "off" if setting is False else "stderr" if setting is True else str(setting)
-    logger.debug("logging: %s (%s); log level: %s (%s); verbosity: %d (%s)", shown, _source_text(source),
-                 logging.getLevelName(level).lower(), level_source, args.verbosity, args.verbosity_source)
+    logger.debug(
+        "logging: %s (%s); log level: %s (%s); verbosity: %d (%s)",
+        shown,
+        _source_text(source),
+        logging.getLevelName(level).lower(),
+        level_source,
+        args.verbosity,
+        args.verbosity_source,
+    )
     return cfg
 
 
@@ -211,8 +231,11 @@ def _log_arguments(args):
     claim to hide a value."""
     skip = {"fn", "argv", "verbosity", "verbosity_source", "verbose_extra"}
     # `0 == False`, so a test with `in` would drop `--slot 0`: compare by identity
-    shown = {name: value for name, value in vars(args).items()
-             if name not in skip and value is not None and value is not False and value != [] and value != ()}
+    shown = {
+        name: value
+        for name, value in vars(args).items()
+        if name not in skip and value is not None and value is not False and value != [] and value != ()
+    }
     logger.debug("arguments as parsed: %s", ", ".join(f"{name}={value!r}" for name, value in sorted(shown.items())))
 
 
@@ -221,8 +244,11 @@ def _log_environment():
     and whether PATH is set, which the benchmark's `python` is looked up on. The other variables that shape a
     run are the allowlisted ones, which each order logs by name."""
     shown = [f"{name}={os.environ[name]}" if os.environ.get(name) else f"{name} not set" for name in CONTROL_ENV]
-    logger.debug("environment variables consulted: %s; PATH is %s", "; ".join(shown),
-                 "set (the benchmark's python is looked up on it)" if os.environ.get("PATH") else "not set")
+    logger.debug(
+        "environment variables consulted: %s; PATH is %s",
+        "; ".join(shown),
+        "set (the benchmark's python is looked up on it)" if os.environ.get("PATH") else "not set",
+    )
 
 
 def _log_config(cfg):
@@ -230,9 +256,17 @@ def _log_config(cfg):
     found = cfg.path or f"none found from {Path.cwd()} upward"
     home = ""
     if os.environ.get(config_mod.HOME_ENV):
-        home = f" (set by ${config_mod.HOME_ENV}" + (", which hides paths.store in the file)" if "store" in cfg.section("paths") else ")")
-    logger.info("config file: %s; project root %s; store %s%s; results %s", found, cfg.root, cfg.store_path, home,
-                cfg.results_dir)
+        home = f" (set by ${config_mod.HOME_ENV}" + (
+            ", which hides paths.store in the file)" if "store" in cfg.section("paths") else ")"
+        )
+    logger.info(
+        "config file: %s; project root %s; store %s%s; results %s",
+        found,
+        cfg.root,
+        cfg.store_path,
+        home,
+        cfg.results_dir,
+    )
 
 
 def _log_settings(sources):
@@ -259,8 +293,9 @@ def _report_unmeasured(rows) -> None:
     if unmeasured:
         cases = {row["case"] for row in rows}
         silent = unmeasured - named  # nothing on the screen names these, whatever else is shown
-        log.degraded(f"{len(unmeasured)} of {len(cases)} cases not measured",
-                     shown=bool(log.quiet() and (not named or silent)))
+        log.degraded(
+            f"{len(unmeasured)} of {len(cases)} cases not measured", shown=bool(log.quiet() and (not named or silent))
+        )
 
 
 def _open_store(path, command: str, *, hint: str | None = None):
@@ -303,8 +338,11 @@ def cmd_run(args):
     except runner.Refused as e:
         return _refused(e)
     _report_unmeasured(bench_mod.summarize(summary["files"]))
-    say.out(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
-            f"  (order {summary['order'][:19]})", log.SUMMARY)
+    say.out(
+        f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
+        f"  (order {summary['order'][:19]})",
+        log.SUMMARY,
+    )
     if store is None:
         logger.info("ingest skipped (--no-ingest): the results are files only")
         return EXIT_OK
@@ -361,11 +399,15 @@ def _session_position(args) -> tuple[dict, int | None, int | None, int | None]:
         raise UsageError(f"--slot wants a number from 0, not {args.slot}")
     placed = labels or round_ is not None or args.slot is not None
     if placed and not args.run_key:
-        raise UsageError("--label, --round and --slot need an explicit --run-key: the default is a timestamp "
-                         "per call, so two calls would never share a run")
+        raise UsageError(
+            "--label, --round and --slot need an explicit --run-key: the default is a timestamp "
+            "per call, so two calls would never share a run"
+        )
     if (labels or round_ is not None) and args.slot is None:
-        raise UsageError("--label and --round need --slot: without one, the sides of a run would share an "
-                         "ingest key and their results would conflict")
+        raise UsageError(
+            "--label and --round need --slot: without one, the sides of a run would share an "
+            "ingest key and their results would conflict"
+        )
     return labels, round_, args.slot, rounds
 
 
@@ -401,13 +443,20 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     block = cfg.adapter
     given = forced_adapter or args.adapter
     if given and block.get("name") and not harnesses.same_family(given, block["name"]):
-        raise config_mod.ConfigError(f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
-                                     "and its precision belongs to that harness and the ones that share it "
-                                     "(pyperf and asv)")
+        raise config_mod.ConfigError(
+            f"adapter {given!r}, but {cfg.where} sets adapter.name to {block['name']!r}, "
+            "and its precision belongs to that harness and the ones that share it "
+            "(pyperf and asv)"
+        )
     sources = []
     quantities = config_mod.parse_quantities(args.quantity) if args.quantity else block.get("quantities", ["wall-time"])
-    sources.append(("quantities", ", ".join(quantities),
-                    "flag" if args.quantity else "file" if "quantities" in block else "default"))
+    sources.append(
+        (
+            "quantities",
+            ", ".join(quantities),
+            "flag" if args.quantity else "file" if "quantities" in block else "default",
+        )
+    )
     if args.project and args.no_project:
         raise UsageError("give --project or --no-project, not both")
     timeouts = cfg.section("timeouts")
@@ -416,12 +465,16 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     if given and named and given != named:  # the file's block serves another adapter of its family
         adapter_source += f"; the file says {named}, same family"
     sources.append(("adapter", adapter, adapter_source))
-    suite, suite_source = cfg.pick_with_source(forced_suite or args.suite, block.get("suite"), flag="--suite",
-                                               key="adapter.suite")
+    suite, suite_source = cfg.pick_with_source(
+        forced_suite or args.suite, block.get("suite"), flag="--suite", key="adapter.suite"
+    )
     sources.append(("suite", suite, suite_source))
     from_flag, from_file = _environment(args.env), cfg.section("environment_variables")
     environment_variables = {**from_file, **from_flag}
-    where = [f"-e: {', '.join(sorted(from_flag))}" if from_flag else "", f"file: {', '.join(sorted(from_file))}" if from_file else ""]
+    where = [
+        f"-e: {', '.join(sorted(from_flag))}" if from_flag else "",
+        f"file: {', '.join(sorted(from_file))}" if from_file else "",
+    ]
     if overrode := sorted(set(from_flag) & set(from_file)):
         where.append(f"-e overrode the file's {', '.join(overrode)}")
     sources.append(("environment_variables", "names only", "; ".join(w for w in where if w) or "default: none"))
@@ -429,15 +482,21 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
         project = None
         sources.append(("project", "none: results are filed as local/HOST", "flag --no-project"))
     else:
-        project, project_source = cfg.pick_with_source(args.project, cfg.data.get("project"), None, flag="--project",
-                                                       key="project")
+        project, project_source = cfg.pick_with_source(
+            args.project, cfg.data.get("project"), None, flag="--project", key="project"
+        )
         sources.append(("project", project or "none: results are filed as local/HOST", project_source))
-    source_uri, uri_source = cfg.pick_with_source(args.source_uri or None, cfg.section("source").get("uri"), None,
-                                                  flag="--source-uri", key="source.uri")
+    source_uri, uri_source = cfg.pick_with_source(
+        args.source_uri or None, cfg.section("source").get("uri"), None, flag="--source-uri", key="source.uri"
+    )
     sources.append(("source.uri", source_uri or "the checkout's origin remote", uri_source))
-    case_s, case_source = cfg.pick_with_source(getattr(args, "case_timeout", None), timeouts.get("case_s"),
-                                               ASV_CASE_TIMEOUT_S if adapter == "asv" else orders.CASE_TIMEOUT_S,
-                                               flag="--case-timeout", key="timeouts.case_s")
+    case_s, case_source = cfg.pick_with_source(
+        getattr(args, "case_timeout", None),
+        timeouts.get("case_s"),
+        ASV_CASE_TIMEOUT_S if adapter == "asv" else orders.CASE_TIMEOUT_S,
+        flag="--case-timeout",
+        key="timeouts.case_s",
+    )
     if case_source == "default":
         case_source = "default for asv, which times every round of a benchmark" if adapter == "asv" else "default"
     sources.append(("timeouts.case_s", f"{case_s:g} s", case_source))
@@ -445,8 +504,13 @@ def _common(cfg, args, *, forced_adapter=None, forced_suite=None) -> dict:
     sources.append(("timeouts.order_s", f"{order_s:g} s", "file" if "order_s" in timeouts else "default"))
     flagged = [name for name in harnesses.FLAG_NAMES if getattr(args, name) is not None]
     precision_file = sorted(block.get("precision") or {})
-    sources.append(("precision", f"flags {', '.join(flagged) or 'none'}; file {', '.join(precision_file) or 'none'}",
-                    "flag over file over the harness's defaults"))
+    sources.append(
+        (
+            "precision",
+            f"flags {', '.join(flagged) or 'none'}; file {', '.join(precision_file) or 'none'}",
+            "flag over file over the harness's defaults",
+        )
+    )
     if args.filter:
         sources.append(("filter", args.filter, "flag"))
     harness_verbosity, verbosity_source = _harness_verbosity(cfg, args)
@@ -487,9 +551,11 @@ def _needs_provider(cfg, *targets):
 def _placed(settings, rounds=None) -> str:
     """` (round 1/5, slot 3)`: where a `bx bench` call sits in a session, as the start line says it, with the
     session's number of rounds when the caller gave it (`--round 1/5`); empty when alone."""
-    parts = [f"round {settings['round_']}{f'/{rounds}' if rounds else ''}" if settings["round_"] is not None else "",
-             f"slot {settings['slot']}" if settings["slot"] is not None else "",
-             ", ".join(f"{name}={value}" for name, value in (settings["labels"] or {}).items())]
+    parts = [
+        f"round {settings['round_']}{f'/{rounds}' if rounds else ''}" if settings["round_"] is not None else "",
+        f"slot {settings['slot']}" if settings["slot"] is not None else "",
+        ", ".join(f"{name}={value}" for name, value in (settings["labels"] or {}).items()),
+    ]
     return f" ({', '.join(part for part in parts if part)})" if any(parts) else ""
 
 
@@ -505,8 +571,9 @@ def cmd_bench(args):
         target, forced_suite, forced_adapter = _bench_target(args)
         settings = _common(cfg, args, forced_adapter=forced_adapter, forced_suite=forced_suite)
         settings["labels"], settings["round_"], settings["slot"], rounds = _session_position(args)
-        session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
-                              settings["quantities"])
+        session.check_harness(
+            settings["adapter"], settings["flags"], settings["file_precision"], settings["quantities"]
+        )
         _needs_provider(cfg, target)
         # A name may carry `(arguments)` where the harness has parametrized benchmarks.
         names = harnesses.exact_filter(args.functions, harnesses.get(settings["adapter"]).NAMES_TAKE_ARGUMENTS)
@@ -519,8 +586,13 @@ def cmd_bench(args):
     out = Path(args.out) if args.out else session.run_directory(cfg.results_dir, run_key)
     if (cfg := _start_logging(cfg, args, out, "bench")) is None:
         return EXIT_REFUSED
-    logger.info("run key %s (%s); output folder %s (%s)", run_key, "given" if args.run_key else "generated", out,
-                "--out" if args.out else "the results directory")
+    logger.info(
+        "run key %s (%s); output folder %s (%s)",
+        run_key,
+        "given" if args.run_key else "generated",
+        out,
+        "--out" if args.out else "the results directory",
+    )
     _log_settings(settings.pop("sources"))
     settings["run_key"], settings["out"] = run_key, out
     settings["filter"] = names or settings["filter"]
@@ -530,8 +602,10 @@ def cmd_bench(args):
         if store is None:
             return EXIT_REFUSED
     # Where a quiet run says it started, before a provider that builds takes its time.
-    say.progress(f"measuring {Path(settings['suite']).name if settings.get('suite') else 'the suite'} on {target}"
-                 + _placed(settings, rounds))
+    say.progress(
+        f"measuring {Path(settings['suite']).name if settings.get('suite') else 'the suite'} on {target}"
+        + _placed(settings, rounds)
+    )
     try:
         summary = session.bench_target(target, store=store, progress=say.info, **settings)
     except (session.SessionError, config_mod.ConfigError) as e:
@@ -603,6 +677,7 @@ def _logging_rows(cfg, args):
 def _resolved(cfg):
     """What the file and the built-in defaults give, before any command-line argument:
     (key, value, 'file' | 'default' | 'unset')."""
+
     def row(key, value, default=None):
         if value is not None:
             return key, json.dumps(value), "file"
@@ -621,7 +696,13 @@ def _resolved(cfg):
     yield row("environment_variables", cfg.data.get("environment_variables"), {})
     yield row("timeouts.case_s", timeouts.get("case_s"), orders.CASE_TIMEOUT_S)
     yield row("timeouts.order_s", timeouts.get("order_s"), orders.ORDER_TIMEOUT_S)
-    store_from = "$BENCHX_HOME" if os.environ.get(config_mod.HOME_ENV) else "file" if "store" in cfg.section("paths") else "default"
+    store_from = (
+        "$BENCHX_HOME"
+        if os.environ.get(config_mod.HOME_ENV)
+        else "file"
+        if "store" in cfg.section("paths")
+        else "default"
+    )
     yield "paths.store", str(cfg.store_path), store_from
     yield "paths.results", str(cfg.results_dir), "file" if "results" in cfg.section("paths") else "default"
     yield row("compare.profile", compare.get("profile"))
@@ -670,8 +751,9 @@ def cmd_series(args):
         logger.info("no series%s", " matches the filter" if args.workload or args.quantity else " in the store")
     for s in listed:
         estimator = json.loads(s["estimator"])["method_version"]
-        print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
-              f"  est={estimator}")
+        print(
+            f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]  est={estimator}"
+        )
     return EXIT_OK
 
 
@@ -686,14 +768,20 @@ def cmd_history(args):
     if not points:
         logger.info("no series matches %s", args.series)
     elif len(matched := {p["series_fingerprint"] for p in points}) > 1:
-        logger.warning("%s matches %d series, whose points are listed together; `changed` is worked out per series: %s",
-                       args.series, len(matched), ", ".join(sorted(f[:12] for f in matched)))
+        logger.warning(
+            "%s matches %d series, whose points are listed together; `changed` is worked out per series: %s",
+            args.series,
+            len(matched),
+            ", ".join(sorted(f[:12] for f in matched)),
+        )
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         changed = f"  changed: {', '.join(p['changed'])}" if p["changed"] else ""
         warned = f"  [{', '.join(p['warnings'])}]" if p["warnings"] else ""  # such as dirty-subject-tree
-        print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}"
-              f"{changed}{warned}")
+        print(
+            f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}"
+            f"{changed}{warned}"
+        )
     return EXIT_OK
 
 
@@ -710,12 +798,25 @@ def cmd_head(args):
             print(row["document"])
         return EXIT_OK
     if not total:
-        logger.info("%s holds no result%s", store.path, "s that match the filter" if args.project or args.workload else "")
+        logger.info(
+            "%s holds no result%s", store.path, "s that match the filter" if args.project or args.workload else ""
+        )
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
     if args.table:  # the columns of `bx bench`, led by where each result came from; measurands only
-        print(bench_mod.render([{**bench_mod.row_of(json.loads(r["document"])), "revision": r["revision"][:10],
-                                 "run": r["run_key"], "project": r["project"]} for r in rows],
-                               leading=("revision", "run", "project")))
+        print(
+            bench_mod.render(
+                [
+                    {
+                        **bench_mod.row_of(json.loads(r["document"])),
+                        "revision": r["revision"][:10],
+                        "run": r["run_key"],
+                        "project": r["project"],
+                    }
+                    for r in rows
+                ],
+                leading=("revision", "run", "project"),
+            )
+        )
         return EXIT_OK
     cells = []
     for r in rows:
@@ -724,8 +825,19 @@ def cmd_head(args):
         labels = f"  {r['labels']}" if r["labels"] else ""
         codes = warning_codes(json.loads(r["document"]))  # such as dirty-subject-tree, as `--table` shows them
         status = r["status"] + (f"  [{', '.join(codes)}]" if codes else "")
-        cells.append((f"{r['row']:>5}", started, r["run_key"], r["workload"], r["quantity"], status, median,
-                      r["revision"][:10], f"{r['project']}{labels}"))
+        cells.append(
+            (
+                f"{r['row']:>5}",
+                started,
+                r["run_key"],
+                r["workload"],
+                r["quantity"],
+                status,
+                median,
+                r["revision"][:10],
+                f"{r['project']}{labels}",
+            )
+        )
     widths = [max([len(cell[i]) for cell in cells], default=0) for i in range(len(cells[0]))] if cells else []
     for cell in cells:
         print("  ".join(text.ljust(width) for text, width in zip(cell, widths)).rstrip())
@@ -757,8 +869,22 @@ class UsageError(Exception):
 
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
-_MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project", "no_project",
-                 "run_key", "out", "source_uri", "no_build", "no_ingest")
+_MEASURE_ONLY = (
+    "adapter",
+    "suite",
+    "filter",
+    "quantity",
+    "rounds",
+    "env",
+    *harnesses.FLAG_NAMES,
+    "project",
+    "no_project",
+    "run_key",
+    "out",
+    "source_uri",
+    "no_build",
+    "no_ingest",
+)
 _READ_ONLY = ("baseline", "results")
 
 
@@ -777,8 +903,11 @@ def _mode(args, profile) -> str:
         raise UsageError(f"give {targets} (measure mode) or --run KEY (read mode)")
     if args.targets:
         if len(args.targets) != (1 if variants else 2):
-            raise UsageError("measure mode takes exactly one target for variants: TARGET" if variants
-                             else "measure mode takes exactly two targets: BASELINE CONTENDER")
+            raise UsageError(
+                "measure mode takes exactly one target for variants: TARGET"
+                if variants
+                else "measure mode takes exactly two targets: BASELINE CONTENDER"
+            )
         if wrong := _flags(args, ("results",) if variants else _READ_ONLY):
             raise UsageError(f"{', '.join(wrong)} belongs to read mode (--run)")
         return "measure"
@@ -808,24 +937,34 @@ def _policy(cfg, args) -> tuple[dict, list]:
     """The comparison's own settings: the command line, else `compare` in the file, else the default;
     and each with where it came from, for the log."""
     compare = cfg.section("compare")
-    profile, profile_source = cfg.pick_with_source(args.profile, compare.get("profile"), flag="--profile",
-                                                   key="compare.profile")
+    profile, profile_source = cfg.pick_with_source(
+        args.profile, compare.get("profile"), flag="--profile", key="compare.profile"
+    )
     k, k_source = cfg.pick_with_source(args.k, compare.get("k"), 3.0, flag="--k", key="compare.k")
-    min_rounds, min_source = cfg.pick_with_source(args.min_rounds, compare.get("min_rounds"), 4, flag="--min-rounds",
-                                                  key="compare.min_rounds")
-    return ({"profile": profile, "k": k, "min_rounds": min_rounds},
-            [("compare.profile", profile, profile_source), ("compare.k", k, k_source),
-             ("compare.min_rounds", min_rounds, min_source)])
+    min_rounds, min_source = cfg.pick_with_source(
+        args.min_rounds, compare.get("min_rounds"), 4, flag="--min-rounds", key="compare.min_rounds"
+    )
+    return (
+        {"profile": profile, "k": k, "min_rounds": min_rounds},
+        [
+            ("compare.profile", profile, profile_source),
+            ("compare.k", k, k_source),
+            ("compare.min_rounds", min_rounds, min_source),
+        ],
+    )
 
 
 def _profile_flags(args, profile):
     """The flags that name the sides of one profile only."""
     if args.vary and profile != "variants":
-        raise UsageError(f"--vary names the parameter whose values are the sides of a variants comparison, "
-                         f"not of {profile}")
+        raise UsageError(
+            f"--vary names the parameter whose values are the sides of a variants comparison, not of {profile}"
+        )
     if args.label and profile == "variants":
-        raise UsageError("--label names the sides of an environments comparison; the sides of a variants "
-                         "comparison are two values of a parameter (--vary)")
+        raise UsageError(
+            "--label names the sides of an environments comparison; the sides of a variants "
+            "comparison are two values of a parameter (--vary)"
+        )
 
 
 def _view_flags(args):
@@ -847,8 +986,7 @@ def _read(cfg, args, policy, sources):
         store = MemoryStore()  # the ad hoc path: validated in memory without PyArrow
         outcome = store.ingest_paths(args.results)
         # The throwaway store is discarded on exit: its path would say nothing, so the count does.
-        logger.debug("read mode with --results: %d document(s) ingested into a throwaway store",
-                     outcome["ingested"])
+        logger.debug("read mode with --results: %d document(s) ingested into a throwaway store", outcome["ingested"])
         if outcome["rejected"]:
             logger.warning("%d document(s) were rejected: the comparison was not run", len(outcome["rejected"]))
             return _report(outcome)
@@ -863,11 +1001,13 @@ def _measure(cfg, args, policy, sources):
     """The workbench's session loop: run both sides, deliver, compare."""
     try:  # the check phase: nothing has run, and no folder exists yet
         settings = _common(cfg, args)
-        session.check_harness(settings["adapter"], settings["flags"], settings["file_precision"],
-                              settings["quantities"])
+        session.check_harness(
+            settings["adapter"], settings["flags"], settings["file_precision"], settings["quantities"]
+        )
         _needs_provider(cfg, *args.targets)
-        rounds, rounds_source = cfg.pick_with_source(args.rounds, cfg.section("compare").get("rounds"),
-                                                     session.ROUNDS, flag="--rounds", key="compare.rounds")
+        rounds, rounds_source = cfg.pick_with_source(
+            args.rounds, cfg.section("compare").get("rounds"), session.ROUNDS, flag="--rounds", key="compare.rounds"
+        )
         label = session.parse_label(args.label) if args.label else None
     except (UsageError, config_mod.ConfigError) as e:
         say.error(f"bx compare: error: {e}")
@@ -890,17 +1030,28 @@ def _measure(cfg, args, policy, sources):
     if (cfg := _start_logging(cfg, args, out, "compare")) is None:
         return EXIT_REFUSED
     if not args.no_ingest:
-        say.info(f"{store.path}")  # stderr, so --json output stays clean; after the checks, so a refusal does not print it
+        say.info(
+            f"{store.path}"
+        )  # stderr, so --json output stays clean; after the checks, so a refusal does not print it
     _log_settings([*sources, *settings.pop("sources"), ("compare.rounds", rounds, rounds_source)])
     settings["run_key"], settings["out"] = run_key, out
     try:
         if policy["profile"] == "variants":
             doc = session.compare_variants(
-                *args.targets, rounds=rounds, store=store, parameter=args.vary, baseline=args.baseline,
-                progress=say.info, k=policy["k"], min_rounds=policy["min_rounds"], **settings)
+                *args.targets,
+                rounds=rounds,
+                store=store,
+                parameter=args.vary,
+                baseline=args.baseline,
+                progress=say.info,
+                k=policy["k"],
+                min_rounds=policy["min_rounds"],
+                **settings,
+            )
         else:
-            doc = session.compare_targets(*args.targets, rounds=rounds, store=store, label=label, progress=say.info,
-                                          **policy, **settings)
+            doc = session.compare_targets(
+                *args.targets, rounds=rounds, store=store, label=label, progress=say.info, **policy, **settings
+            )
     except runner.Refused as e:
         return _refused(e)
     except (UsageError, config_mod.ConfigError) as e:
@@ -934,8 +1085,10 @@ def _show(doc, args, documents):
     if args.tables:
         shown = tables_mod.render(doc, documents, all_rows=args.all)
         if not shown:
-            logger.warning("tables skipped: no units, or no contender (%d failed invariant(s))",
-                           len(doc.get("failed_invariants", [])))
+            logger.warning(
+                "tables skipped: no units, or no contender (%d failed invariant(s))",
+                len(doc.get("failed_invariants", [])),
+            )
         print(shown)
 
 
@@ -948,9 +1101,16 @@ def _compare(store, args, policy):
             if not args.vary:  # the choice is recorded in the document's `varying`, and said here too
                 say.info(f"varying: {parameter} (the only parameter)")
                 logger.info("%s was inferred from %d result document(s) of run %s", parameter, len(documents), args.run)
-        doc = compare_mod.compare(documents, run_key=args.run, profile=policy["profile"],
-                                  baseline=args.baseline, label=args.label, parameter=parameter, k=policy["k"],
-                                  min_rounds=policy["min_rounds"])
+        doc = compare_mod.compare(
+            documents,
+            run_key=args.run,
+            profile=policy["profile"],
+            baseline=args.baseline,
+            label=args.label,
+            parameter=parameter,
+            k=policy["k"],
+            min_rounds=policy["min_rounds"],
+        )
     except compare_mod.CompareError as e:
         say.error(f"cannot compare: {e}")
         return EXIT_REFUSED
@@ -1044,10 +1204,7 @@ def cmd_view(args):
                 f"{counts['distinct_commits']} commit(s) -> {summary['out']}"
             )
         else:
-            print(
-                f"{counts['points']} result(s), {counts['series']} series, "
-                f"{counts['distinct_commits']} commit(s)"
-            )
+            print(f"{counts['points']} result(s), {counts['series']} series, {counts['distinct_commits']} commit(s)")
         if serve:
             try:
                 views_mod.serve_site(
@@ -1080,40 +1237,72 @@ def cmd_view(args):
 def _add_target_options(parser, command):
     """The options `bx bench` and `bx compare` (measure mode) share: the harness,
     its suite and cases, its precision flags, and where the results go."""
-    parser.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
-                        help="the harness (default: adapter.name; required)")
-    parser.add_argument("--suite", help="pyperf: the module's path in the working tree; "
-                                        "google-benchmark: the binary in the build directory "
-                                        "(default: adapter.suite; required)")
-    parser.add_argument("--filter", help="a case filter regex (pyperf, asv: searched in the name, and in "
-                                         "name(p0, p1) of a parametrized benchmark; "
-                                         "google-benchmark: --benchmark_filter)")
-    parser.add_argument("--quantity", metavar="NAMES",
-                        help="comma-separated, collected in one run (default: adapter.quantities, else wall-time); "
-                             "google-benchmark also reports cpu-time")
-    parser.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
-                        help="set an environment variable for the benchmark (repeatable); "
-                             "each becomes a workload parameter")
-    parser.add_argument("--repetitions", type=int,
-                        help=f"google-benchmark: repetitions per case (default {harnesses.GOOGLE_BENCHMARK.DEFAULT_REPETITIONS})")
+    parser.add_argument(
+        "--adapter", choices=sorted(harnesses.HARNESSES), help="the harness (default: adapter.name; required)"
+    )
+    parser.add_argument(
+        "--suite",
+        help="pyperf: the module's path in the working tree; "
+        "google-benchmark: the binary in the build directory "
+        "(default: adapter.suite; required)",
+    )
+    parser.add_argument(
+        "--filter",
+        help="a case filter regex (pyperf, asv: searched in the name, and in "
+        "name(p0, p1) of a parametrized benchmark; "
+        "google-benchmark: --benchmark_filter)",
+    )
+    parser.add_argument(
+        "--quantity",
+        metavar="NAMES",
+        help="comma-separated, collected in one run (default: adapter.quantities, else wall-time); "
+        "google-benchmark also reports cpu-time",
+    )
+    parser.add_argument(
+        "-e",
+        "--env",
+        action="append",
+        metavar="NAME=VALUE",
+        help="set an environment variable for the benchmark (repeatable); each becomes a workload parameter",
+    )
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        help=f"google-benchmark: repetitions per case (default {harnesses.GOOGLE_BENCHMARK.DEFAULT_REPETITIONS})",
+    )
     parser.add_argument("--processes", type=int, help="pyperf: worker processes (default 20)")
     parser.add_argument("--values", type=int, help="pyperf: values per process (default 3)")
     parser.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per sample")
     parser.add_argument("--loops", type=int, help="pyperf: fixed calibration, inner loops per value")
     parser.add_argument("--warmups", type=int, help="pyperf: warmup values per process (0: none)")
     parser.add_argument("--project", help="name a project, so the results join its series (default: project)")
-    parser.add_argument("--no-project", action="store_true",
-                        help="an ad hoc run, whatever the file's project says: filed as local/<hostname>")
+    parser.add_argument(
+        "--no-project",
+        action="store_true",
+        help="an ad hoc run, whatever the file's project says: filed as local/<hostname>",
+    )
     parser.add_argument("--run-key", help=f"default: {command}-<UTC timestamp>")
-    parser.add_argument("--out", help="directory for orders and result files (default: RESULTS/RUN_KEY, "
-                                      "RESULTS being paths.results, else ./results in the project root)")
-    parser.add_argument("--harness-verbosity", type=_non_negative, metavar="N",
-                        help="ask the harness to say more (default 0: nothing more). pyperf and asv: 1 or more passes "
-                             "--verbose; Google Benchmark: N is passed as --v=N. Its output is logged in full. "
-                             f"Each -v past -vv does the same (-vvv is 1). ${HARNESS_VERBOSITY_ENV}, adapter.verbosity")
-    parser.add_argument("--no-build", action="store_true",
-                        help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
-    parser.add_argument("--source-uri", help="the source's URI (default: source.uri, else the checkout's origin remote)")
+    parser.add_argument(
+        "--out",
+        help="directory for orders and result files (default: RESULTS/RUN_KEY, "
+        "RESULTS being paths.results, else ./results in the project root)",
+    )
+    parser.add_argument(
+        "--harness-verbosity",
+        type=_non_negative,
+        metavar="N",
+        help="ask the harness to say more (default 0: nothing more). pyperf and asv: 1 or more passes "
+        "--verbose; Google Benchmark: N is passed as --v=N. Its output is logged in full. "
+        f"Each -v past -vv does the same (-vvv is 1). ${HARNESS_VERBOSITY_ENV}, adapter.verbosity",
+    )
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="ask a provider to describe each @CONFIG target instead of preparing (building) it",
+    )
+    parser.add_argument(
+        "--source-uri", help="the source's URI (default: source.uri, else the checkout's origin remote)"
+    )
 
 
 def _logging_options() -> argparse.ArgumentParser:
@@ -1123,21 +1312,52 @@ def _logging_options() -> argparse.ArgumentParser:
     any flag beats the environment and the file."""
     parent = argparse.ArgumentParser(add_help=False)
     group = parent.add_mutually_exclusive_group()
-    group.add_argument("--no-log", dest="log", action="store_const", const=False, default=None,
-                       help="write no log (the default is bx.log in the run's output folder)")
-    group.add_argument("--log", dest="log", action="store_const", const=True, default=None,
-                       help="send the whole log to stderr instead of a file")
-    group.add_argument("--log-file", dest="log", metavar="PATH",
-                       help="append the log to PATH ({out} is the run's output folder, {root} the project root)")
-    parent.add_argument("--log-level", type=str.lower, choices=list(log.LEVELS), metavar="LEVEL",
-                        help=f"what the log keeps: {', '.join(log.LEVELS)} (default debug; ${LOG_LEVEL_ENV})")
-    parent.add_argument("-v", "--verbose", action="count", default=None,
-                        help=f"show more on the terminal: -v every INFO record, -vv DEBUG too; each -v past -vv also asks the "
-                             f"harness to say more (--harness-verbosity) (${VERBOSE_ENV})")
-    parent.add_argument("-q", "--quiet", action="count", default=None,
-                        help="show less on the terminal: -q hides the table and the other INFO messages (it keeps warnings, "
-                             "errors, the start line, the not-measured section and the result line); -qq keeps "
-                             "only errors and the not-measured section")
+    group.add_argument(
+        "--no-log",
+        dest="log",
+        action="store_const",
+        const=False,
+        default=None,
+        help="write no log (the default is bx.log in the run's output folder)",
+    )
+    group.add_argument(
+        "--log",
+        dest="log",
+        action="store_const",
+        const=True,
+        default=None,
+        help="send the whole log to stderr instead of a file",
+    )
+    group.add_argument(
+        "--log-file",
+        dest="log",
+        metavar="PATH",
+        help="append the log to PATH ({out} is the run's output folder, {root} the project root)",
+    )
+    parent.add_argument(
+        "--log-level",
+        type=str.lower,
+        choices=list(log.LEVELS),
+        metavar="LEVEL",
+        help=f"what the log keeps: {', '.join(log.LEVELS)} (default debug; ${LOG_LEVEL_ENV})",
+    )
+    parent.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=None,
+        help=f"show more on the terminal: -v every INFO record, -vv DEBUG too; each -v past -vv also asks the "
+        f"harness to say more (--harness-verbosity) (${VERBOSE_ENV})",
+    )
+    parent.add_argument(
+        "-q",
+        "--quiet",
+        action="count",
+        default=None,
+        help="show less on the terminal: -q hides the table and the other INFO messages (it keeps warnings, "
+        "errors, the start line, the not-measured section and the result line); -qq keeps "
+        "only errors and the not-measured section",
+    )
     return parent
 
 
@@ -1149,57 +1369,92 @@ def main(argv=None):
     p = sub.add_parser("run", parents=[options], help="execute one work order (schemas/work-order/0.1.0)")
     p.add_argument("order")
     p.add_argument("--out", help="directory for result files (default ./results)")
-    p.add_argument("--no-ingest", action="store_true",
-                   help="only write the result files; do not deliver them to the local store")
-    p.add_argument("--allow-collectors", action="store_true",
-                   help="run the order's context collectors: commands the order names (otherwise refused)")
+    p.add_argument(
+        "--no-ingest", action="store_true", help="only write the result files; do not deliver them to the local store"
+    )
+    p.add_argument(
+        "--allow-collectors",
+        action="store_true",
+        help="run the order's context collectors: commands the order names (otherwise refused)",
+    )
     p.set_defaults(fn=cmd_run)
 
-    p = sub.add_parser("bench", parents=[options], help="benchmark one target: the single-target form of bx compare",
-                       description="bx bench TARGET --suite S [FUNCTION ...]: run one target once and print a table "
-                                   "per case. TARGET and the options are those of bx compare: @CONFIG[=SOURCE_REF] "
-                                   "(the project's target provider) or a path, which the harness reads (pyperf: a "
-                                   "working tree; google-benchmark: BUILD_DIR[:SOURCE_DIR]). Each FUNCTION is an "
-                                   "exact case name; with none, the harness's default cases. The shorthand "
-                                   "bx bench MODULE.py [FUNCTION ...] benchmarks a Python module with pyperf: "
-                                   "its checkout is the target, and its path there the suite. The shorthand "
-                                   "bx bench PATH --adapter asv runs an asv suite, timed by pyperf: PATH holds "
-                                   "asv.conf.json (its benchmark_dir is the suite) or is the benchmark directory; "
-                                   "--filter searches name(p0, p1) per parameter combination, as asv run --bench, "
-                                   "and the precision flags left out come from each benchmark's own attributes. "
-                                   "Precision comes "
-                                   "from the harness's defaults, the config file (pyperf; bx config init "
-                                   "writes one) and the flags: flags win.")
-    p.add_argument("target", metavar="TARGET",
-                   help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file or an asv suite")
-    p.add_argument("functions", nargs="*", metavar="FUNCTION",
-                   help="exact case names (default: all cases); pyperf, asv: the name of a "
-                        "parametrized benchmark selects all its combinations")
+    p = sub.add_parser(
+        "bench",
+        parents=[options],
+        help="benchmark one target: the single-target form of bx compare",
+        description="bx bench TARGET --suite S [FUNCTION ...]: run one target once and print a table "
+        "per case. TARGET and the options are those of bx compare: @CONFIG[=SOURCE_REF] "
+        "(the project's target provider) or a path, which the harness reads (pyperf: a "
+        "working tree; google-benchmark: BUILD_DIR[:SOURCE_DIR]). Each FUNCTION is an "
+        "exact case name; with none, the harness's default cases. The shorthand "
+        "bx bench MODULE.py [FUNCTION ...] benchmarks a Python module with pyperf: "
+        "its checkout is the target, and its path there the suite. The shorthand "
+        "bx bench PATH --adapter asv runs an asv suite, timed by pyperf: PATH holds "
+        "asv.conf.json (its benchmark_dir is the suite) or is the benchmark directory; "
+        "--filter searches name(p0, p1) per parameter combination, as asv run --bench, "
+        "and the precision flags left out come from each benchmark's own attributes. "
+        "Precision comes "
+        "from the harness's defaults, the config file (pyperf; bx config init "
+        "writes one) and the flags: flags win.",
+    )
+    p.add_argument(
+        "target",
+        metavar="TARGET",
+        help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file or an asv suite",
+    )
+    p.add_argument(
+        "functions",
+        nargs="*",
+        metavar="FUNCTION",
+        help="exact case names (default: all cases); pyperf, asv: the name of a "
+        "parametrized benchmark selects all its combinations",
+    )
     _add_target_options(p, "bench")
     p.add_argument("--tree", help="the shorthand's tree (default: the module's or suite's git checkout or directory)")
-    p.add_argument("--case-timeout", type=float,
-                   help=f"seconds before one case is stopped (default: timeouts.case_s, else {orders.CASE_TIMEOUT_S:g}; "
-                        f"asv: {ASV_CASE_TIMEOUT_S}, all rounds, each also stopped at the benchmark's own timeout)")
-    p.add_argument("--label", action="append", metavar="NAME=VALUE",
-                   help="name this call's side of a session, such as env=numpy-2.0 (repeatable); the calls of a "
-                        "session share --run-key, and bx compare --run reads the label with --label NAME. "
-                        "Needs --run-key and --slot")
-    p.add_argument("--round", metavar="R[/N]",
-                   help="this call's round in a session, numbered from 0: the sides' attempts are paired by it. "
-                        "R/N also says the session has N rounds, which the start line shows (nothing else uses "
-                        "it). Needs --run-key and --slot")
-    p.add_argument("--slot", type=int,
-                   help="this call's position in the session's alternation (0, 1, 2, ...), kept by the caller's loop. "
-                        "Needs --run-key")
+    p.add_argument(
+        "--case-timeout",
+        type=float,
+        help=f"seconds before one case is stopped (default: timeouts.case_s, else {orders.CASE_TIMEOUT_S:g}; "
+        f"asv: {ASV_CASE_TIMEOUT_S}, all rounds, each also stopped at the benchmark's own timeout)",
+    )
+    p.add_argument(
+        "--label",
+        action="append",
+        metavar="NAME=VALUE",
+        help="name this call's side of a session, such as env=numpy-2.0 (repeatable); the calls of a "
+        "session share --run-key, and bx compare --run reads the label with --label NAME. "
+        "Needs --run-key and --slot",
+    )
+    p.add_argument(
+        "--round",
+        metavar="R[/N]",
+        help="this call's round in a session, numbered from 0: the sides' attempts are paired by it. "
+        "R/N also says the session has N rounds, which the start line shows (nothing else uses "
+        "it). Needs --run-key and --slot",
+    )
+    p.add_argument(
+        "--slot",
+        type=int,
+        help="this call's position in the session's alternation (0, 1, 2, ...), kept by the caller's loop. "
+        "Needs --run-key",
+    )
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
     p = sub.add_parser("config", parents=[options], help="write or show benchx.conf.json")
-    p.add_argument("action", choices=["init", "show"],
-                   help="init: write a benchx.conf.json stating a harness's defaults; show: what the file and the defaults give")
+    p.add_argument(
+        "action",
+        choices=["init", "show"],
+        help="init: write a benchx.conf.json stating a harness's defaults; show: what the file and the defaults give",
+    )
     p.add_argument("--dir", default=".", help="init: where to write benchx.conf.json (default .)")
-    p.add_argument("--adapter", choices=sorted(harnesses.HARNESSES), default="pyperf",
-                   help="init: the harness (default %(default)s)")
+    p.add_argument(
+        "--adapter",
+        choices=sorted(harnesses.HARNESSES),
+        default="pyperf",
+        help="init: the harness (default %(default)s)",
+    )
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("ingest", parents=[options], help="sweep result files and work orders into the local store")
@@ -1221,64 +1476,104 @@ def main(argv=None):
     p.add_argument("--workload", help="only results whose benchmark name contains this")
     shape = p.add_mutually_exclusive_group()
     shape.add_argument("--json", action="store_true", help="print the stored documents instead")
-    shape.add_argument("--table", action="store_true",
-                       help="the `bx bench` table (median, mean ± sd, range, n, status) with revision, run and project")
+    shape.add_argument(
+        "--table",
+        action="store_true",
+        help="the `bx bench` table (median, mean ± sd, range, n, status) with revision, run and project",
+    )
     p.set_defaults(fn=cmd_head)
 
-    p = sub.add_parser("target", parents=[options], help="ask for a target's description (schemas/target-description/0.1.0)",
-                       description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
-                                   "benchx.conf.json, or a build directory holding .benchx-target.json. "
-                                   "describe only reports a target that exists; prepare may build it.")
+    p = sub.add_parser(
+        "target",
+        parents=[options],
+        help="ask for a target's description (schemas/target-description/0.1.0)",
+        description="TARGET is @CONFIG[=SOURCE_REF], asking the provider named in "
+        "benchx.conf.json, or a build directory holding .benchx-target.json. "
+        "describe only reports a target that exists; prepare may build it.",
+    )
     p.add_argument("operation", choices=["describe", "prepare"])
     p.add_argument("target")
     p.set_defaults(fn=cmd_target)
 
-    p = sub.add_parser("compare", parents=[options], help="compare two sides: read mode (--run) or measure mode (two targets)",
-                       description="Read mode compares results already measured: --run KEY --baseline VALUE. "
-                                   "Measure mode runs two prepared targets, alternating them over "
-                                   "--rounds rounds, delivers the results to the local store, then compares: "
-                                   "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
-                                   "or @CONFIG[=SOURCE_REF] (the project's target provider). "
-                                   "The variants profile takes one target: its sides are two values of one "
-                                   "benchmark parameter (--vary), as in TARGET --profile variants --suite NAME "
-                                   "--rounds R.")
-    p.add_argument("targets", nargs="*", metavar="TARGET",
-                   help="measure mode: BASELINE CONTENDER (variants: TARGET)")
+    p = sub.add_parser(
+        "compare",
+        parents=[options],
+        help="compare two sides: read mode (--run) or measure mode (two targets)",
+        description="Read mode compares results already measured: --run KEY --baseline VALUE. "
+        "Measure mode runs two prepared targets, alternating them over "
+        "--rounds rounds, delivers the results to the local store, then compares: "
+        "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
+        "or @CONFIG[=SOURCE_REF] (the project's target provider). "
+        "The variants profile takes one target: its sides are two values of one "
+        "benchmark parameter (--vary), as in TARGET --profile variants --suite NAME "
+        "--rounds R.",
+    )
+    p.add_argument("targets", nargs="*", metavar="TARGET", help="measure mode: BASELINE CONTENDER (variants: TARGET)")
     p.add_argument("--profile", choices=list(compare_mod.PROFILES), help="default: compare.profile")
-    p.add_argument("--vary", metavar="NAME",
-                   help="variants: the workload parameter whose two values are the sides "
-                        "(default: the only parameter the results carry)")
-    p.add_argument("--k", type=float, help="confidence in normal sigmas: the threshold is the t quantile with that two-sided tail, "
-                                       "times the noise (default: compare.k, else 3)")
-    p.add_argument("--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 4)")
+    p.add_argument(
+        "--vary",
+        metavar="NAME",
+        help="variants: the workload parameter whose two values are the sides "
+        "(default: the only parameter the results carry)",
+    )
+    p.add_argument(
+        "--k",
+        type=float,
+        help="confidence in normal sigmas: the threshold is the t quantile with that two-sided tail, "
+        "times the noise (default: compare.k, else 3)",
+    )
+    p.add_argument(
+        "--min-rounds", type=int, help="fewest paired rounds for a verdict (default: compare.min_rounds, else 4)"
+    )
     p.add_argument("--json", action="store_true")
-    p.add_argument("--tables", action="store_true",
-                   help="after the summary, asv-style tables: one per side, then the changes")
-    p.add_argument("--all", action="store_true",
-                   help="with --tables: every row of the change table, not only the changed ones (as asv continuous)")
-    p.add_argument("--label", help="read mode: the label that names the sides (environments); "
-                                   "measure mode: NAME=BASE,CONTENDER")
-    p.add_argument("--baseline", help="revisions: a revision or tree id prefix; environments: the label value; "
-                                      "variants: the parameter's recorded value, quotes included ('baseline'); "
-                                      "required in read mode, and in measure mode only for variants "
-                                      "(default: the first declared value)")
+    p.add_argument(
+        "--tables", action="store_true", help="after the summary, asv-style tables: one per side, then the changes"
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="with --tables: every row of the change table, not only the changed ones (as asv continuous)",
+    )
+    p.add_argument(
+        "--label", help="read mode: the label that names the sides (environments); measure mode: NAME=BASE,CONTENDER"
+    )
+    p.add_argument(
+        "--baseline",
+        help="revisions: a revision or tree id prefix; environments: the label value; "
+        "variants: the parameter's recorded value, quotes included ('baseline'); "
+        "required in read mode, and in measure mode only for variants "
+        "(default: the first declared value)",
+    )
     read = p.add_argument_group("read mode")
     read.add_argument("--run", help="run key")
-    read.add_argument("--results", nargs="+",
-                      help="compare these result files or directories directly, without using the local store")
+    read.add_argument(
+        "--results", nargs="+", help="compare these result files or directories directly, without using the local store"
+    )
     measure = p.add_argument_group("measure mode")
-    measure.add_argument("--rounds", type=int,
-                         help=f"alternation rounds; each runs both sides once (default: compare.rounds, else {session.ROUNDS})")
-    measure.add_argument("--no-ingest", action="store_true",
-                         help="write result files and compare in memory; skip the local store")
+    measure.add_argument(
+        "--rounds",
+        type=int,
+        help=f"alternation rounds; each runs both sides once (default: compare.rounds, else {session.ROUNDS})",
+    )
+    measure.add_argument(
+        "--no-ingest", action="store_true", help="write result files and compare in memory; skip the local store"
+    )
     _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
-    p = sub.add_parser("validate", parents=[options], help="check documents against their schema and rules",
-                       description="Report every problem in each document, or nothing when all are valid.")
+    p = sub.add_parser(
+        "validate",
+        parents=[options],
+        help="check documents against their schema and rules",
+        description="Report every problem in each document, or nothing when all are valid.",
+    )
     p.add_argument("files", type=Path, nargs="+")
-    p.add_argument("--kind", choices=get_args(Kind), default="measurement-result",
-                   help="kind of document being checked (default: %(default)s)")
+    p.add_argument(
+        "--kind",
+        choices=get_args(Kind),
+        default="measurement-result",
+        help="kind of document being checked (default: %(default)s)",
+    )
     p.set_defaults(fn=cmd_validate)
 
     p = sub.add_parser(
@@ -1286,31 +1581,38 @@ def main(argv=None):
         parents=[options],
         help="build and serve the static benchmark dashboard",
         description="Build static dashboard views from the local Parquet store, JSON result files "
-                    "(--results, no PyArrow required), or a runs/<sha>/<node>/ directory (--runs). "
-                    "With no --out, builds into a temporary directory and serves locally until Ctrl-C; "
-                    "with --out DIR, writes the static site (add --serve to also serve it).",
+        "(--results, no PyArrow required), or a runs/<sha>/<node>/ directory (--runs). "
+        "With no --out, builds into a temporary directory and serves locally until Ctrl-C; "
+        "with --out DIR, writes the static site (add --serve to also serve it).",
     )
     src = p.add_mutually_exclusive_group()
     src.add_argument("--store", help="local Parquet store (default: paths.store / $BENCHX_HOME/store.parquet)")
-    src.add_argument("--results", nargs="+",
-                     help="JSON result files or directories, read directly without PyArrow")
+    src.add_argument("--results", nargs="+", help="JSON result files or directories, read directly without PyArrow")
     src.add_argument("--runs", help="runs/<sha>/<node>/ directory holding run.parquet and results.parquet")
     p.add_argument("--out", help="write the static site into DIR instead of a temporary directory")
     p.add_argument("--serve", action="store_true", help="serve the built site over local HTTP")
     p.add_argument("--host", default="127.0.0.1", help="bind address for local serving (default %(default)s)")
-    p.add_argument("--port", type=int, default=None,
-                   help="TCP port for local serving (default 8000, falling back to a free port if busy)")
+    p.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="TCP port for local serving (default 8000, falling back to a free port if busy)",
+    )
     p.add_argument("--open", action="store_true", help="open the served dashboard in the default web browser")
     p.add_argument("--project-file", help="project.json describing title, links, and upstream commit URL")
     p.add_argument("--title", help="override the dashboard page title")
     p.add_argument("--repo", help="git checkout used to enrich commit metadata for --store / --results")
     marts_group = p.add_mutually_exclusive_group()
-    marts_group.add_argument("--marts", action="store_true",
-                             help="write derived Parquet tables under data/ (requires benchx[parquet])")
-    marts_group.add_argument("--no-marts", action="store_true",
-                             help="skip writing derived Parquet tables under data/")
-    p.add_argument("--views-format", choices=("json", "parquet"), default="json",
-                   help="format for frontend view payloads under data/views/ (default %(default)s; parquet requires benchx[parquet])")
+    marts_group.add_argument(
+        "--marts", action="store_true", help="write derived Parquet tables under data/ (requires benchx[parquet])"
+    )
+    marts_group.add_argument("--no-marts", action="store_true", help="skip writing derived Parquet tables under data/")
+    p.add_argument(
+        "--views-format",
+        choices=("json", "parquet"),
+        default="json",
+        help="format for frontend view payloads under data/views/ (default %(default)s; parquet requires benchx[parquet])",
+    )
     p.add_argument("--stamp", help="cache-busting version stamped onto static asset URLs in index.html")
     p.set_defaults(fn=cmd_view)
 

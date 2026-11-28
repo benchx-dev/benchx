@@ -9,8 +9,10 @@ SUITE = "demo-bench"
 
 
 def description(path, kind="working_tree", **target):
-    return {"schema_version": "benchx/target-description/0.1.0",
-            "target": {"kind": kind, "path": str(path), "source": {"uri": SOURCE_URI, "type": "git"}, **target}}
+    return {
+        "schema_version": "benchx/target-description/0.1.0",
+        "target": {"kind": kind, "path": str(path), "source": {"uri": SOURCE_URI, "type": "git"}, **target},
+    }
 
 
 def provided(monkeypatch, desc):
@@ -68,9 +70,21 @@ def test_a_provided_working_tree_is_its_own_source(tree, monkeypatch):
 def test_a_working_tree_order_is_valid(tree, monkeypatch):
     provided(monkeypatch, description(tree))
     side = session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
-    order = session._order(side, harness=harnesses.GOOGLE_BENCHMARK, suite=SUITE, filter=None, quantities=["wall-time"],
-                           precision={"repetitions": 3}, environment_variables=None, project=None, run_key="rk",
-                           source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
+    order = session._order(
+        side,
+        harness=harnesses.GOOGLE_BENCHMARK,
+        suite=SUITE,
+        filter=None,
+        quantities=["wall-time"],
+        precision={"repetitions": 3},
+        environment_variables=None,
+        project=None,
+        run_key="rk",
+        source_uri=SOURCE_URI,
+        round_=0,
+        slot=0,
+        labels=None,
+    )
     assert order["target"]["kind"] == "working_tree"
     assert order["target"]["source_dir"] == str(tree.resolve())
     assert core.check(order, "work-order") == []
@@ -94,8 +108,13 @@ def test_a_missing_working_tree_says_so(tmp_path, monkeypatch):
 
 def test_an_artifact_target_is_still_deferred(monkeypatch):
     desc = description("x", kind="artifact")
-    desc["target"] = {"kind": "artifact", "uri": "https://example.org/a.whl", "sha256": "0" * 64,
-                      "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "abc"}
+    desc["target"] = {
+        "kind": "artifact",
+        "uri": "https://example.org/a.whl",
+        "sha256": "0" * 64,
+        "source": {"uri": SOURCE_URI, "type": "git"},
+        "revision": "abc",
+    }
     provided(monkeypatch, desc)
     with pytest.raises(session.SessionError, match="'artifact' is deferred"):
         session._side("@a", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
@@ -123,6 +142,7 @@ def test_an_untracked_file_leaves_a_working_tree_clean(tree, monkeypatch):
 
 # --- a bare path is read by the harness ---------------------------------------------
 
+
 @pytest.fixture
 def pyperf_tree(tmp_path):
     """A clean git checkout holding a pyperf module."""
@@ -143,8 +163,11 @@ def test_the_harness_says_what_a_bare_path_names():
 def test_a_bare_path_is_a_working_tree_for_pyperf(pyperf_tree):
     pytest.importorskip("pyperf")
     side = session._side(str(pyperf_tree), "benchmarks/mod.py", "describe", harness=harnesses.PYPERF)
-    assert (side["kind"], side["path"], side["source"]) == ("working_tree", pyperf_tree.resolve(),
-                                                           str(pyperf_tree.resolve()))
+    assert (side["kind"], side["path"], side["source"]) == (
+        "working_tree",
+        pyperf_tree.resolve(),
+        str(pyperf_tree.resolve()),
+    )
     assert side["identity"]["dirty"] == "clean"
 
 

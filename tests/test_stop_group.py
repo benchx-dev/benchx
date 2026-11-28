@@ -16,7 +16,7 @@ from processes import HAS_PROC, alive, running, wait_gone, wait_until
 
 pytestmark = pytest.mark.skipif(not HAS_PROC, reason="needs /proc")
 
-MANAGER = '''
+MANAGER = """
 import os, signal, subprocess, sys, time
 pidfile, mode = sys.argv[1], sys.argv[2]
 if mode == "ignore":  # the disposition is inherited by the grandchild
@@ -30,15 +30,20 @@ grandchild = subprocess.Popen(["sleep", "60"], **({"start_new_session": True} if
 open(pidfile, "w").write(f"{os.getpid()} {grandchild.pid}")
 print("partial output", flush=True)
 time.sleep(60)
-'''
+"""
 
 
 def start(tmp_path, mode):
     script = tmp_path / "manager.py"
     script.write_text(MANAGER)
     pidfile = tmp_path / "pids"
-    proc = subprocess.Popen([sys.executable, str(script), str(pidfile), mode], text=True, start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        [sys.executable, str(script), str(pidfile), mode],
+        text=True,
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     assert wait_until(lambda: pidfile.exists() and pidfile.read_text().count(" ") == 1, 10)
     manager, grandchild = map(int, pidfile.read_text().split())
     return proc, manager, grandchild, pidfile
@@ -61,7 +66,7 @@ def test_a_group_that_ignores_sigint_is_killed_when_the_grace_is_over(tmp_path):
 
 def test_a_second_ctrl_c_ends_the_wait_at_once(tmp_path):
     proc, manager, grandchild, _ = start(tmp_path, "ignore")
-    timer = signal.setitimer(signal.ITIMER_REAL, 0.3)  # a second Ctrl-C, 0.3 s into a grace of 20
+    signal.setitimer(signal.ITIMER_REAL, 0.3)  # a second Ctrl-C, 0.3 s into a grace of 20
     previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
     started = time.monotonic()
     try:
@@ -82,8 +87,13 @@ def test_a_process_that_left_the_group_and_holds_the_pipes_does_not_hold_bx(tmp_
 
 
 def test_a_group_that_is_already_gone_is_not_an_error(tmp_path):
-    proc = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     proc.wait()
     stop_group(proc)
 
@@ -109,17 +119,37 @@ def test_a_pyperf_case_that_times_out_returns_although_a_daemon_holds_the_pipes(
     pytest.importorskip("pyperf")
     from benchx import cli
     from conftest import git
+
     monkeypatch.chdir(tmp_path)
     (tmp_path / "hang.py").write_text(
         "import subprocess, time\n\n\ndef bench_hang():\n"
         f"    subprocess.Popen(['sleep', '{HOLDER}'], start_new_session=True)  # a daemon, with our pipes\n"
-        "    time.sleep(60)\n")
+        "    time.sleep(60)\n"
+    )
     git(tmp_path, "init", "-q")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-qm", "m")
     started = time.monotonic()
-    code = cli.main(["bench", "hang.py", "bench_hang", "--no-ingest", "--case-timeout", "1", "--processes", "1",
-                     "--values", "1", "--loops", "1", "--warmups", "0", "--run-key", "t"])
+    code = cli.main(
+        [
+            "bench",
+            "hang.py",
+            "bench_hang",
+            "--no-ingest",
+            "--case-timeout",
+            "1",
+            "--processes",
+            "1",
+            "--values",
+            "1",
+            "--loops",
+            "1",
+            "--warmups",
+            "0",
+            "--run-key",
+            "t",
+        ]
+    )
     took = time.monotonic() - started
     assert code == cli.EXIT_OK  # a case that timed out is a result, not a failure of the command
     assert took < HOLDER / 2, f"bx waited {took:.1f} s: the daemon's {HOLDER} s, not the case's limit of 1 s"

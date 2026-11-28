@@ -31,14 +31,14 @@ import time
 import traceback
 
 
-
 def _load_params():
     """benchx_params.py, beside this file: by its path and under its own module name, so that
     nothing on sys.path (a benchmark's own `params` module, say) can stand in for it."""
     if "benchx_params" in sys.modules:
         return sys.modules["benchx_params"]
     spec = importlib.util.spec_from_file_location(
-        "benchx_params", os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchx_params.py"))
+        "benchx_params", os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchx_params.py")
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules["benchx_params"] = module
     spec.loader.exec_module(module)
@@ -56,8 +56,17 @@ TYPES = (
     ("track", re.compile("^(Track[A-Z_].+)|(track_.+)$")),
 )
 # Declared attributes that bear on how a case is timed.
-DECLARED = ("number", "repeat", "rounds", "processes", "sample_time", "warmup_time", "min_run_count", "timeout",
-            "setup_scope")
+DECLARED = (
+    "number",
+    "repeat",
+    "rounds",
+    "processes",
+    "sample_time",
+    "warmup_time",
+    "min_run_count",
+    "timeout",
+    "setup_scope",
+)
 
 
 class Skipped(Exception):
@@ -152,8 +161,9 @@ class Benchmark:
         explicit = _first(sources, "version")
         code = _source([func] + self.setups + [self.setup_cache])
         self.version = str(explicit) if explicit is not None else hashlib.sha256(code.encode()).hexdigest()
-        self.raw_params, self.param_names, self.params = params_.normalize(_first(sources, "params", []),
-                                                                           _first(sources, "param_names", []))
+        self.raw_params, self.param_names, self.params = params_.normalize(
+            _first(sources, "params", []), _first(sources, "param_names", [])
+        )
         self.skip_params = _first(sources, "skip_params", [])
         self.declared = {k: _first(sources, k) for k in DECLARED if _first(sources, k) is not None}
         self.timer = _first(sources, "timer", time.perf_counter)
@@ -161,12 +171,24 @@ class Benchmark:
 
     def describe(self) -> dict:
         """What the adapter needs to plan and record a case, as JSON."""
-        declared = {k: (list(v) if isinstance(v, tuple) else v) for k, v in self.declared.items()
-                    if isinstance(v, (int, float, str, tuple, list))}
-        return {"name": self.name, "type": self.type, "module": self.module, "attr": self.attr,
-                "params": self.params, "param_names": self.param_names, "version": self.version,
-                "setup_cache_key": self.setup_cache_key, "has_setup": bool(self.setups),
-                "has_teardown": bool(self.teardowns), "declared": declared}
+        declared = {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in self.declared.items()
+            if isinstance(v, (int, float, str, tuple, list))
+        }
+        return {
+            "name": self.name,
+            "type": self.type,
+            "module": self.module,
+            "attr": self.attr,
+            "params": self.params,
+            "param_names": self.param_names,
+            "version": self.version,
+            "setup_cache_key": self.setup_cache_key,
+            "has_setup": bool(self.setups),
+            "has_teardown": bool(self.teardowns),
+            "declared": declared,
+        }
 
     def select(self, index):
         if index is not None:
@@ -212,6 +234,7 @@ class Benchmark:
         func, args, timer = self.func, self._args(), self.timer
         fresh = [True]  # the first value (or call) uses the setup the driver ran
         if not self.setups or self.declared.get("setup_scope", "call") == "sample":
+
             def run(loops):
                 if self.setups and not fresh[0]:
                     self.teardown()
@@ -227,6 +250,7 @@ class Benchmark:
                 finally:
                     if enabled:
                         gc.enable()
+
             return run
 
         def run_isolated(loops):
@@ -246,6 +270,7 @@ class Benchmark:
                 if enabled:
                     gc.enable()
             return total
+
         return run_isolated
 
 
@@ -261,20 +286,26 @@ def _benchmark(attr_name, module, klass, func, left_out=None):
         return None
     parts = module.__name__.split(".", 1)[1:]
     if klass is None:
-        return Benchmark(name or ".".join(parts + [func.__name__]), kind, func, [func, module],
-                         module.__name__, [attr_name])
+        return Benchmark(
+            name or ".".join(parts + [func.__name__]), kind, func, [func, module], module.__name__, [attr_name]
+        )
     instance = klass()
     bound = getattr(instance, attr_name)
-    return Benchmark(name or ".".join(parts + [klass.__name__, attr_name]), kind, bound,
-                     [bound, instance, module], module.__name__, [klass.__name__, attr_name])
+    return Benchmark(
+        name or ".".join(parts + [klass.__name__, attr_name]),
+        kind,
+        bound,
+        [bound, instance, module],
+        module.__name__,
+        [klass.__name__, attr_name],
+    )
 
 
 def _modules(name, failed):
     try:
         module = importlib.import_module(name)
     except BaseException as e:
-        failed.append({"module": name, "error": f"{type(e).__name__}: {e}",
-                       "traceback": traceback.format_exc()})
+        failed.append({"module": name, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()})
         return
     yield module
     for _, sub, _ in pkgutil.iter_modules(getattr(module, "__path__", None) or [], name + "."):

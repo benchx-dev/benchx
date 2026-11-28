@@ -45,8 +45,11 @@ def test_the_default_stdout_is_the_table_the_failures_and_the_summary(build, cap
     code, out, err = bench(build, capsys, *POSITION)
     assert code == cli.EXIT_OK
     assert out.splitlines()[0].startswith("case ") and HEADER in out
-    assert re.search(r"\n\nnot measured \(2\)\n  BM_Broken: .+\n  BM_Skipped: .+\n\n"
-                     r"\d+ result\(s\) -> \S+  \(order sha256:\w+\)\n", out)
+    assert re.search(
+        r"\n\nnot measured \(2\)\n  BM_Broken: .+\n  BM_Skipped: .+\n\n"
+        r"\d+ result\(s\) -> \S+  \(order sha256:\w+\)\n",
+        out,
+    )
     assert "ingested" not in out  # a progress message now, and on stderr with the others
     assert re.fullmatch(START + rf"\nprecision: .*\n\S+{DEFAULT_STORE}: ingested \d+, duplicate 0\n", err)
 
@@ -115,7 +118,7 @@ def test_the_log_holds_the_report_whatever_the_terminal_shows(build, tmp, capsys
     assert all(STAMP.match(line) for line in lines)  # a line a record, as the harness output is logged
     table = [i for i, line in enumerate(lines) if HEADER in line]
     assert len(table) == 1 and " INFO " in lines[table[0]]
-    rows = lines[table[0]:table[0] + 6]
+    rows = lines[table[0] : table[0] + 6]
     assert any("BM_Quiet/1024" in row for row in rows) and any("BM_Broken" in row for row in rows)
     assert any(" WARNING not measured (2)" in line for line in lines)  # the errors, as a warning
     assert any(re.search(r" INFO \d+ result\(s\) -> ", line) for line in lines)
@@ -137,7 +140,8 @@ def test_with_the_log_on_stderr_the_report_is_on_stdout_and_once_in_the_log(buil
     _, out, err = bench(build, capsys, "--log")
     assert HEADER in out
     assert sum(HEADER in line for line in err.splitlines()) == 1 and STAMP.match(
-        next(line for line in err.splitlines() if HEADER in line))
+        next(line for line in err.splitlines() if HEADER in line)
+    )
 
 
 def test_the_ingest_command_prints_its_counts_at_every_verbosity(clean, tmp, capsys):
@@ -199,6 +203,7 @@ def test_the_total_of_rounds_is_for_the_start_line_only(clean, tmp, capsys):
 
 
 # --- the cases that were not measured, which `bx run` says as `bx bench` does
+
 
 def row(case, status, message=None):
     return {"case": case, "status": status, "message": message}

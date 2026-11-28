@@ -43,11 +43,14 @@ def test_google_benchmark_precision():
     flags = gb.flags_to_precision(repetitions=3, min_time=0.25)
     precision = gb.precision(flags)
     assert (precision["repetitions"], precision["calibration"]) == (
-        3, {"mode": "adaptive", "minimum_sample_seconds": 0.25})
+        3,
+        {"mode": "adaptive", "minimum_sample_seconds": 0.25},
+    )
 
 
-@pytest.mark.parametrize("harness, flag", [(harnesses.GOOGLE_BENCHMARK, "processes"),
-                                           (harnesses.PYPERF, "repetitions")])
+@pytest.mark.parametrize(
+    "harness, flag", [(harnesses.GOOGLE_BENCHMARK, "processes"), (harnesses.PYPERF, "repetitions")]
+)
 def test_a_flag_the_harness_does_not_take_is_refused(harness, flag):
     with pytest.raises(SessionError, match=f"takes no --{flag}"):
         harness.flags_to_precision(**{flag: 2})

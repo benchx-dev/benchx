@@ -13,7 +13,7 @@ import pytest
 
 from benchx import bench, cli, core
 from benchx.store import Store
-from conftest import EXAMPLES, QUIET, NOISY, cases, git, make_build, requires_pyarrow
+from conftest import EXAMPLES, NOISY, QUIET, cases, git, make_build, requires_pyarrow
 from test_config import write_config
 from test_target import PROVIDER, describe
 
@@ -39,9 +39,14 @@ def test_one_google_benchmark_run_prints_a_table_and_delivers(build, tmp, capsys
     order = order_of(tmp, "g1")
     assert core.check(order, "work-order") == []
     assert (order["suites"][0], order["target"]["kind"]) == (
-        {"adapter": "google-benchmark", "suite": "demo-bench"}, "build")
+        {"adapter": "google-benchmark", "suite": "demo-bench"},
+        "build",
+    )
     assert "round" not in order and "slot" not in order
-    assert {d["coordinates"]["workload"]["name"] for d in Store(tmp / "store.parquet").documents("g1")} == {QUIET, NOISY}
+    assert {d["coordinates"]["workload"]["name"] for d in Store(tmp / "store.parquet").documents("g1")} == {
+        QUIET,
+        NOISY,
+    }
 
 
 @requires_pyarrow
@@ -59,10 +64,26 @@ def test_google_benchmark_case_name_with_spaces_runs_and_compares(repo, tmp, mon
     assert [d["coordinates"]["workload"]["name"] for d in docs] == [spaced]
     assert " " not in docs[0]["ingest_key"]
 
-    assert cli.main([
-        "compare", str(base), str(head), *GBENCH,
-        "--profile", "revisions", "--rounds", "3", "--repetitions", "3", "--run-key", "sp-cmp", "--json",
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "compare",
+                str(base),
+                str(head),
+                *GBENCH,
+                "--profile",
+                "revisions",
+                "--rounds",
+                "3",
+                "--repetitions",
+                "3",
+                "--run-key",
+                "sp-cmp",
+                "--json",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     comparison = json.loads(capsys.readouterr().out)
     assert core.check(comparison, "comparison-document") == []
     assert [u["workload"]["name"] for u in comparison["units"]] == [spaced]
@@ -129,28 +150,48 @@ def test_cases_are_named_or_filtered(build, tmp, capsys):
     out = capsys.readouterr().out
     assert QUIET in out and NOISY not in out
     assert order_of(tmp, "c1")["suites"][0]["filter"] == "^(BM_Quiet/1024)$"
-    assert cli.main(["bench", str(build), *GBENCH, "--filter", "Noisy", "--run-key", "c2", "--no-ingest"]) == cli.EXIT_OK
+    assert (
+        cli.main(["bench", str(build), *GBENCH, "--filter", "Noisy", "--run-key", "c2", "--no-ingest"]) == cli.EXIT_OK
+    )
     out = capsys.readouterr().out
     assert NOISY in out and QUIET not in out
 
 
 def test_precision_and_quantity_are_the_harnesss(build, tmp):
-    assert cli.main(["bench", str(build), *GBENCH, "--repetitions", "3", "--quantity", "cpu-time",
-                     "--run-key", "p1", "--no-ingest"]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                str(build),
+                *GBENCH,
+                "--repetitions",
+                "3",
+                "--quantity",
+                "cpu-time",
+                "--run-key",
+                "p1",
+                "--no-ingest",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     order = order_of(tmp, "p1")
     assert order["precision"]["repetitions"] == 3 and order["quantities"] == ["cpu-time"]
 
 
-@pytest.mark.parametrize("argv, message", [
-    (["BUILD", *GBENCH, "--processes", "2"], "google-benchmark takes no --processes"),
-    (["BUILD", *GBENCH, "--loops", "5"], "google-benchmark takes no --loops"),
-    (["BUILD", "--suite", "mod.py", "--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
-    (["BUILD", "--suite", "mod.py"], "--adapter is required"),
-    (["BUILD", *GBENCH, "--filter", "Quiet", QUIET], "case names or --filter"),
-    (["BUILD", *GBENCH, "--tree", "t"], "--tree belongs to"),
-    (["BUILD", "--adapter", "google-benchmark"], "--suite is required"),
-    (["m.py", "--adapter", "google-benchmark"], "benchmarked with pyperf"),
-])
+@pytest.mark.parametrize(
+    "argv, message",
+    [
+        (["BUILD", *GBENCH, "--processes", "2"], "google-benchmark takes no --processes"),
+        (["BUILD", *GBENCH, "--loops", "5"], "google-benchmark takes no --loops"),
+        (["BUILD", "--suite", "mod.py", "--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
+        (["BUILD", "--suite", "mod.py"], "--adapter is required"),
+        (["BUILD", *GBENCH, "--filter", "Quiet", QUIET], "case names or --filter"),
+        (["BUILD", *GBENCH, "--tree", "t"], "--tree belongs to"),
+        (["BUILD", "--adapter", "google-benchmark"], "--suite is required"),
+        (["m.py", "--adapter", "google-benchmark"], "benchmarked with pyperf"),
+    ],
+)
 def test_what_does_not_fit_is_refused_before_anything_runs(argv, message, build, tmp, capsys):
     assert cli.main(["bench", *(str(build) if a == "BUILD" else a for a in argv)]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err
@@ -158,7 +199,10 @@ def test_what_does_not_fit_is_refused_before_anything_runs(argv, message, build,
 
 
 def test_a_suite_the_adapter_cannot_find_is_refused(build, tmp, capsys):
-    assert cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone", "--no-ingest"]) == cli.EXIT_REFUSED
+    assert (
+        cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone", "--no-ingest"])
+        == cli.EXIT_REFUSED
+    )
     assert "suite binary not found" in capsys.readouterr().err
     # refused inside the session, after the log was started: the run folder holds only the log, which says why
     assert [p.name for p in (tmp / "results").glob("*/*")] == ["bx.log"]
@@ -183,10 +227,10 @@ def test_a_provider_target_is_resolved_like_compare_does(repo, build, tmp, monke
     assert json.loads(result.read_text())["provenance"]["info"]["target_provider"]["version"] == "describe"
 
 
-MODULE = textwrap.dedent('''
+MODULE = textwrap.dedent("""
     def bench_a():
         sum(range(100))
-''')
+""")
 
 
 def test_pyperf_takes_a_working_tree_path_like_the_shorthand(tmp, monkeypatch, capsys):
@@ -199,8 +243,23 @@ def test_pyperf_takes_a_working_tree_path_like_the_shorthand(tmp, monkeypatch, c
     git(tree, "commit", "-qm", "m")
     monkeypatch.chdir(tmp)
     fast = ["--processes", "2", "--values", "2", "--loops", "20", "--no-ingest"]
-    assert cli.main(["bench", str(tree), "--adapter", "pyperf", "--suite", "benchmarks/mod.py", "bench_a",
-                     "--run-key", "w1", *fast]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                str(tree),
+                "--adapter",
+                "pyperf",
+                "--suite",
+                "benchmarks/mod.py",
+                "bench_a",
+                "--run-key",
+                "w1",
+                *fast,
+            ]
+        )
+        == cli.EXIT_OK
+    )
     assert "bench_a" in capsys.readouterr().out
     long_form = order_of(tmp, "w1")
     assert cli.main(["bench", str(tree / "benchmarks" / "mod.py"), "bench_a", "--run-key", "w2", *fast]) == cli.EXIT_OK
@@ -213,10 +272,16 @@ def test_pyperf_takes_a_working_tree_path_like_the_shorthand(tmp, monkeypatch, c
 
 # --- from benchx.conf.json -------------------------------------------------------------------
 
-CONFIG = {"project": "demo",
-          "adapter": {"name": "google-benchmark", "suite": "demo-bench", "quantities": ["wall-time", "cpu-time"],
-                      "precision": {"repetitions": 3}},
-          "environment_variables": {"DEMO_THREADS": "1"}}
+CONFIG = {
+    "project": "demo",
+    "adapter": {
+        "name": "google-benchmark",
+        "suite": "demo-bench",
+        "quantities": ["wall-time", "cpu-time"],
+        "precision": {"repetitions": 3},
+    },
+    "environment_variables": {"DEMO_THREADS": "1"},
+}
 
 
 @requires_pyarrow
@@ -226,19 +291,45 @@ def test_a_bare_command_takes_everything_from_the_file(build, tmp, capsys):
     assert QUIET in capsys.readouterr().out
     order = order_of(tmp, "f1")
     assert (order["project"], order["quantities"], order["precision"]["repetitions"]) == (
-        "demo", ["wall-time", "cpu-time"], 3)
+        "demo",
+        ["wall-time", "cpu-time"],
+        3,
+    )
     assert order["environment_variables"] == {"DEMO_THREADS": "1"}
     assert order["suites"][0] == {"adapter": "google-benchmark", "suite": "demo-bench", "filter": "^(BM_Quiet/1024)$"}
-    names = {(d["coordinates"]["workload"]["name"], d["measurement"]["quantity"]["name"])
-                 for d in Store(tmp / "store.parquet").documents("f1") if d["measurement"]["quantity"]["name"] != "load-average"}
+    names = {
+        (d["coordinates"]["workload"]["name"], d["measurement"]["quantity"]["name"])
+        for d in Store(tmp / "store.parquet").documents("f1")
+        if d["measurement"]["quantity"]["name"] != "load-average"
+    }
     assert names == {(QUIET, "wall-time"), (QUIET, "cpu-time")}  # one run, both quantities
     assert {d["project"] for d in Store(tmp / "store.parquet").documents("f1")} == {"demo"}
 
 
 def test_a_flag_wins_over_the_file(build, tmp):
     write_config(tmp, **CONFIG)
-    assert cli.main(["bench", str(build), "--repetitions", "4", "--quantity", "cpu-time", "-e", "DEMO_THREADS=2",
-                     "-e", "OTHER=x", "--project", "other", "--run-key", "f2", "--no-ingest"]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                str(build),
+                "--repetitions",
+                "4",
+                "--quantity",
+                "cpu-time",
+                "-e",
+                "DEMO_THREADS=2",
+                "-e",
+                "OTHER=x",
+                "--project",
+                "other",
+                "--run-key",
+                "f2",
+                "--no-ingest",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     order = order_of(tmp, "f2")
     assert (order["project"], order["quantities"], order["precision"]["repetitions"]) == ("other", ["cpu-time"], 4)
     assert order["environment_variables"] == {"DEMO_THREADS": "2", "OTHER": "x"}
@@ -301,9 +392,13 @@ def test_a_provider_target_without_a_provider_is_refused(build, tmp, capsys):
 def test_compare_takes_its_policy_from_the_file(repo, tmp, capsys):
     base = make_build(tmp / "b0", repo["wt-base"], cases())
     head = make_build(tmp / "b1", repo["wt-head"], cases(quiet=1.02e-3))
-    write_config(tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 4, "k": 4.0, "min_rounds": 3})
-    assert cli.main(["compare", f"{base}:{repo['wt-base']}", f"{head}:{repo['wt-head']}", "--run-key", "cmp",
-                     "--json"]) == cli.EXIT_OK
+    write_config(
+        tmp, adapter=CONFIG["adapter"], compare={"profile": "revisions", "rounds": 4, "k": 4.0, "min_rounds": 3}
+    )
+    assert (
+        cli.main(["compare", f"{base}:{repo['wt-base']}", f"{head}:{repo['wt-head']}", "--run-key", "cmp", "--json"])
+        == cli.EXIT_OK
+    )
     doc = json.loads(capsys.readouterr().out)
     assert doc["method"]["configuration"] == {"k": 4.0, "min_rounds": 3}
     assert {d["procedure"]["round"] for d in Store(tmp / "store.parquet").documents("cmp")} == {0, 1, 2, 3}

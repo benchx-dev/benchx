@@ -20,7 +20,9 @@ def make(ratios=None, rounds=5, **changes):
         for side in (BASE, HEAD):
             for name, parameters, seconds in WORKLOADS:
                 ratio = ratios.get(name, 1.05) if side == HEAD else 1.0
-                d = result(side, r, slot, seconds * (1 + 0.01 * r) * ratio, workload=name, **(changes if side == HEAD else {}))
+                d = result(
+                    side, r, slot, seconds * (1 + 0.01 * r) * ratio, workload=name, **(changes if side == HEAD else {})
+                )
                 if parameters:
                     d["coordinates"]["workload"]["parameters"] = parameters
                 d["ingest_key"] += f":{parameters}"
@@ -33,21 +35,24 @@ def evaluate(docs):
     return compare.compare(docs, run_key="run", profile="revisions", baseline=BASE)
 
 
-@pytest.mark.parametrize("value, spread, unit, expected", [
-    (5.2e-6, 8e-8, "s", "5.20±0.08μs"),
-    (96.3e-6, 1e-7, "s", "96.3±0.1μs"),
-    (97.6e-6, 2e-6, "s", "97.6±2μs"),
-    (2.08e-3, 6e-5, "s", "2.08±0.06ms"),
-    (1.5, None, "s", "1.50s"),
-    (100e-6, None, "s", "100μs"),
-    (10e-6, None, "s", "10.0μs"),
-    (3e-9, 1e-10, "s", "3.00±0.1ns"),
-    (5.2e-6, 4e-9, "s", "5.20±0μs"),  # a spread below 0.005 of the unit shows as 0, as in asv
-    (90.0, 3.0, "s", "1.50±0.05m"),
-    (0.0, None, "s", "0s"),
-    (1500.0, 20.0, "B", "1500±20 B"),
-    (None, None, "s", "n/a"),
-])
+@pytest.mark.parametrize(
+    "value, spread, unit, expected",
+    [
+        (5.2e-6, 8e-8, "s", "5.20±0.08μs"),
+        (96.3e-6, 1e-7, "s", "96.3±0.1μs"),
+        (97.6e-6, 2e-6, "s", "97.6±2μs"),
+        (2.08e-3, 6e-5, "s", "2.08±0.06ms"),
+        (1.5, None, "s", "1.50s"),
+        (100e-6, None, "s", "100μs"),
+        (10e-6, None, "s", "10.0μs"),
+        (3e-9, 1e-10, "s", "3.00±0.1ns"),
+        (5.2e-6, 4e-9, "s", "5.20±0μs"),  # a spread below 0.005 of the unit shows as 0, as in asv
+        (90.0, 3.0, "s", "1.50±0.05m"),
+        (0.0, None, "s", "0s"),
+        (1500.0, 20.0, "B", "1500±20 B"),
+        (None, None, "s", "n/a"),
+    ],
+)
 def test_values_are_written_as_asv_writes_them(value, spread, unit, expected):
     assert tables.human(value, spread, unit) == expected
 
@@ -105,10 +110,14 @@ def test_only_changed_rows_unless_all():
     docs = make({PLAIN: 1.0})
     doc = evaluate(docs)
     changes = tables.render(doc, docs).splitlines()
-    assert [line for line in changes if line.startswith("| ")][1:] and not any(PLAIN in line for line in changes if line.startswith("| "))
+    assert [line for line in changes if line.startswith("| ")][1:] and not any(
+        PLAIN in line for line in changes if line.startswith("| ")
+    )
     everything = [line for line in tables.render(doc, docs, all_rows=True).splitlines() if line.startswith("| ")]
     assert len(everything) == 4  # the header and three rows
-    assert everything[-1].startswith("|          | 2.04±0.03ms") and "1.00" in everything[-1] and PLAIN in everything[-1]
+    assert (
+        everything[-1].startswith("|          | 2.04±0.03ms") and "1.00" in everything[-1] and PLAIN in everything[-1]
+    )
     assert "| no change detected |" in everything[-1] and "| regressed " in everything[1]
 
 
@@ -153,8 +162,14 @@ def test_a_benchmark_that_raises_on_one_side_leaves_the_others_compared():
     assert "bench_b.Plain.time_x  2.04±0.03ms" in shown and "bench_b.Plain.time_x  error" in shown
     rows = [line for line in shown.splitlines() if line.startswith("| ")]
     assert sum("| regressed " in line for line in rows) == 2
-    assert any("bench_b.Plain.time_x" in line and "| ?" in line and "error" in line and "n/a" in line
-               and "indeterminate (not-measured)" in line for line in rows)
+    assert any(
+        "bench_b.Plain.time_x" in line
+        and "| ?" in line
+        and "error" in line
+        and "n/a" in line
+        and "indeterminate (not-measured)" in line
+        for line in rows
+    )
 
 
 def test_an_edited_benchmark_is_marked_not_comparable_and_the_others_have_their_rows():
@@ -187,18 +202,27 @@ def test_a_comparison_without_units_has_no_tables():
     assert doc["failed_invariants"] and tables.render(doc, docs) == ""
 
 
-@pytest.mark.parametrize("profile, named, axis", [
-    ("environments", {"label": "env"}, "/provenance/labels/env"),
-    ("variants", {"parameter": "role"}, "/coordinates/workload/parameters/role"),
-    ("revisions", {}, "/provenance/subject_tree"),
-])
+@pytest.mark.parametrize(
+    "profile, named, axis",
+    [
+        ("environments", {"label": "env"}, "/provenance/labels/env"),
+        ("variants", {"parameter": "role"}, "/coordinates/workload/parameters/role"),
+        ("revisions", {}, "/provenance/subject_tree"),
+    ],
+)
 def test_the_projection_is_rebuilt_from_the_document(profile, named, axis):
-    doc = {"selector": {"name": "benchx/run-profile", "version": "v1",
-                        "params": {"run_key": "r", "profile": profile, "baseline": "a", **named}}}
+    doc = {
+        "selector": {
+            "name": "benchx/run-profile",
+            "version": "v1",
+            "params": {"run_key": "r", "profile": profile, "baseline": "a", **named},
+        }
+    }
     assert tables._projection(doc).axis[0] == axis
 
 
 # Through the CLI, on the fake Google Benchmark of the session tests.
+
 
 @pytest.fixture
 def builds(repo, tmp):
@@ -209,27 +233,66 @@ def builds(repo, tmp):
 
 def test_tables_after_a_measure_mode_comparison_and_the_same_in_read_mode(repo, tmp, builds, capsys):
     common = ["--profile", "revisions"]
-    assert cli.main(["compare", builds["baseline"], builds["contender"], *common, "--adapter", "google-benchmark",
-                     "--suite", "demo-bench", "--rounds", "5", "--run-key", "t-1", "--out", str(tmp / "o"),
-                     "--tables"]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "compare",
+                builds["baseline"],
+                builds["contender"],
+                *common,
+                "--adapter",
+                "google-benchmark",
+                "--suite",
+                "demo-bench",
+                "--rounds",
+                "5",
+                "--run-key",
+                "t-1",
+                "--out",
+                str(tmp / "o"),
+                "--tables",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     measured = capsys.readouterr().out
     assert measured.index("REGRESSED") < measured.index(f"commit {repo['base'][:8]}") < measured.index("| Change")
     assert f"commit {repo['head'][:8]} (5 rounds):" in measured and "BM_Quiet/1024" in measured
-    assert f"| + " in measured and f"Before [{repo['base'][:8]}]" in measured
+    assert "| + " in measured and f"Before [{repo['base'][:8]}]" in measured
     assert cli.main(["compare", "--run", "t-1", *common, "--baseline", repo["base"][:10], "--tables"]) == cli.EXIT_OK
     assert capsys.readouterr().out == measured
 
 
 def test_without_tables_the_output_is_what_it_was(repo, tmp, builds, capsys):
-    cli.main(["compare", builds["baseline"], builds["contender"], "--profile", "revisions", "--adapter",
-              "google-benchmark", "--suite", "demo-bench", "--rounds", "3", "--run-key", "t-2", "--out", str(tmp / "o")])
+    cli.main(
+        [
+            "compare",
+            builds["baseline"],
+            builds["contender"],
+            "--profile",
+            "revisions",
+            "--adapter",
+            "google-benchmark",
+            "--suite",
+            "demo-bench",
+            "--rounds",
+            "3",
+            "--run-key",
+            "t-2",
+            "--out",
+            str(tmp / "o"),
+        ]
+    )
     assert "For " not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("argv, message", [
-    (["--run", "k", "--profile", "revisions", "--baseline", "x", "--tables", "--json"], "--tables is a text view"),
-    (["--run", "k", "--profile", "revisions", "--baseline", "x", "--all"], "--all goes with --tables"),
-])
+@pytest.mark.parametrize(
+    "argv, message",
+    [
+        (["--run", "k", "--profile", "revisions", "--baseline", "x", "--tables", "--json"], "--tables is a text view"),
+        (["--run", "k", "--profile", "revisions", "--baseline", "x", "--all"], "--all goes with --tables"),
+    ],
+)
 def test_tables_flags_that_do_not_fit_are_refused(argv, message, capsys):
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err

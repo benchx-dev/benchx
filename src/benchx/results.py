@@ -38,9 +38,7 @@ _ATTEMPT_PROVENANCE = (
 def attempt_signature(doc: dict) -> str:
     facts = {k: doc.get(k) for k in _ATTEMPT_FIELDS}
     facts.update({k: doc["coordinates"][k] for k in _ATTEMPT_COORDINATES})
-    facts["environment"] = {
-        k: facts["environment"][k] for k in ("schema_version", "identity")
-    }
+    facts["environment"] = {k: facts["environment"][k] for k in ("schema_version", "identity")}
     facts.update({k: doc["provenance"].get(k) for k in _ATTEMPT_PROVENANCE})
     return core.sha256_hex(core.canonical(facts))
 
@@ -87,8 +85,13 @@ def sweep_paths(paths) -> tuple[list[tuple[str, str]], dict[str, dict], list[dic
             unreadable.append(rejection(f.name, errors[0]))
         else:
             orders[core.order_ref(order)] = order
-    logger.debug("swept %d file(s): %d result document(s), %d work order(s), %d unreadable or malformed", len(files),
-                 len(documents), len(orders), len(unreadable))
+    logger.debug(
+        "swept %d file(s): %d result document(s), %d work order(s), %d unreadable or malformed",
+        len(files),
+        len(documents),
+        len(orders),
+        len(unreadable),
+    )
     return documents, orders, unreadable
 
 
@@ -122,8 +125,14 @@ def ingest_documents(
             outcome["rejected"].append(rejection(name, errors[0]))
             logger.debug("%s: rejected with %d error(s)", name, len(errors))  # the rejection keeps the first
             for error in errors[:MAX_LOGGED]:
-                logger.debug("%s: %s at %s: %s%s", name, error.code, error.location or "the document", error.message,
-                             f" (rule {error.rule})" if getattr(error, "rule", None) else "")
+                logger.debug(
+                    "%s: %s at %s: %s%s",
+                    name,
+                    error.code,
+                    error.location or "the document",
+                    error.message,
+                    f" (rule {error.rule})" if getattr(error, "rule", None) else "",
+                )
             if len(errors) > MAX_LOGGED:
                 logger.debug("%s: and %d more error(s)", name, len(errors) - MAX_LOGGED)
             continue
@@ -155,8 +164,14 @@ def ingest_documents(
             outcome["rejected"].append(rejection(name, conflict))
             if isinstance(conflict, IdempotencyConflict):  # the error does not carry what makes it one
                 where = store_path if store_path is not None else "the store"
-                logger.warning("%s: idempotency-conflict: %s already holds payload %s for %s, and this one is %s",
-                               name, where, existing[key][:16], doc["ingest_key"], payload[:16])
+                logger.warning(
+                    "%s: idempotency-conflict: %s already holds payload %s for %s, and this one is %s",
+                    name,
+                    where,
+                    existing[key][:16],
+                    doc["ingest_key"],
+                    payload[:16],
+                )
             else:
                 logger.warning("%s: %s: %s", name, conflict.code, conflict.message)
             continue
@@ -164,8 +179,13 @@ def ingest_documents(
         existing[key] = payload
         attempts[doc["attempt_key"]] = signature
         if not known:
-            logger.debug("%s: a new quantity %s [%s] in %s: the first result defines its unit", name,
-                         quantity["name"], quantity["unit"], project)
+            logger.debug(
+                "%s: a new quantity %s [%s] in %s: the first result defines its unit",
+                name,
+                quantity["name"],
+                quantity["unit"],
+                project,
+            )
         units[(project, quantity["name"])] = quantity["unit"]  # first sight defines the unit
         ref = doc["provenance"].get("info", {}).get("workorder_ref")
         order = orders.get(ref)
@@ -174,22 +194,31 @@ def ingest_documents(
         else:
             used_orders.add(ref)
         accepted.append(doc)
-        derived.append({
-            "store_project": project,
-            "reported_coordinates_fingerprint": identity.reported_coordinates_fingerprint(doc),
-            "payload_sha256": payload,
-            "attempt_signature": signature,
-            "document": canonical.decode(),
-            "work_order_ref": ref,
-            "work_order": core.canonical(order).decode() if order is not None else None,
-        })
+        derived.append(
+            {
+                "store_project": project,
+                "reported_coordinates_fingerprint": identity.reported_coordinates_fingerprint(doc),
+                "payload_sha256": payload,
+                "attempt_signature": signature,
+                "document": canonical.decode(),
+                "work_order_ref": ref,
+                "work_order": core.canonical(order).decode() if order is not None else None,
+            }
+        )
         outcome["ingested"] += 1
 
     unused = [ref for ref in orders if ref not in used_orders]
-    logger.debug("ingest: %d ingested, %d duplicate, %d rejected; %d work order(s) attached, %d in the sweep "
-                 "that no result references (neither stored nor reported), %d result(s) with no order in the sweep "
-                 "(an order delivered by an earlier ingest is not attached)", outcome["ingested"],
-                 outcome["duplicate"], len(outcome["rejected"]), len(used_orders), len(unused), without_order)
+    logger.debug(
+        "ingest: %d ingested, %d duplicate, %d rejected; %d work order(s) attached, %d in the sweep "
+        "that no result references (neither stored nor reported), %d result(s) with no order in the sweep "
+        "(an order delivered by an earlier ingest is not attached)",
+        outcome["ingested"],
+        outcome["duplicate"],
+        len(outcome["rejected"]),
+        len(used_orders),
+        len(unused),
+        without_order,
+    )
     return accepted, derived, outcome
 
 

@@ -55,6 +55,7 @@ def values(doc: dict) -> list[float]:
 
 # -- projections ---------------------------------------------------------------
 
+
 def _has_null(value) -> bool:
     if value is None:
         return True
@@ -68,9 +69,10 @@ def _has_null(value) -> bool:
 @dataclass(frozen=True)
 class Projected:
     """One result under a projection."""
-    axis: tuple            # one value per axis path; None where the result has none
-    identity: dict         # pointer -> matched value, normalized: the comparison identity
-    ignored: dict          # pointer -> ignored value
+
+    axis: tuple  # one value per axis path; None where the result has none
+    identity: dict  # pointer -> matched value, normalized: the comparison identity
+    ignored: dict  # pointer -> ignored value
 
 
 class Projection:
@@ -84,11 +86,11 @@ class Projection:
     the subject tree, and `invariants` are the checks a profile runs (§5.5).
     """
 
-    def __init__(self, policy: dict, axis: list[str], *, profile: str | None = None,
-                 paths: dict | None = None, invariants=()):
+    def __init__(
+        self, policy: dict, axis: list[str], *, profile: str | None = None, paths: dict | None = None, invariants=()
+    ):
         self.policy, self.profile, self.extra = policy, profile, dict(paths or {})
-        self.identity_schema = (f"{profile}+{policy['identity_schema']}" if profile
-                                else policy["identity_schema"])
+        self.identity_schema = f"{profile}+{policy['identity_schema']}" if profile else policy["identity_schema"]
         self.axis_keys = tuple(Key(path) for path in axis)
         self.axis = [key.pointer for key in self.axis_keys]
         self.default = policy["default"]
@@ -98,23 +100,29 @@ class Projection:
             if path not in NAMED_ONLY and path.split("/")[1] not in REPORTED:
                 raise ProjectionError(f"{self.identity_schema}: {path} is not a reported coordinate (§4.3)")
         for path in self.axis:
-            if path not in NAMED_ONLY and path.split("/")[1] not in REPORTED and not (
-                    path.startswith(LABELS) and path.count("/") == 3):
+            if (
+                path not in NAMED_ONLY
+                and path.split("/")[1] not in REPORTED
+                and not (path.startswith(LABELS) and path.count("/") == 3)
+            ):
                 raise ProjectionError(f"{self.identity_schema}: the axis path {path} is outside what §4.3 allows")
         if not (set(self.axis) & set(CODE) or self.paths.get("/provenance/subject_tree") == "match"):
-            raise ProjectionError(f"{self.identity_schema}: an axis that is not the code must match "
-                                  "/provenance/subject_tree (§4.3)")
+            raise ProjectionError(
+                f"{self.identity_schema}: an axis that is not the code must match /provenance/subject_tree (§4.3)"
+            )
 
     def with_axis_first(self, path: str) -> "Projection":
         """This projection with one more axis path in front, such as the label
         that names the sides of a comparison."""
-        return Projection(self.policy, [path, *self.axis], profile=self.profile, paths=self.extra,
-                          invariants=self.invariants)
+        return Projection(
+            self.policy, [path, *self.axis], profile=self.profile, paths=self.extra, invariants=self.invariants
+        )
 
     def role(self, pointer: str):
         """The role of a fact: the longest named path at or above it, else the default."""
-        for path in sorted((p for p in self.paths if pointer == p or pointer.startswith(p + "/")),
-                           key=len, reverse=True):
+        for path in sorted(
+            (p for p in self.paths if pointer == p or pointer.startswith(p + "/")), key=len, reverse=True
+        ):
             return self.paths[path]
         return self.default
 
@@ -167,15 +175,22 @@ class Projection:
         return _hash("benchmark-comparison-v1", self.identity_schema.encode(), canonical(projected.identity))
 
     def series_fingerprint(self, projected: Projected, quantity: str, estimator: dict) -> str:
-        return _hash("benchmark-series-v6", self.comparison_fingerprint(projected).encode(), quantity.encode(),
-                     _hash("benchmark-estimator-v1", canonical(estimator)).encode())
+        return _hash(
+            "benchmark-series-v6",
+            self.comparison_fingerprint(projected).encode(),
+            quantity.encode(),
+            _hash("benchmark-estimator-v1", canonical(estimator)).encode(),
+        )
 
     def order_key(self, point_axis: tuple) -> tuple:
         """A sort key for a point: none for a revision axis, which the
         implementation orders by time since it has no revision graph (schema §4.1);
         otherwise the axis values in natural order (`axis_order`)."""
-        return () if self.axis == ["/revision/key"] else tuple(
-            key.sort_key(value) for key, value in zip(self.axis_keys, point_axis))
+        return (
+            ()
+            if self.axis == ["/revision/key"]
+            else tuple(key.sort_key(value) for key, value in zip(self.axis_keys, point_axis))
+        )
 
 
 def declared_workload(document: dict) -> dict:
@@ -206,7 +221,7 @@ def said(document: dict, width: int = 160) -> str | None:
     line = message.splitlines()[0] if message else ""
     if not line:
         return None
-    return line if len(line) <= width else line[:width - 1] + "…"
+    return line if len(line) <= width else line[: width - 1] + "…"
 
 
 def reported_coordinates(doc: dict) -> dict:

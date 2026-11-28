@@ -58,8 +58,7 @@ def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
     stderr is the provider's to use (progress, build output) and goes straight
     to the user's terminal. A nonzero exit is the failure report.
     """
-    request = {"schema_version": core.catalog.TARGET_PROVIDER_REQUEST, "operation": operation,
-               "source_ref": source_ref}
+    request = {"schema_version": core.catalog.TARGET_PROVIDER_REQUEST, "operation": operation, "source_ref": source_ref}
     if configuration:
         request["configuration"] = configuration
     errors = core.check(request, "target-provider-request")
@@ -71,8 +70,7 @@ def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
     logger.debug("provider command: %s (in %s); request: %s", log.command(command), cwd, json.dumps(request))
     started = time.monotonic()
     try:
-        done = subprocess.run(command, input=json.dumps(request), text=True, cwd=cwd,
-                              stdout=subprocess.PIPE)
+        done = subprocess.run(command, input=json.dumps(request), text=True, cwd=cwd, stdout=subprocess.PIPE)
     except OSError as e:
         raise TargetError(f"cannot run the provider {command[0]!r}: {e}") from None
     status, stdout = done.returncode, done.stdout

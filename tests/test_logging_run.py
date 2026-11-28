@@ -42,8 +42,9 @@ def test_the_log_names_the_order_and_each_case_before_and_after_it_runs(build, t
         start = next(i for i, l in enumerate(lines) if f"case {number}/4 " in l and ": starting, limit 60 s" in l)
         done = next(i for i, l in enumerate(lines) if f"case {number}/4 " in l and ", exit 0," in l)
         assert start < done  # the start is written before the case runs, the line after it
-    assert re.search(r" INFO case \d/4 BM_Quiet/1024: success, exit 0, [\d.]+ s, load [\d.n/a]+$", "\n".join(lines),
-                     re.M)
+    assert re.search(
+        r" INFO case \d/4 BM_Quiet/1024: success, exit 0, [\d.]+ s, load [\d.n/a]+$", "\n".join(lines), re.M
+    )
 
 
 def test_a_case_that_failed_is_a_warning_with_its_message_and_its_output(build, tmp):
@@ -52,9 +53,11 @@ def test_a_case_that_failed_is_a_warning_with_its_message_and_its_output(build, 
     broken = record(lines, "WARNING", "BM_Broken: error (harness.error)")
     assert re.search(r"error \(harness\.error\): fake failure, exit 0, [\d.]+ s", broken)
     skipped = record(lines, "INFO", "BM_Skipped: skipped (harness.skipped)")  # expected: not a warning
-    assert skipped.endswith(("fake skip, exit 0, " + skipped.rsplit("exit 0, ", 1)[1]))
-    assert any(" WARNING " in l and "BM_Broken: stdout| " in l or " WARNING " in l and "BM_Broken: stdout, " in l
-               for l in lines)  # a failed case's output is a WARNING, a successful one's DEBUG
+    assert skipped.endswith("fake skip, exit 0, " + skipped.rsplit("exit 0, ", 1)[1])
+    assert any(
+        " WARNING " in l and "BM_Broken: stdout| " in l or " WARNING " in l and "BM_Broken: stdout, " in l
+        for l in lines
+    )  # a failed case's output is a WARNING, a successful one's DEBUG
     assert any(" DEBUG " in l and "BM_Quiet/1024: stdout, " in l for l in lines)
 
 
@@ -78,8 +81,11 @@ def test_the_files_line_names_what_the_case_left_with_absolute_paths(build, tmp)
 def test_a_discovery_call_is_logged_with_its_command_and_how_it_ended(build, tmp):
     assert bench(build) == cli.EXIT_OK
     text = "\n".join(lines_of(tmp))
-    assert re.search(r"benchx\.adapters\.base DEBUG listing the benchmarks of demo-bench: \S+demo-bench "
-                     r"--benchmark_list_tests=true \(in .+, limit 600 s\)", text)
+    assert re.search(
+        r"benchx\.adapters\.base DEBUG listing the benchmarks of demo-bench: \S+demo-bench "
+        r"--benchmark_list_tests=true \(in .+, limit 600 s\)",
+        text,
+    )
     assert "listing the benchmarks of demo-bench: exit 0 in " in text
 
 
@@ -88,10 +94,11 @@ def test_a_rerun_of_a_run_key_says_that_its_files_are_overwritten(build, tmp, ca
     capsys.readouterr()
     assert bench(build) == cli.EXIT_INVALID  # the store refuses the second draw of every result
     lines = lines_of(tmp)
-    second = lines[next(i for i, l in enumerate(lines) if " INFO start: " in l and i > 0):]
+    second = lines[next(i for i, l in enumerate(lines) if " INFO start: " in l and i > 0) :]
     assert any(" WARNING " in l and "exists and is overwritten" in l for l in second)
-    assert any(" WARNING " in l and "result file(s)" in l and "were overwritten by a rerun of run key r1" in l
-               for l in second)
+    assert any(
+        " WARNING " in l and "result file(s)" in l and "were overwritten by a rerun of run key r1" in l for l in second
+    )
     assert " INFO end: invalid (exit 1)" in second[-1]
 
 
@@ -124,6 +131,7 @@ def test_a_refusal_lists_its_problems_in_the_log_before_it_is_raised(build, tmp,
 
 # --- the helpers
 
+
 def result(status, reason=None, message=None):
     info = {"message": message} if message else {}
     return status, reason, {"provenance": {"info": info}, "measurement": {"status": status}}
@@ -138,7 +146,9 @@ def test_a_case_line_is_info_unless_the_case_did_badly():
     assert (level, bad) == (logging.INFO, False)
     assert text == "success [setup-per-call-unbatched], exit 0, 41.2 s, load 0.42"
     assert case_line([result("skipped", "harness.skipped", "no GPU")])[:2] == (
-        logging.INFO, "skipped (harness.skipped): no GPU, exit 0, 41.2 s, load 0.42")
+        logging.INFO,
+        "skipped (harness.skipped): no GPU, exit 0, 41.2 s, load 0.42",
+    )
     assert case_line([result("success")], load=None)[1].endswith("load n/a")
 
 
@@ -149,7 +159,9 @@ def test_a_non_zero_exit_raises_the_level_though_the_status_is_success():
 
 def test_an_error_a_timeout_and_a_doubtful_environment_are_warnings():
     assert case_line([result("error", "harness.error", "ValueError: boom")])[:2] == (
-        logging.WARNING, "error (harness.error): ValueError: boom, exit 0, 41.2 s, load 0.42")
+        logging.WARNING,
+        "error (harness.error): ValueError: boom, exit 0, 41.2 s, load 0.42",
+    )
     level, text, bad = case_line([result("error", "harness.timeout")], exit_status=None, timed_out=True)
     assert (level, bad) == (logging.WARNING, True) and ", timeout, " in text
     assert case_line([result("success")], ["env-mismatch"])[0] == logging.WARNING  # the line, not the output
@@ -162,8 +174,11 @@ def test_what_is_the_same_in_every_order_is_info_once_and_debug_after(caplog):
     with caplog.at_level(logging.DEBUG, logger="benchx"):
         runner._log_identity({"python": "/venv/bin/python"}, source, None, "/p")
         runner._log_identity({"python": "/venv/bin/python"}, source, None, "/p")
-    by_level = [(r.levelname, r.getMessage()) for r in caplog.records if "run under" in r.getMessage()
-                or "tree is dirty" in r.getMessage()]
+    by_level = [
+        (r.levelname, r.getMessage())
+        for r in caplog.records
+        if "run under" in r.getMessage() or "tree is dirty" in r.getMessage()
+    ]
     assert [level for level, _ in by_level] == ["INFO", "INFO", "DEBUG", "DEBUG"]
     assert any("M a.py; ?? b.py" in m and "dirty-subject-tree" in m for _, m in by_level)
 
@@ -180,8 +195,9 @@ def test_a_dirty_state_that_is_unknown_is_a_warning_naming_the_cause(caplog):
 def test_harness_output_keeps_the_last_forty_lines_and_says_where_the_rest_is(caplog, tmp):
     text = "\n".join(f"line {n}" for n in range(1, 101))
     with caplog.at_level(logging.DEBUG, logger="benchx"):
-        log.harness_output(logging.getLogger("benchx.test"), "case 1/1 x", "stderr", text, failed=True,
-                           kept_at=tmp / "0000.stderr")
+        log.harness_output(
+            logging.getLogger("benchx.test"), "case 1/1 x", "stderr", text, failed=True, kept_at=tmp / "0000.stderr"
+        )
         log.harness_output(logging.getLogger("benchx.test"), "case 1/1 x", "stdout", "  \n", failed=True)  # empty
     messages = [r.getMessage() for r in caplog.records]
     assert messages[0] == f"case 1/1 x: stderr, 100 lines (last 40; all in {tmp}/0000.stderr)"
@@ -191,9 +207,15 @@ def test_harness_output_keeps_the_last_forty_lines_and_says_where_the_rest_is(ca
 
 def test_a_failing_collector_is_a_warning_with_its_reason_and_the_progress_is_info(caplog, tmp):
     from benchx import collectors
-    specs = [{"name": "good", "command": [sys.executable, "-c", "print('{\"x\": 1}')"]},
-             {"name": "bad", "command": [sys.executable, "-c", "import sys; print('boom', file=sys.stderr); sys.exit(3)"],
-              "on_fail": "warn"}]
+
+    specs = [
+        {"name": "good", "command": [sys.executable, "-c", "print('{\"x\": 1}')"]},
+        {
+            "name": "bad",
+            "command": [sys.executable, "-c", "import sys; print('boom', file=sys.stderr); sys.exit(3)"],
+            "on_fail": "warn",
+        },
+    ]
     with caplog.at_level(logging.DEBUG, logger="benchx"):
         collected = collectors.run_all(specs, declared=None, cwd=tmp, env=dict(os.environ), artifacts_dir=tmp)
     assert collected.warnings == ["collector-failed"]
@@ -215,20 +237,47 @@ def test_a_bench_with_a_failed_case_keeps_the_not_measured_section_on_stdout_wit
 def test_a_parametrized_case_logs_its_workload_and_parameter_values_before_it_runs(tmp, monkeypatch):
     pytest.importorskip("pyperf")
     import subprocess
+
     (tmp / "m.py").write_text(
         "def bench_matmul(n, kind):\n    sum(range(10))\n\n"
         "bench_matmul.params = [[10, 100], ['a', 'b']]\n"
-        "bench_matmul.param_names = ['n', 'kind']\n")
+        "bench_matmul.param_names = ['n', 'kind']\n"
+    )
     for command in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "m"]):
         subprocess.run(["git", *command], cwd=tmp, check=True)
-    assert cli.main(["bench", "m.py", "--run-key", "p1", "--no-ingest", "--processes", "2", "--values", "1",
-                     "--warmups", "0", "--loops", "1", "-e", "A=1", "bench_matmul"]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                "m.py",
+                "--run-key",
+                "p1",
+                "--no-ingest",
+                "--processes",
+                "2",
+                "--values",
+                "1",
+                "--warmups",
+                "0",
+                "--loops",
+                "1",
+                "-e",
+                "A=1",
+                "bench_matmul",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     lines = lines_of(tmp, "p1")
-    listed = next(l for l in lines if " DEBUG " in l and "bench_matmul: 4 combination(s) of n: 10, 100, kind: 'a', 'b'" in l)
+    listed = next(
+        l for l in lines if " DEBUG " in l and "bench_matmul: 4 combination(s) of n: 10, 100, kind: 'a', 'b'" in l
+    )
     first = next(i for i, l in enumerate(lines) if " INFO case 1/4 bench_matmul-0: starting" in l)
     shown = lines[first + 1]
-    assert " DEBUG case 1/4 bench_matmul-0: workload bench_matmul; parameters n=10, kind='a'; " \
-           "environment variables of the order A=1" in shown
+    assert (
+        " DEBUG case 1/4 bench_matmul-0: workload bench_matmul; parameters n=10, kind='a'; "
+        "environment variables of the order A=1" in shown
+    )
     assert "n=100, kind='b'" in next(l for l in lines if "case 4/4 bench_matmul-3: workload" in l)
     assert lines.index(listed) < first  # listed once, before the first case
 

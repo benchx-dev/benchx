@@ -112,9 +112,7 @@ def ordered_bounds(data: dict[str, Any]) -> Iterator[RuleViolation]:
         )
 
 
-def _empty_interval(
-    path: PathParts, lower: float, upper: float, closed: bool
-) -> Iterator[RuleViolation]:
+def _empty_interval(path: PathParts, lower: float, upper: float, closed: bool) -> Iterator[RuleViolation]:
     if lower > upper or (lower == upper and not closed):
         yield EmptyInterval(path=path, lower=lower, upper=upper)
 

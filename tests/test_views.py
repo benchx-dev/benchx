@@ -11,10 +11,11 @@ import pytest
 
 from benchx import cli, views
 from benchx.store import Store
-from benchx.views import inputs, marts as marts_mod, payloads, site
+from benchx.views import inputs, payloads, site
+from benchx.views import marts as marts_mod
 from conftest import NOISY, QUIET, cases, make_build, requires_pyarrow, run_rounds
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 SHAS = [f"{i}" * 40 for i in range(1, 5)]
 
 
@@ -59,6 +60,7 @@ def _by(rows, **keys):
 
 
 # --- Marts arithmetic (pure Python, no PyArrow required) -------------------------------
+
 
 @pytest.fixture
 def synthetic_marts():
@@ -110,12 +112,26 @@ def test_movers_rank_changes_per_commit(synthetic_marts):
 
 def test_build_commits_orders_by_committer_date():
     runs = [
-        {"sha": "b" * 40, "parents": ["a" * 40], "committer_date": inputs.parse_time("2026-02-01T10:00:00+00:00"),
-         "author_date": inputs.parse_time("2026-02-01T10:00:00+00:00"), "subject": "second", "node": "n1",
-         "state": "finished", "results": 5},
-        {"sha": "a" * 40, "parents": ["9" * 40], "committer_date": inputs.parse_time("2026-01-01T10:00:00+01:00"),
-         "author_date": inputs.parse_time("2026-01-01T10:00:00+01:00"), "subject": "first", "node": "n1",
-         "state": "finished", "results": 5},
+        {
+            "sha": "b" * 40,
+            "parents": ["a" * 40],
+            "committer_date": inputs.parse_time("2026-02-01T10:00:00+00:00"),
+            "author_date": inputs.parse_time("2026-02-01T10:00:00+00:00"),
+            "subject": "second",
+            "node": "n1",
+            "state": "finished",
+            "results": 5,
+        },
+        {
+            "sha": "a" * 40,
+            "parents": ["9" * 40],
+            "committer_date": inputs.parse_time("2026-01-01T10:00:00+01:00"),
+            "author_date": inputs.parse_time("2026-01-01T10:00:00+01:00"),
+            "subject": "first",
+            "node": "n1",
+            "state": "finished",
+            "results": 5,
+        },
     ]
     commits = marts_mod.build_commits(runs)
     order = {r["sha"]: r["commit_order"] for r in commits}
@@ -124,6 +140,7 @@ def test_build_commits_orders_by_committer_date():
 
 
 # --- View payloads (pure Python, no PyArrow required) ----------------------------------
+
 
 def _build_synthetic_views(tmp_path: Path, raw_points: list[dict], n_commits: int = 4) -> Path:
     runs = [
@@ -166,9 +183,18 @@ def view_out(tmp_path):
         _point(SHAS[2], 3, SHAS[1], "flaky", None, "error"),
         _point(SHAS[3], 4, SHAS[2], "flaky", 1.1),
         *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "broken", None, "error") for i in range(1, 5)],
-        *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "fast", v,
-                 quantity="items-per-second", direction="higher-is-better")
-          for i, v in [(1, 100), (2, 101), (3, 100), (4, 80)]],
+        *[
+            _point(
+                SHAS[i - 1],
+                i,
+                SHAS[i - 2] if i > 1 else "0" * 40,
+                "fast",
+                v,
+                quantity="items-per-second",
+                direction="higher-is-better",
+            )
+            for i, v in [(1, 100), (2, 101), (3, 100), (4, 80)]
+        ],
     ]
     return _build_synthetic_views(tmp_path, pts)
 
@@ -184,7 +210,11 @@ def test_history_keeps_each_estimate_on_its_commit(view_out):
 
 def test_failures_are_listed_not_hidden(view_out):
     series = {s["case"]: s for s in _load(view_out / "series.json")}
-    assert series["broken"]["estimate"] is None and series["broken"]["status"] == "error" and series["broken"]["points"] == 0
+    assert (
+        series["broken"]["estimate"] is None
+        and series["broken"]["status"] == "error"
+        and series["broken"]["points"] == 0
+    )
     assert series["flaky"]["status"] == "success"
     landing = _load(view_out / "landing.json")
     assert [f["case"] for f in landing["failures"]] == ["broken"]
@@ -218,6 +248,7 @@ def test_static_site_loads_no_external_scripts_or_styles(tmp_path):
         assert (tmp_path / asset).is_file(), asset
     assert "MIT License" in (tmp_path / "vendor" / "uplot" / "LICENSE").read_text(encoding="utf-8")
 
+
 def test_last_executed_is_by_finish_time_not_commit_order():
     commits = [
         {"sha": "new", "node": "n1", "finished_at": "2026-01-02T10:00:00+00:00", "started_at": None},
@@ -231,6 +262,7 @@ def test_last_executed_is_by_finish_time_not_commit_order():
 
 # --- End-to-end JSON results mode (Arrow-free) -----------------------------------------
 
+
 def test_view_from_json_results_without_pyarrow(repo, tmp, monkeypatch, capsys):
     _block_pyarrow(monkeypatch)
     base = make_build(tmp / "build-base", repo["wt-base"], cases())
@@ -243,28 +275,68 @@ def test_view_from_json_results_without_pyarrow(repo, tmp, monkeypatch, capsys):
         (f"{base}:{repo['wt-base']}", out_base, "r-base"),
         (f"{head}:{repo['wt-head']}", out_head, "r-head"),
     ):
-        assert cli.main([
-            "bench", target, "--adapter", "google-benchmark", "--suite", "demo-bench",
-            "--run-key", rkey, "--out", str(out_dir), "--no-ingest",
-        ]) == cli.EXIT_OK
+        assert (
+            cli.main(
+                [
+                    "bench",
+                    target,
+                    "--adapter",
+                    "google-benchmark",
+                    "--suite",
+                    "demo-bench",
+                    "--run-key",
+                    rkey,
+                    "--out",
+                    str(out_dir),
+                    "--no-ingest",
+                ]
+            )
+            == cli.EXIT_OK
+        )
 
     # Make an uncommitted edit on wt-head and benchmark it too.
     (repo["wt-head"] / "bench.cpp").write_text("// dirty edit\n")
-    assert cli.main([
-        "bench", f"{head}:{repo['wt-head']}", "--adapter", "google-benchmark", "--suite", "demo-bench",
-        "--run-key", "r-dirty", "--out", str(out_dirty), "--no-ingest",
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                f"{head}:{repo['wt-head']}",
+                "--adapter",
+                "google-benchmark",
+                "--suite",
+                "demo-bench",
+                "--run-key",
+                "r-dirty",
+                "--out",
+                str(out_dirty),
+                "--no-ingest",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     capsys.readouterr()
 
     site_dir = tmp / "site"
-    assert cli.main([
-        "view",
-        "--results", str(out_base), str(out_head), str(out_dirty),
-        "--repo", str(repo["src"]),
-        "--title", "Demo Local",
-        "--stamp", "v1",
-        "--out", str(site_dir),
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "view",
+                "--results",
+                str(out_base),
+                str(out_head),
+                str(out_dirty),
+                "--repo",
+                str(repo["src"]),
+                "--title",
+                "Demo Local",
+                "--stamp",
+                "v1",
+                "--out",
+                str(site_dir),
+            ]
+        )
+        == cli.EXIT_OK
+    )
     stdout = capsys.readouterr().out
     assert "3 commit(s)" in stdout
 
@@ -315,6 +387,7 @@ def test_view_pyarrow_errors_are_actionable(tmp, monkeypatch, capsys):
 
 # --- End-to-end Parquet store & CI runs/ modes -----------------------------------------
 
+
 @requires_pyarrow
 def test_view_from_local_store_collapses_rounds_and_writes_marts(repo, tmp, capsys):
     import pyarrow.parquet as pq
@@ -332,10 +405,20 @@ def test_view_from_local_store_collapses_rounds_and_writes_marts(repo, tmp, caps
     assert store.ingest_paths([out])["rejected"] == []
 
     site_dir = tmp / "site"
-    assert cli.main([
-        "view", "--store", str(tmp / "store.parquet"),
-        "--repo", str(repo["src"]), "--out", str(site_dir),
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "view",
+                "--store",
+                str(tmp / "store.parquet"),
+                "--repo",
+                str(repo["src"]),
+                "--out",
+                str(site_dir),
+            ]
+        )
+        == cli.EXIT_OK
+    )
 
     manifest = _load(site_dir / "data" / "manifest.json")
     assert manifest["source"] == "store"
@@ -360,16 +443,36 @@ def test_view_from_runs_dir_with_logs_and_failed_build(repo, tmp, capsys):
         (repo["head"], repo["base"], "2026-01-02T10:00:00+00:00", head, repo["wt-head"]),
     ):
         res_out = tmp / f"raw-{sha[:8]}"
-        assert cli.main([
-            "bench", f"{build_dir}:{wt}", "--adapter", "google-benchmark", "--suite", "demo-bench",
-            "--run-key", f"main/{sha}/m5", "--out", str(res_out), "--no-ingest",
-        ]) == cli.EXIT_OK
+        assert (
+            cli.main(
+                [
+                    "bench",
+                    f"{build_dir}:{wt}",
+                    "--adapter",
+                    "google-benchmark",
+                    "--suite",
+                    "demo-bench",
+                    "--run-key",
+                    f"main/{sha}/m5",
+                    "--out",
+                    str(res_out),
+                    "--no-ingest",
+                ]
+            )
+            == cli.EXIT_OK
+        )
         node_dir = runs_dir / sha / "m5"
         Store(node_dir / "results.parquet").ingest_paths([res_out])
         views.write_run(
             node_dir,
             {"sha": sha, "parents": [parent], "committer_date": date, "author_date": date, "subject": f"msg {sha[:6]}"},
-            {"state": "finished", "node": "m5", "suites_ok": 1, "suites_failed": 0, "suites": {"demo-bench": {"results": 2}}},
+            {
+                "state": "finished",
+                "node": "m5",
+                "suites_ok": 1,
+                "suites_failed": 0,
+                "suites": {"demo-bench": {"results": 2}},
+            },
             log=f"log for {sha[:6]}\n",
         )
 
@@ -377,26 +480,49 @@ def test_view_from_runs_dir_with_logs_and_failed_build(repo, tmp, capsys):
     failed_sha = "f" * 40
     views.write_run(
         runs_dir / failed_sha / "m5",
-        {"sha": failed_sha, "parents": [repo["head"]], "committer_date": "2026-01-03T10:00:00+00:00", "subject": "broken build"},
+        {
+            "sha": failed_sha,
+            "parents": [repo["head"]],
+            "committer_date": "2026-01-03T10:00:00+00:00",
+            "subject": "broken build",
+        },
         {"state": "failed", "node": "m5"},
         log="cmake failed\n",
         ingest_problems=1,
     )
 
     project_file = tmp / "project.json"
-    project_file.write_text(json.dumps({
-        "name": "demo",
-        "title": "Demo CI Benchmarks",
-        "repository": "https://github.com/example/benchx-demo",
-        "upstream": {"url": "https://github.com/example/demo.git", "branch": "main",
-                     "commit_url": "https://github.com/example/demo/commit/{sha}"},
-    }))
+    project_file.write_text(
+        json.dumps(
+            {
+                "name": "demo",
+                "title": "Demo CI Benchmarks",
+                "repository": "https://github.com/example/benchx-demo",
+                "upstream": {
+                    "url": "https://github.com/example/demo.git",
+                    "branch": "main",
+                    "commit_url": "https://github.com/example/demo/commit/{sha}",
+                },
+            }
+        )
+    )
     capsys.readouterr()
 
     site_dir = tmp / "site"
-    assert cli.main([
-        "view", "--runs", str(runs_dir), "--project-file", str(project_file), "--out", str(site_dir),
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "view",
+                "--runs",
+                str(runs_dir),
+                "--project-file",
+                str(project_file),
+                "--out",
+                str(site_dir),
+            ]
+        )
+        == cli.EXIT_OK
+    )
 
     manifest = _load(site_dir / "data" / "manifest.json")
     assert manifest["source"] == "runs"
@@ -410,6 +536,7 @@ def test_view_from_runs_dir_with_logs_and_failed_build(repo, tmp, capsys):
 
 
 # --- Local HTTP serving & default temp-dir behavior ------------------------------------
+
 
 def test_serve_and_default_temp_dir(tmp, monkeypatch):
     res_dir = tmp / "empty-res"
@@ -480,10 +607,26 @@ def test_build_commits_breaks_equal_timestamp_ties_by_ancestry():
     same_ts = dt.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
     parent_sha, child_sha = "f" * 40, "0" * 40  # child sorts before parent lexicographically
     runs = [
-        {"sha": child_sha, "parents": [parent_sha], "committer_date": same_ts, "author_date": same_ts,
-         "subject": "child", "node": "n1", "state": "finished", "results": 1},
-        {"sha": parent_sha, "parents": ["a" * 40], "committer_date": same_ts, "author_date": same_ts,
-         "subject": "parent", "node": "n1", "state": "finished", "results": 1},
+        {
+            "sha": child_sha,
+            "parents": [parent_sha],
+            "committer_date": same_ts,
+            "author_date": same_ts,
+            "subject": "child",
+            "node": "n1",
+            "state": "finished",
+            "results": 1,
+        },
+        {
+            "sha": parent_sha,
+            "parents": ["a" * 40],
+            "committer_date": same_ts,
+            "author_date": same_ts,
+            "subject": "parent",
+            "node": "n1",
+            "state": "finished",
+            "results": 1,
+        },
     ]
     commits = marts_mod.build_commits(runs)
     order = {r["sha"]: r["commit_order"] for r in commits}
@@ -543,11 +686,14 @@ def test_summary_only_estimate_and_partial_and_skipped_statuses(adhoc, tmp, monk
     assert landing["latest_runs"][0]["failed_results"] == 0
 
 
-@pytest.mark.parametrize("flag, uri", [
-    ("--results", "s3://bucket/results"),
-    ("--store", "s3://bucket/store.parquet"),
-    ("--runs", "s3://bucket/runs"),
-])
+@pytest.mark.parametrize(
+    "flag, uri",
+    [
+        ("--results", "s3://bucket/results"),
+        ("--store", "s3://bucket/store.parquet"),
+        ("--runs", "s3://bucket/runs"),
+    ],
+)
 def test_remote_uri_rejected_clearly(tmp, monkeypatch, capsys, flag, uri):
     _block_pyarrow(monkeypatch)
     out = tmp / "remote-site"
@@ -562,10 +708,24 @@ def test_path_traversal_and_orphan_results_in_runs_dir(repo, tmp, capsys):
     runs_dir = tmp / "runs"
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
     res_out = tmp / "raw-base"
-    assert cli.main([
-        "bench", f"{base}:{repo['wt-base']}", "--adapter", "google-benchmark", "--suite", "demo-bench",
-        "--run-key", f"main/{repo['base']}/m5", "--out", str(res_out), "--no-ingest",
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                f"{base}:{repo['wt-base']}",
+                "--adapter",
+                "google-benchmark",
+                "--suite",
+                "demo-bench",
+                "--run-key",
+                f"main/{repo['base']}/m5",
+                "--out",
+                str(res_out),
+                "--no-ingest",
+            ]
+        )
+        == cli.EXIT_OK
+    )
     # Orphan results.parquet without a matching run.parquet.
     Store(runs_dir / repo["base"] / "m5" / "results.parquet").ingest_paths([res_out])
 
@@ -601,9 +761,20 @@ def test_validation_errors_do_not_create_out_and_rebuild_prunes_stale_files(tmp,
 
     # Invalid/missing --project-file fails before creating --out.
     bad_out = tmp / "bad-proj-out"
-    assert cli.main([
-        "view", "--results", str(res_dir), "--project-file", str(tmp / "missing.json"), "--out", str(bad_out),
-    ]) == cli.EXIT_REFUSED
+    assert (
+        cli.main(
+            [
+                "view",
+                "--results",
+                str(res_dir),
+                "--project-file",
+                str(tmp / "missing.json"),
+                "--out",
+                str(bad_out),
+            ]
+        )
+        == cli.EXIT_REFUSED
+    )
     assert not bad_out.exists()
 
     # --marts without pyarrow fails before creating --out.
@@ -664,13 +835,23 @@ def test_jsonl_store_builds_views_without_pyarrow(repo, tmp, monkeypatch):
     """Default `bx bench` + `bx view --out site` works end-to-end via store.jsonl without pyarrow."""
     _block_pyarrow(monkeypatch)
     base = make_build(tmp / "b-base", repo["wt-base"], cases())
-    assert cli.main([
-        "bench", f"{base}:{repo['wt-base']}",
-        "--adapter", "google-benchmark",
-        "--suite", "demo-bench",
-        "--run-key", "v-jsonl",
-        "--out", str(tmp / "raw"),
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "bench",
+                f"{base}:{repo['wt-base']}",
+                "--adapter",
+                "google-benchmark",
+                "--suite",
+                "demo-bench",
+                "--run-key",
+                "v-jsonl",
+                "--out",
+                str(tmp / "raw"),
+            ]
+        )
+        == cli.EXIT_OK
+    )
     assert (tmp / "store.jsonl").is_file()
 
     site_dir = tmp / "site"
@@ -702,7 +883,10 @@ def test_nested_python_suites_do_not_collide_while_binaries_use_basename(adhoc, 
     assert {s["suite"] for s in series} == {"benchmarks/a/bench.py", "benchmarks/b/bench.py"}
     assert (site_dir / "data" / "views" / "history" / "benchmarks_a_bench.py.json").is_file()
     assert (site_dir / "data" / "views" / "history" / "benchmarks_b_bench.py.json").is_file()
+
+
 # --- Parquet view payloads (`--views-format parquet`), monthly layout & HTTP Range -----
+
 
 @requires_pyarrow
 def test_parquet_views_emit_snappy_tables_and_slice_offsets(tmp_path):
@@ -714,9 +898,18 @@ def test_parquet_views_emit_snappy_tables_and_slice_offsets(tmp_path):
         _point(SHAS[2], 3, SHAS[1], "flaky", None, "error"),
         _point(SHAS[3], 4, SHAS[2], "flaky", 1.1),
         *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "broken", None, "error") for i in range(1, 5)],
-        *[_point(SHAS[i - 1], i, SHAS[i - 2] if i > 1 else "0" * 40, "fast", v,
-                 quantity="items-per-second", direction="higher-is-better")
-          for i, v in [(1, 100), (2, 101), (3, 100), (4, 80)]],
+        *[
+            _point(
+                SHAS[i - 1],
+                i,
+                SHAS[i - 2] if i > 1 else "0" * 40,
+                "fast",
+                v,
+                quantity="items-per-second",
+                direction="higher-is-better",
+            )
+            for i, v in [(1, 100), (2, 101), (3, 100), (4, 80)]
+        ],
     ]
     runs = [
         {
@@ -780,8 +973,8 @@ def test_parquet_views_emit_snappy_tables_and_slice_offsets(tmp_path):
     failures_pq = pq.read_table(views_dir / "failures.parquet").to_pylist()
     for c in commits_pq:
         sha = c["sha"]
-        ch_slice = changes_pq[c["changes_start"]:c["changes_end"]]
-        f_slice = failures_pq[c["failures_start"]:c["failures_end"]]
+        ch_slice = changes_pq[c["changes_start"] : c["changes_end"]]
+        f_slice = failures_pq[c["failures_start"] : c["failures_end"]]
         assert all(r["sha"] == sha for r in ch_slice)
         assert all(r["sha"] == sha for r in f_slice)
         assert [r["case"] for r in ch_slice] == [r["case"] for r in json_commits[sha]["changes"]]
@@ -808,9 +1001,20 @@ def test_views_format_parquet_refused_without_pyarrow(tmp, monkeypatch, capsys):
     res_dir = tmp / "res"
     res_dir.mkdir()
     out_dir = tmp / "pq-site"
-    assert cli.main([
-        "view", "--results", str(res_dir), "--views-format", "parquet", "--out", str(out_dir),
-    ]) == cli.EXIT_REFUSED
+    assert (
+        cli.main(
+            [
+                "view",
+                "--results",
+                str(res_dir),
+                "--views-format",
+                "parquet",
+                "--out",
+                str(out_dir),
+            ]
+        )
+        == cli.EXIT_REFUSED
+    )
     assert "benchx[parquet]" in capsys.readouterr().err
     assert not out_dir.exists()
 
@@ -832,25 +1036,57 @@ def test_monthly_runs_layout_and_parquet_views_cli(repo, tmp):
         (repo["head"], repo["base"], "2026-11-02T10:00:00+00:00", head, repo["wt-head"]),
     ):
         res_out = tmp / f"raw-{sha[:8]}"
-        assert cli.main([
-            "bench", f"{build_dir}:{wt}", "--adapter", "google-benchmark", "--suite", "demo-bench",
-            "--run-key", f"main/{sha}/m5", "--out", str(res_out), "--no-ingest",
-        ]) == cli.EXIT_OK
+        assert (
+            cli.main(
+                [
+                    "bench",
+                    f"{build_dir}:{wt}",
+                    "--adapter",
+                    "google-benchmark",
+                    "--suite",
+                    "demo-bench",
+                    "--run-key",
+                    f"main/{sha}/m5",
+                    "--out",
+                    str(res_out),
+                    "--no-ingest",
+                ]
+            )
+            == cli.EXIT_OK
+        )
         store.ingest_paths([res_out])
         staging = tmp / f"run-{sha[:8]}"
         run_pq = views.write_run(
             staging,
             {"sha": sha, "parents": [parent], "committer_date": date, "author_date": date, "subject": f"msg {sha[:6]}"},
-            {"state": "finished", "node": "m5", "suites_ok": 1, "suites_failed": 0, "suites": {"demo-bench": {"results": 2}}},
+            {
+                "state": "finished",
+                "node": "m5",
+                "suites_ok": 1,
+                "suites_failed": 0,
+                "suites": {"demo-bench": {"results": 2}},
+            },
         )
         run_tables.append(pq.read_table(run_pq))
 
     pq.write_table(pa.concat_tables(run_tables), monthly_dir / "runs.parquet")
 
     site_dir = tmp / "site-pq"
-    assert cli.main([
-        "view", "--runs", str(monthly_dir), "--views-format", "parquet", "--no-marts", "--out", str(site_dir),
-    ]) == cli.EXIT_OK
+    assert (
+        cli.main(
+            [
+                "view",
+                "--runs",
+                str(monthly_dir),
+                "--views-format",
+                "parquet",
+                "--no-marts",
+                "--out",
+                str(site_dir),
+            ]
+        )
+        == cli.EXIT_OK
+    )
 
     manifest = _load(site_dir / "data" / "manifest.json")
     assert manifest["source"] == "runs"

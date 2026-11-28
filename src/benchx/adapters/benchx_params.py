@@ -57,7 +57,7 @@ def normalize(params, param_names):
         params = [params]
     else:
         params = [list(entry) for entry in params]
-    param_names = [str(n) for n in param_names][:len(params)]
+    param_names = [str(n) for n in param_names][: len(params)]
     param_names += [f"param{k + 1}" for k in range(len(param_names), len(params))]
     ids = []
     for entry in params:
@@ -99,8 +99,11 @@ def expand(name, ids, case_filter):
     """
     if not ids:
         return [(name, None)] if not case_filter or re.search(case_filter, name) else []
-    return [(f"{name}-{i}", i) for i, combo in enumerate(itertools.product(*ids))
-            if not case_filter or re.search(case_filter, _search_text(name, combo))]
+    return [
+        (f"{name}-{i}", i)
+        for i, combo in enumerate(itertools.product(*ids))
+        if not case_filter or re.search(case_filter, _search_text(name, combo))
+    ]
 
 
 def matches_name_only(name, ids, case_filter) -> bool:

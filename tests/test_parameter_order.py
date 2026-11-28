@@ -14,8 +14,11 @@ from test_comparator import BASE, HEAD, result
 
 NAME = "bm.Partition.time_argpartition"
 DECLARED = ["dtype", "array_type", "k"]  # not alphabetical
-COMBINATIONS = [{"dtype": dtype, "array_type": array_type, "k": "10"}
-                for dtype in ("'float64'", "'int16'") for array_type in ("('ordered',)", "('random',)")]
+COMBINATIONS = [
+    {"dtype": dtype, "array_type": array_type, "k": "10"}
+    for dtype in ("'float64'", "'int16'")
+    for array_type in ("('ordered',)", "('random',)")
+]
 
 
 def stored(document):
@@ -83,15 +86,27 @@ def test_a_comparison_names_the_parameters_in_the_order_they_were_declared():
 def test_the_units_are_listed_in_the_order_the_parameters_vary_as_declared():
     """The first declared parameter changes slowest, as asv lists a product of params."""
     doc = evaluate(run_of())
-    assert [(u["workload"]["parameters"]["dtype"], u["workload"]["parameters"]["array_type"]) for u in doc["units"]] == [
-        ("'float64'", "('ordered',)"), ("'float64'", "('random',)"), ("'int16'", "('ordered',)"), ("'int16'", "('random',)")]
+    assert [
+        (u["workload"]["parameters"]["dtype"], u["workload"]["parameters"]["array_type"]) for u in doc["units"]
+    ] == [
+        ("'float64'", "('ordered',)"),
+        ("'float64'", "('random',)"),
+        ("'int16'", "('ordered',)"),
+        ("'int16'", "('random',)"),
+    ]
 
 
 def test_results_without_the_order_are_compared_and_listed_as_before():
     doc = evaluate(run_of(names=False))
     assert [list(u["workload"]["parameters"]) for u in doc["units"]] == [sorted(DECLARED)] * 4
-    assert [(u["workload"]["parameters"]["array_type"], u["workload"]["parameters"]["dtype"]) for u in doc["units"]] == [
-        ("('ordered',)", "'float64'"), ("('ordered',)", "'int16'"), ("('random',)", "'float64'"), ("('random',)", "'int16'")]
+    assert [
+        (u["workload"]["parameters"]["array_type"], u["workload"]["parameters"]["dtype"]) for u in doc["units"]
+    ] == [
+        ("('ordered',)", "'float64'"),
+        ("('ordered',)", "'int16'"),
+        ("('random',)", "'float64'"),
+        ("('random',)", "'int16'"),
+    ]
 
 
 def test_a_failed_invariant_names_the_parameters_in_the_declared_order_too():
@@ -99,12 +114,14 @@ def test_a_failed_invariant_names_the_parameters_in_the_declared_order_too():
     for d in docs:
         if d["coordinates"]["workload"]["parameters"]["dtype"] == "'int16'":
             d["coordinates"]["environment"]["system"]["runtime"] = {
-                "python": "3.13" if d["revision"]["key"] == HEAD else "3.12"}
+                "python": "3.13" if d["revision"]["key"] == HEAD else "3.12"
+            }
     doc = evaluate(docs)
     assert [list(f["workload"]["parameters"]) for f in doc["failed_invariants"]] == [DECLARED] * 2
     assert compare.render(doc).splitlines()[-1] == (
         "  sides-agree: /coordinates/environment/system/runtime/python differ  (2 units: "
-        f"{NAME} [dtype='int16', array_type=('ordered',), k=10], {NAME} [dtype='int16', array_type=('random',), k=10])")
+        f"{NAME} [dtype='int16', array_type=('ordered',), k=10], {NAME} [dtype='int16', array_type=('random',), k=10])"
+    )
 
 
 def test_the_tables_have_the_columns_and_the_values_in_the_declared_order():

@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "tools"
 
 sys.path.insert(0, str(TOOLS))
-from gen_docs import example_names  # the one definition of what an example is
+from gen_docs import example_names  # noqa: E402  # the one definition of what an example is
 
 
 def fail(message: str) -> int:
@@ -46,15 +46,15 @@ def fail(message: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build the documentation site with the examples executed "
-                    "(see the top of this file).")
-    parser.add_argument("--serve", action="store_true",
-                        help="preview the site with `zensical serve` instead of building it into site/")
+        description="Build the documentation site with the examples executed (see the top of this file)."
+    )
+    parser.add_argument(
+        "--serve", action="store_true", help="preview the site with `zensical serve` instead of building it into site/"
+    )
     args = parser.parse_args()
 
     # The examples run `bx` and `python` from the PATH: the ones of the environment of this Python.
-    env = {**os.environ,
-           "PATH": os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])}
+    env = {**os.environ, "PATH": os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])}
     zensical = shutil.which("zensical", path=env["PATH"])
     problems = []
     if subprocess.run([sys.executable, "-c", "import markdown_it"], capture_output=True, check=False).returncode:
@@ -76,10 +76,20 @@ def main() -> int:
             shutil.rmtree(stale)
         print(f"\n=== executing examples/{name}/README.md", flush=True)
         done = subprocess.run(
-            [sys.executable, str(TOOLS / "execute_markdown.py"),
-             "--source", f"examples/{name}/README.md",
-             "--output", str(pages / f"{name}.md"), "--logs", str(logs / name)],
-            cwd=ROOT, env=env, check=False)
+            [
+                sys.executable,
+                str(TOOLS / "execute_markdown.py"),
+                "--source",
+                f"examples/{name}/README.md",
+                "--output",
+                str(pages / f"{name}.md"),
+                "--logs",
+                str(logs / name),
+            ],
+            cwd=ROOT,
+            env=env,
+            check=False,
+        )
         if done.returncode:
             return fail(f"example {name} failed, so no site was built. Logs, one per block: {logs / name}")
 
@@ -96,8 +106,10 @@ def main() -> int:
         return 0
 
     if not args.serve:
-        print("\nBuilt site/. To look at it: python -m http.server -d site"
-              "  (or run this script with --serve; the pages link by directory, which file:// does not follow)")
+        print(
+            "\nBuilt site/. To look at it: python -m http.server -d site"
+            "  (or run this script with --serve; the pages link by directory, which file:// does not follow)"
+        )
     return 0
 
 

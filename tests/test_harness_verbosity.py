@@ -47,13 +47,18 @@ def test_the_option_goes_into_the_order_the_command_line_and_the_result(build, t
     assert order["harness_verbosity"] == 2 and core.check(order, "work-order") == []
     text = log_of(tmp)
     assert "--benchmark_min_time=0.5s --v=2 (in " in text  # on the command line the log shows
-    assert " INFO the harness is asked to say more (harness_verbosity 2): its output is logged up to 2000 lines a stream" in text
+    assert (
+        " INFO the harness is asked to say more (harness_verbosity 2): its output is logged up to 2000 lines a stream"
+        in text
+    )
     assert result_info(tmp)["harness_verbosity"] == 2
     assert " DEBUG setting harness verbosity: 2 (flag)" in text
 
 
-@pytest.mark.parametrize("flags, level", [(["-vv"], 0), (["-vvv"], 1), (["-vvvv"], 2), (["-v", "-v", "-v", "-v", "-v"], 3),
-                                          (["-vvvv", "-q"], 1)])
+@pytest.mark.parametrize(
+    "flags, level",
+    [(["-vv"], 0), (["-vvv"], 1), (["-vvvv"], 2), (["-v", "-v", "-v", "-v", "-v"], 3), (["-vvvv", "-q"], 1)],
+)
 def test_each_v_past_two_asks_the_harness_to_say_more(build, tmp, flags, level, capsys):
     assert bench(build, *flags) == cli.EXIT_OK
     assert order_of(tmp).get("harness_verbosity", 0) == level

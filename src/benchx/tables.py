@@ -26,8 +26,20 @@ CHANGED = {"regressed": "+", "improved": "-", "changed": "~"}  # as asv continuo
 MARKS = {**CHANGED, "no-change-detected": " ", "equivalent": " ", "indeterminate": "?"}
 SHA = 8  # asv's width
 # asv_runner.util._human_time_units: the unit is the largest one the value does not reach.
-TIME_UNITS = (("ns", 1e-9), ("μs", 1e-6), ("ms", 1e-3), ("s", 1), ("m", 60), ("h", 3600), ("d", 86400),
-              ("w", 604800), ("M", 2620800), ("q", 7862400), ("y", 31449600), ("C", 3144960000))
+TIME_UNITS = (
+    ("ns", 1e-9),
+    ("μs", 1e-6),
+    ("ms", 1e-3),
+    ("s", 1),
+    ("m", 60),
+    ("h", 3600),
+    ("d", 86400),
+    ("w", 604800),
+    ("M", 2620800),
+    ("q", 7862400),
+    ("y", 31449600),
+    ("C", 3144960000),
+)
 
 
 def _float(value: float, significant: int, truncate_small: int | None = None, zeros: bool = False) -> str:
@@ -69,8 +81,11 @@ def human(value, spread, unit) -> str:
     units = TIME_UNITS if scale != 0 else (("s", 1), ("m", 60))
     for (name, size), (_, bigger) in zip(units, units[1:]):
         if scale < bigger:
-            return (_float(value / size, 3, zeros=True)
-                    + (f"±{_float(spread / size, 1, truncate_small=2)}" if spread is not None else "") + name)
+            return (
+                _float(value / size, 3, zeros=True)
+                + (f"±{_float(spread / size, 1, truncate_small=2)}" if spread is not None else "")
+                + name
+            )
     return "~0"
 
 
@@ -83,12 +98,17 @@ def _projection(doc):
 def _side(docs) -> dict:
     """One side of one unit: the median of its per-round medians, their sd, and what went wrong if
     no round succeeded."""
-    medians = [m for d in docs if d["measurement"]["status"] == "success"
-               and (m := estimate(identity.MEDIAN, values(d))) is not None]
+    medians = [
+        m
+        for d in docs
+        if d["measurement"]["status"] == "success" and (m := estimate(identity.MEDIAN, values(d))) is not None
+    ]
     failed = sorted({d["measurement"]["status"] for d in docs if d["measurement"]["status"] != "success"})
-    return {"value": statistics.median(medians) if medians else None,
-            "spread": statistics.stdev(medians) if len(medians) > 1 else None,
-            "status": "ok" if medians else (failed[0] if failed else "n/a")}
+    return {
+        "value": statistics.median(medians) if medians else None,
+        "spread": statistics.stdev(medians) if len(medians) > 1 else None,
+        "status": "ok" if medians else (failed[0] if failed else "n/a"),
+    }
 
 
 def summarize(doc, documents) -> tuple[list[dict], dict]:
@@ -106,28 +126,40 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
             continue
         variant = {ptr: v for ptr, v in projected.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
         quantity = d["measurement"]["quantity"]
-        unit = grouped.setdefault((_c(variant), quantity["name"]),
-                                  {"quantity": quantity, "docs": {r: [] for r in ROLES}})
+        unit = grouped.setdefault(
+            (_c(variant), quantity["name"]), {"quantity": quantity, "docs": {r: [] for r in ROLES}}
+        )
         unit["docs"][role].append(d)
         sides[role].append(d)
     if skipped:
         logger.debug("--tables skipped %d document(s) that fit neither side", skipped)
     if len(grouped) != len(doc["units"]):  # side tables regroup every attempt: units the comparison dropped show up
-        logger.debug("the side tables hold %d unit(s), the comparison %d: units dropped for sides-agree, "
-                     "equal-attempts or a missing side still appear in the side tables", len(grouped), len(doc["units"]))
+        logger.debug(
+            "the side tables hold %d unit(s), the comparison %d: units dropped for sides-agree, "
+            "equal-attempts or a missing side still appear in the side tables",
+            len(grouped),
+            len(doc["units"]),
+        )
     units = []
     for unit in grouped.values():
-        units.append({"workload": _workload(unit["docs"], projection.axis), "quantity": unit["quantity"],
-                      **{role: _side(unit["docs"][role]) for role in ROLES}})
+        units.append(
+            {
+                "workload": _workload(unit["docs"], projection.axis),
+                "quantity": unit["quantity"],
+                **{role: _side(unit["docs"][role]) for role in ROLES},
+            }
+        )
     units.sort(key=lambda u: _unit_order(u["workload"], u["quantity"]["name"]))
     varying = named["varying"].rsplit(".", 1)[-1]  # the label or parameter that names the sides
     revisions = params["profile"] == "revisions"  # its sides are two commits; the others', two values
     info = {}
     for role, docs in sides.items():
-        info[role] = {"project": store_project(docs[0]) if docs else "",
-                      "commit": docs[0]["revision"]["key"][:SHA] if docs else "?",
-                      "rounds": len({d.get("procedure", {}).get("round") for d in docs}),
-                      "dirty": any(d["provenance"].get(flag) == "dirty" for d in docs for flag, _ in DIRTY_WARNINGS)}
+        info[role] = {
+            "project": store_project(docs[0]) if docs else "",
+            "commit": docs[0]["revision"]["key"][:SHA] if docs else "?",
+            "rounds": len({d.get("procedure", {}).get("round") for d in docs}),
+            "dirty": any(d["provenance"].get(flag) == "dirty" for d in docs for flag, _ in DIRTY_WARNINGS),
+        }
     if revisions and len({(side["commit"], side["dirty"]) for side in info.values()}) == 1:
         # The same commit on both sides, each with uncommitted changes: the tree id tells them apart.
         for role, side in info.items():
@@ -135,8 +167,9 @@ def summarize(doc, documents) -> tuple[list[dict], dict]:
     for role, side in info.items():
         # Uncommitted changes against HEAD share HEAD's commit, so a side that is not clean says so.
         side["tag"] = side["commit"] + (" (dirty)" if side["dirty"] else "") if revisions else str(named[role])
-        side["heading"] = (f"{side['project']} commit {side['commit']}" if revisions
-                           else f"{side['project']} {varying}={named[role]}")
+        side["heading"] = (
+            f"{side['project']} commit {side['commit']}" if revisions else f"{side['project']} {varying}={named[role]}"
+        )
     return units, info
 
 
@@ -153,8 +186,11 @@ def _grid(headers, rows) -> list[str]:
 def _cell(unit, role) -> str:
     """A side's value, or why it has none."""
     side = unit[role]
-    return human(side["value"], side["spread"], unit["quantity"].get("unit")) if side["value"] is not None \
+    return (
+        human(side["value"], side["spread"], unit["quantity"].get("unit"))
+        if side["value"] is not None
         else side["status"]
+    )
 
 
 def side_tables(units, role, info) -> str:
@@ -190,8 +226,9 @@ def _pipe(headers, rows, right=()) -> str:
     widths = [max(len(header) + 2, *(len(row[j]) for row in rows)) for j, header in enumerate(headers)]
     align = lambda cell, j: cell.rjust(widths[j]) if j in right else cell.ljust(widths[j])  # noqa: E731
     line = lambda cells: "| " + " | ".join(align(cell, j) for j, cell in enumerate(cells)) + " |"  # noqa: E731
-    return "\n".join([line(headers), "|" + "|".join("-" * (width + 2) for width in widths) + "|",
-                      *(line(row) for row in rows)])
+    return "\n".join(
+        [line(headers), "|" + "|".join("-" * (width + 2) for width in widths) + "|", *(line(row) for row in rows)]
+    )
 
 
 def _verdict(unit) -> str:
@@ -215,14 +252,32 @@ def change_table(doc, units, info, *, all_rows=False) -> str:
         before, after = unit["baseline"], unit["contender"]
         ratio = f"{after['value'] / before['value']:.2f}" if before["value"] and after["value"] is not None else "n/a"
         noise = f"{verdict_unit['details']['noise']:.2%}" if "noise" in verdict_unit["details"] else "n/a"
-        rows.append([mark, *(_cell(unit, role) for role in ROLES), ratio, noise, _verdict(verdict_unit),
-                     _label(unit["workload"])])
-    logger.info("--tables: %d row(s) shown; hidden by verdict: %s", len(rows),
-                ", ".join(f"{verdict} {n}" for verdict, n in sorted(hidden.items())) or "none")
+        rows.append(
+            [
+                mark,
+                *(_cell(unit, role) for role in ROLES),
+                ratio,
+                noise,
+                _verdict(verdict_unit),
+                _label(unit["workload"]),
+            ]
+        )
+    logger.info(
+        "--tables: %d row(s) shown; hidden by verdict: %s",
+        len(rows),
+        ", ".join(f"{verdict} {n}" for verdict, n in sorted(hidden.items())) or "none",
+    )
     if not rows:
         return "No benchmark changed (the verdict is benchx's; --all lists every row)."
-    headers = ["Change", f"Before [{info['baseline']['tag']}]", f"After [{info['contender']['tag']}]",
-               "Ratio", "Noise", "Verdict", "Benchmark (Parameter)"]
+    headers = [
+        "Change",
+        f"Before [{info['baseline']['tag']}]",
+        f"After [{info['contender']['tag']}]",
+        "Ratio",
+        "Noise",
+        "Verdict",
+        "Benchmark (Parameter)",
+    ]
     return _pipe(headers, rows, right={j for j in (3, 4) if all(row[j] != "n/a" for row in rows)})
 
 
@@ -231,5 +286,6 @@ def render(doc, documents, *, all_rows=False) -> str:
     if not doc.get("units") or "contender" not in doc.get("sides", {}):
         return ""
     units, info = summarize(doc, documents)
-    return "\n" + "\n\n".join([*(side_tables(units, role, info) for role in ROLES),
-                               change_table(doc, units, info, all_rows=all_rows)])
+    return "\n" + "\n\n".join(
+        [*(side_tables(units, role, info) for role in ROLES), change_table(doc, units, info, all_rows=all_rows)]
+    )

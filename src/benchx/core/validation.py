@@ -19,9 +19,7 @@ Kind = Literal[
 ]
 
 
-def find_schema(
-    data: dict[str, Any], kind: Kind
-) -> tuple[Draft202012Validator | None, list[SchemaNotFound]]:
+def find_schema(data: dict[str, Any], kind: Kind) -> tuple[Draft202012Validator | None, list[SchemaNotFound]]:
     if (
         kind == "measurement-result"
         or kind == "work-order"
@@ -51,13 +49,12 @@ def find_schema(
     return validator, []
 
 
-def check(
-    data: dict[str, Any], validator: Draft202012Validator
-) -> Iterator[StructureError]:
+def check(data: dict[str, Any], validator: Draft202012Validator) -> Iterator[StructureError]:
     for error in validator.iter_errors(data):
         # Its path, its keyword and jsonschema's message, which echoes the offending value: logged as it is.
-        logger.debug("schema error at /%s: %s: %s", "/".join(map(str, error.absolute_path)), error.validator,
-                     error.message)
+        logger.debug(
+            "schema error at /%s: %s: %s", "/".join(map(str, error.absolute_path)), error.validator, error.message
+        )
         yield StructureError(
             path=tuple(error.absolute_path),
             keyword=str(error.validator),

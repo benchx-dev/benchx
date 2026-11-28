@@ -43,8 +43,11 @@ DEFAULTS = {
 
 def default_precision() -> dict:
     """The precision a Google Benchmark order gets with nothing configured."""
-    return {"repetitions": DEFAULT_REPETITIONS, "calibration": dict(DEFAULTS["calibration"]),
-            "warmup": dict(DEFAULTS["warmup"])}
+    return {
+        "repetitions": DEFAULT_REPETITIONS,
+        "calibration": dict(DEFAULTS["calibration"]),
+        "warmup": dict(DEFAULTS["warmup"]),
+    }
 
 
 def protocol(precision: dict) -> tuple[dict, list[str]]:
@@ -129,9 +132,14 @@ def list_cases(binary, case_filter, env, timeout=None) -> list[str]:
 
 def run_case(binary, case, flags, env, timeout, native_path, env_names=(), harness_verbosity=0) -> dict:
     """Run one case; never raises for harness failures, which become results."""
-    args = [str(binary), f"--benchmark_filter=^{re.escape(case)}$",
-            f"--benchmark_out={native_path}", "--benchmark_out_format=json", *flags,
-            *([f"--v={harness_verbosity}"] if harness_verbosity else [])]  # the library's own logging, on stderr
+    args = [
+        str(binary),
+        f"--benchmark_filter=^{re.escape(case)}$",
+        f"--benchmark_out={native_path}",
+        "--benchmark_out_format=json",
+        *flags,
+        *([f"--v={harness_verbosity}"] if harness_verbosity else []),
+    ]  # the library's own logging, on stderr
     note_case(logger, args, cwd=None, timeout=timeout)
     try:
         out = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
@@ -147,8 +155,7 @@ def run_case(binary, case, flags, env, timeout, native_path, env_names=(), harne
         except ValueError:
             native = None
     note_case_ended(logger, status, timeout, native_path, parsed=native is not None)
-    return {"exit_status": status, "timed_out": status is None, "stdout": stdout, "stderr": stderr,
-            "native": native}
+    return {"exit_status": status, "timed_out": status is None, "stdout": stdout, "stderr": stderr, "native": native}
 
 
 def translate(case: str, quantities: list[str], run: dict, attempted: int) -> list[dict]:
@@ -163,10 +170,17 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
 
     if good and len(good) < attempted and not run["timed_out"]:
         first = (failed or skipped or [{}])[0]
-        logger.warning("%s: %d of %d repetition(s) were not measured (%d errored, %d skipped)%s", case,
-                       attempted - len(good), attempted, len(failed), len(skipped),
-                       f"; the first said: {first.get('error_message') or first.get('skip_message')}"
-                       if first.get("error_message") or first.get("skip_message") else "")
+        logger.warning(
+            "%s: %d of %d repetition(s) were not measured (%d errored, %d skipped)%s",
+            case,
+            attempted - len(good),
+            attempted,
+            len(failed),
+            len(skipped),
+            f"; the first said: {first.get('error_message') or first.get('skip_message')}"
+            if first.get("error_message") or first.get("skip_message")
+            else "",
+        )
     outputs = []
     for name in quantities:
         field, quantity = QUANTITIES[name]
@@ -197,8 +211,7 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
                 info["iterations"] = [r.get("iterations") for r in good]
         if run["exit_status"] not in (0, None):
             info["exit_status"] = run["exit_status"]
-        outputs.append({"quantity": quantity, "measurement": measurement,
-                        "procedure": procedure, "info": info})
+        outputs.append({"quantity": quantity, "measurement": measurement, "procedure": procedure, "info": info})
     return outputs
 
 
@@ -211,8 +224,18 @@ def _summaries(aggregates: dict, field: str) -> list[dict]:
             continue
         value = row[field] * _TO_SECONDS[row.get("time_unit", "ns")]
         if summary_type == "estimate":
-            summaries.append({"type": "estimate", "source": "producer", "value": value, "estimator": {
-                "name": name, "method_version": f"google-benchmark/{name}", "input_level": "observations"}})
+            summaries.append(
+                {
+                    "type": "estimate",
+                    "source": "producer",
+                    "value": value,
+                    "estimator": {
+                        "name": name,
+                        "method_version": f"google-benchmark/{name}",
+                        "input_level": "observations",
+                    },
+                }
+            )
         else:
             summaries.append({"type": "statistic", "source": "producer", "name": name, "value": value})
     return summaries
@@ -224,6 +247,9 @@ def context_facts(native: dict | None) -> tuple[dict, dict]:
     §4.4); the harness's copy stays in the native artifact."""
     context = (native or {}).get("context", {})
     system = {"cpu": {"scaling_enabled": context["cpu_scaling_enabled"]}} if "cpu_scaling_enabled" in context else {}
-    info = {k: context[k] for k in ("host_name", "num_cpus", "mhz_per_cpu", "executable",
-                                     "library_build_type", "library_version", "date") if k in context}
+    info = {
+        k: context[k]
+        for k in ("host_name", "num_cpus", "mhz_per_cpu", "executable", "library_build_type", "library_version", "date")
+        if k in context
+    }
     return system, info

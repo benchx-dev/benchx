@@ -166,8 +166,10 @@ def load(start=".") -> Config:
     if path is None:
         for legacy in LEGACY_FILES:
             if old := _find_upward(legacy, start):
-                raise ConfigError(f"{old} is the old configuration format, which is no longer read: "
-                                  f"move its settings into {CONFIG_FILE} (schemas/config/0.1.0)")
+                raise ConfigError(
+                    f"{old} is the old configuration format, which is no longer read: "
+                    f"move its settings into {CONFIG_FILE} (schemas/config/0.1.0)"
+                )
         return Config(root=start, path=None, data={})
     data, errors = loader.read(path)
     if data is None:
@@ -183,7 +185,9 @@ def _check_adapter(path, block):
         return
     adapter = adapters.get(block["name"])
     if adapter is None:
-        raise ConfigError(f"{path}: adapter.name: no adapter named {block['name']!r} ({', '.join(sorted(adapters.ADAPTERS))})")
+        raise ConfigError(
+            f"{path}: adapter.name: no adapter named {block['name']!r} ({', '.join(sorted(adapters.ADAPTERS))})"
+        )
     unknown = sorted(set(block.get("quantities", [])) - set(adapter.QUANTITIES))
     if unknown:
         raise ConfigError(f"{path}: adapter.quantities: {block['name']} does not report {', '.join(unknown)}")
@@ -221,8 +225,10 @@ def template(adapter_name="pyperf") -> dict:
     adapter = adapters.get(adapter_name)
     if adapter is None:
         raise ConfigError(f"no adapter named {adapter_name!r} ({', '.join(sorted(adapters.ADAPTERS))})")
-    return {"schema_version": "benchx/config/0.1.0",
-            "adapter": {"name": adapter_name, "quantities": ["wall-time"], "precision": adapter.default_precision()}}
+    return {
+        "schema_version": "benchx/config/0.1.0",
+        "adapter": {"name": adapter_name, "quantities": ["wall-time"], "precision": adapter.default_precision()},
+    }
 
 
 def write_template(directory=".", adapter_name="pyperf") -> Path:

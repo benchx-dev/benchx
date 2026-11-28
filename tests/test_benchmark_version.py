@@ -45,12 +45,15 @@ def test_trailing_whitespace_and_blank_lines_after_the_function_are_not_a_change
     assert version(tmp_path, "def f(n):   \n    sum(range(n))  \n\n\n") == version(tmp_path, SOURCE + "\n")
 
 
-@pytest.mark.parametrize("edited", [
-    "def f(n):\n    sum(range(n + 1))",                      # the code
-    "def f(n):\n    # a comment\n    sum(range(n))",          # a comment: asv's primary hash counts it
-    'def f(n):\n    """a docstring"""\n    sum(range(n))',    # a docstring
-    "def g(n):\n    sum(range(n))",                          # the name
-])
+@pytest.mark.parametrize(
+    "edited",
+    [
+        "def f(n):\n    sum(range(n + 1))",  # the code
+        "def f(n):\n    # a comment\n    sum(range(n))",  # a comment: asv's primary hash counts it
+        'def f(n):\n    """a docstring"""\n    sum(range(n))',  # a docstring
+        "def g(n):\n    sum(range(n))",  # the name
+    ],
+)
 def test_an_edit_of_the_function_is_a_new_version(tmp_path, edited):
     assert version(tmp_path, edited, name=edited.split("(")[0].split()[-1]) != version(tmp_path, SOURCE + "\n")
 
@@ -84,7 +87,7 @@ def test_a_function_without_source_has_no_version():
 
 # --- through the adapter ---------------------------------------------------------------------
 
-MODULE = textwrap.dedent('''
+MODULE = textwrap.dedent("""
     def bench_a():
         sum(range(100))
 
@@ -93,7 +96,7 @@ MODULE = textwrap.dedent('''
 
     bench_b.params = [1, 2]
     bench_b.param_names = ["n"]
-''')
+""")
 
 
 @pytest.fixture
@@ -107,24 +110,30 @@ def tree(tmp_path):
 def test_the_listing_carries_the_version_of_each_function(tree):
     pytest.importorskip("pyperf")
     import os
+
     from benchx.adapters import pyperf as adapter
+
     env = dict(os.environ)
     runnable = adapter.locate(tree, "mod.py", env)
     adapter.list_cases(runnable, None, env)
     versions = {name: info["version"] for name, info in runnable["benchmarks"].items()}
-    assert versions == {"bench_a": params.source_version(load(tree.parent, MODULE, "bench_a")),
-                        "bench_b": params.source_version(load(tree.parent, MODULE, "bench_b"))}
+    assert versions == {
+        "bench_a": params.source_version(load(tree.parent, MODULE, "bench_a")),
+        "bench_b": params.source_version(load(tree.parent, MODULE, "bench_b")),
+    }
     assert versions["bench_a"] != versions["bench_b"]
 
 
 def test_each_result_records_the_version_of_its_function(tmp_path, tree):
     pytest.importorskip("pyperf")
     from test_pyperf import pyperf_order, run_order
+
     docs = run_order(tmp_path, pyperf_order(tree, "recorded", case_filter="bench_"), "recorded")
     recorded = {}
     for d in docs:
         recorded.setdefault(d["coordinates"]["workload"]["name"], set()).add(
-            d["coordinates"]["protocol"]["pyperf"]["benchmark_version"])
+            d["coordinates"]["protocol"]["pyperf"]["benchmark_version"]
+        )
     expected = {name: {params.source_version(load(tmp_path, MODULE, name))} for name in ("bench_a", "bench_b")}
     assert recorded == expected  # one version for every combination of bench_b, and not the other's
 
@@ -132,26 +141,49 @@ def test_each_result_records_the_version_of_its_function(tmp_path, tree):
 def test_the_protocol_has_the_version_only_when_there_is_one():
     pytest.importorskip("pyperf")
     from benchx.adapters import pyperf as adapter
+
     run = {"native": None, "benchmark_version": None}
     assert adapter.case_protocol({"timer": "perf_counter"}, run, "bench_a") == {"timer": "perf_counter"}
     run["benchmark_version"] = "abc"
     assert adapter.case_protocol({"timer": "perf_counter"}, run, "bench_a") == {
-        "timer": "perf_counter", "pyperf": {"benchmark_version": "abc"}}
+        "timer": "perf_counter",
+        "pyperf": {"benchmark_version": "abc"},
+    }
 
 
 def test_an_asv_result_has_its_own_version_and_no_pyperf_one(tmp_path):
     pytest.importorskip("pyperf")
     from benchx import cli
+
     tree = tmp_path / "asv-tree"
     (tree / "benchmarks").mkdir(parents=True)
     (tree / "benchmarks" / "bm.py").write_text("class T:\n    def time_x(self):\n        sum(range(100))\n")
     out = tmp_path / "out"
-    code = cli.main(["bench", str(tree), "--adapter", "asv", "--suite", "benchmarks", "--run-key", "asv",
-                     "--no-ingest", "--processes", "2", "--values", "2", "--out", str(out)])
+    code = cli.main(
+        [
+            "bench",
+            str(tree),
+            "--adapter",
+            "asv",
+            "--suite",
+            "benchmarks",
+            "--run-key",
+            "asv",
+            "--no-ingest",
+            "--processes",
+            "2",
+            "--values",
+            "2",
+            "--out",
+            str(out),
+        ]
+    )
     assert code == cli.EXIT_OK
     docs = [json.loads(p.read_text()) for p in out.glob("**/*wall-time*.json")]
-    assert docs and all("pyperf" not in d["coordinates"]["protocol"] and
-                        d["coordinates"]["protocol"]["asv"]["benchmark_version"] for d in docs)
+    assert docs and all(
+        "pyperf" not in d["coordinates"]["protocol"] and d["coordinates"]["protocol"]["asv"]["benchmark_version"]
+        for d in docs
+    )
 
 
 # --- two revisions, the function in the tree --------------------------------------------------
@@ -164,11 +196,21 @@ def compare(tmp_path, module, run_key, names=("f",)):
     pytest.importorskip("pyarrow")
     from benchx import harnesses, session
     from test_compare_harnesses import make_worktrees
+
     trees = make_worktrees(tmp_path, module)
     return session.compare_targets(
-        str(trees["base"]), str(trees["head"]), profile="revisions", suite="mod.py", rounds=2,
-        store=Store(tmp_path / "s.parquet"), adapter="pyperf", flags=FLAGS,
-        filter=harnesses.exact_filter(list(names)), out=tmp_path / "out", run_key=run_key)
+        str(trees["base"]),
+        str(trees["head"]),
+        profile="revisions",
+        suite="mod.py",
+        rounds=2,
+        store=Store(tmp_path / "s.parquet"),
+        adapter="pyperf",
+        flags=FLAGS,
+        filter=harnesses.exact_filter(list(names)),
+        out=tmp_path / "out",
+        run_key=run_key,
+    )
 
 
 def test_two_revisions_whose_function_differs_are_not_comparable(tmp_path):
@@ -184,7 +226,9 @@ def test_editing_one_function_leaves_the_others_compared(tmp_path):
     assert doc["failed_invariants"] == []
     units = {u["workload"]["name"]: u for u in doc["units"]}
     assert units["f"]["reason"] == "benchmark-changed" and units["f"]["details"]["rounds"] == 0
-    assert units["g"]["details"]["rounds"] == 2 and units["g"].get("reason") != "benchmark-changed"  # paired, not set aside
+    assert (
+        units["g"]["details"]["rounds"] == 2 and units["g"].get("reason") != "benchmark-changed"
+    )  # paired, not set aside
 
 
 def test_two_revisions_that_differ_outside_the_function_agree(tmp_path):
@@ -201,20 +245,44 @@ def test_a_declared_version_keeps_two_revisions_comparable(tmp_path):
 
 # --- a suite directory outside the checkout ---------------------------------------------------
 
+
 def test_an_asv_suite_outside_the_checkout_is_refused_with_a_message(tmp_path, capsys):
     pytest.importorskip("pyperf")
     from benchx import cli
+
     tree, suite = tmp_path / "tree", tmp_path / "suite"
     tree.mkdir()
     suite.mkdir()
     (tree / "x.txt").write_text("x\n")
     (suite / "bm.py").write_text("class T:\n    def time_x(self):\n        sum(range(100))\n")
     import subprocess
+
     for directory in (tree, suite):
-        for args in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"]):
+        for args in (
+            ["init", "-q"],
+            ["add", "-A"],
+            ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"],
+        ):
             subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True)
-    code = cli.main(["bench", str(tree), "--adapter", "asv", "--suite", str(suite), "--run-key", "out",
-                     "--no-ingest", "--processes", "2", "--values", "2", "--out", str(tmp_path / "out")])
+    code = cli.main(
+        [
+            "bench",
+            str(tree),
+            "--adapter",
+            "asv",
+            "--suite",
+            str(suite),
+            "--run-key",
+            "out",
+            "--no-ingest",
+            "--processes",
+            "2",
+            "--values",
+            "2",
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
     assert code == cli.EXIT_REFUSED
     err = capsys.readouterr().err
     assert "bx bench: error:" in err and "outside the subject's checkout" in err and "put it inside" in err
@@ -226,6 +294,7 @@ def test_what_is_found_outside_the_checkout_is_a_file_or_it_is_refused(tmp_path)
     from benchx import harnesses
     from benchx.errors import SessionError
     from benchx.session import _found_benchmark
+
     source, build, elsewhere = tmp_path / "source", tmp_path / "build", tmp_path / "elsewhere"
     for directory in (source / "benchmarks", build, elsewhere):
         directory.mkdir(parents=True)

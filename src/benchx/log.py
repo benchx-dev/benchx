@@ -33,8 +33,13 @@ PACKAGE = "benchx"
 LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR}
 # What the terminal shows at each verbosity (-qq to -vv): its level, and whether it shows only
 # the messages meant for the user (console=True) or every record.
-_CONSOLE = {-2: (logging.ERROR, True), -1: (logging.WARNING, True), 0: (logging.INFO, True),
-            1: (logging.INFO, False), 2: (logging.DEBUG, False)}
+_CONSOLE = {
+    -2: (logging.ERROR, True),
+    -1: (logging.WARNING, True),
+    0: (logging.INFO, True),
+    1: (logging.INFO, False),
+    2: (logging.DEBUG, False),
+}
 # The log's own line: UTC to the millisecond, as provenance.started_at and ended_at are written,
 # then the process id, so two `bx` processes given one file stay apart.
 _FORMAT = "%(asctime)s %(process)d %(name)s %(levelname)s %(message)s"
@@ -66,7 +71,7 @@ class _Full(logging.Formatter):
         super().__init__(_FORMAT)
 
     def formatTime(self, record, datefmt=None):
-        moment = datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc)
+        moment = datetime.datetime.fromtimestamp(record.created, datetime.UTC)
         return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(record.msecs):03d}Z"
 
     def format(self, record):
@@ -196,8 +201,16 @@ class _Console(logging.LoggerAdapter):
         log. The text is not a format string: a `%` in it is left as it is."""
         body = text.lstrip("\n")
         for number, line in enumerate(body.split("\n")):
-            self.logger.log(level, line, extra={"console": True, "stdout": True, "tier": tier,
-                                                "lead": len(text) - len(body) if number == 0 else 0})
+            self.logger.log(
+                level,
+                line,
+                extra={
+                    "console": True,
+                    "stdout": True,
+                    "tier": tier,
+                    "lead": len(text) - len(body) if number == 0 else 0,
+                },
+            )
 
 
 def console(name: str) -> _Console:
@@ -302,8 +315,9 @@ def _header(argv) -> None:
     from . import __version__
 
     command = "bx " + shlex.join(argv) if argv is not None else "bx"
-    logging.getLogger(f"{PACKAGE}.cli").info("start: benchx %s, pid %d, in %s: %s", __version__, os.getpid(),
-                                             Path.cwd(), command)
+    logging.getLogger(f"{PACKAGE}.cli").info(
+        "start: benchx %s, pid %d, in %s: %s", __version__, os.getpid(), Path.cwd(), command
+    )
 
 
 def footer(outcome: str, code: int | None = None) -> None:

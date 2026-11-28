@@ -55,6 +55,7 @@ def _normalize(rule: dict, value):
 
 # -- pointers ------------------------------------------------------------------
 
+
 def escape(key: str) -> str:
     return key.replace("~", "~0").replace("/", "~1")
 
@@ -99,6 +100,7 @@ _ORDERINGS = {"natural": axis_order}
 
 
 # -- keys ----------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Key:

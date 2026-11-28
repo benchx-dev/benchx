@@ -43,25 +43,17 @@ def test_name_shared_by_environment_and_parameters():
         "workload_parameters": {"threads": 1, "size": 10},
     }
     [issue] = rules.check(document, "work-order")
-    assert issue == SharedParameterName(
-        path=("workload_parameters", "threads"), name="threads"
-    )
-    assert issue.message == (
-        "'threads' is both an environment variable and a workload parameter"
-    )
+    assert issue == SharedParameterName(path=("workload_parameters", "threads"), name="threads")
+    assert issue.message == ("'threads' is both an environment variable and a workload parameter")
 
 
-@pytest.mark.parametrize(
-    "kind", ["comparison-document", "target-description", "target-provider-request"]
-)
+@pytest.mark.parametrize("kind", ["comparison-document", "target-description", "target-provider-request"])
 def test_kinds_without_rules(kind):
     assert list(rules.check({}, kind)) == []
 
 
 def test_primary_source_mismatch(adhoc):
-    adhoc["coordinates"]["subject"]["components"][0]["source"] = (
-        "https://github.com/someone/fork"
-    )
+    adhoc["coordinates"]["subject"]["components"][0]["source"] = "https://github.com/someone/fork"
     [issue] = check(adhoc)
     assert issue == PrimarySourceMismatch(
         path=("coordinates", "subject", "components", 0, "source"),
@@ -78,9 +70,7 @@ def test_primary_source_match_is_fine(adhoc):
 
 
 def test_duplicate_estimate(arrow):
-    arrow["measurement"]["summaries"].append(
-        copy.deepcopy(arrow["measurement"]["summaries"][0])
-    )
+    arrow["measurement"]["summaries"].append(copy.deepcopy(arrow["measurement"]["summaries"][0]))
     [issue] = check(arrow)
     assert type(issue) is DuplicateEstimate and issue.code is Code.MALFORMED
     assert issue.path == ("measurement", "summaries", 3)
@@ -105,9 +95,7 @@ def test_different_method_versions_are_different_estimators(arrow):
 def test_inverted_confidence_interval(arrow):
     arrow["measurement"]["summaries"][2].update(lower=0.04, upper=0.03)
     [issue] = check(arrow)
-    assert issue == EmptyInterval(
-        path=("measurement", "summaries", 2), lower=0.04, upper=0.03
-    )
+    assert issue == EmptyInterval(path=("measurement", "summaries", 2), lower=0.04, upper=0.03)
 
 
 @pytest.mark.parametrize(
@@ -150,9 +138,7 @@ def test_completed_exceeds_attempted(adhoc):
 
 
 def test_every_broken_rule_is_reported_in_order(adhoc):
-    adhoc["coordinates"]["subject"]["components"][0]["source"] = (
-        "https://example.org/other"
-    )
+    adhoc["coordinates"]["subject"]["components"][0]["source"] = "https://example.org/other"
     adhoc["procedure"]["completed_repetitions"] = 6
     assert [type(issue) for issue in check(adhoc)] == [
         PrimarySourceMismatch,

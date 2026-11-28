@@ -12,9 +12,7 @@ def documents(tmp_path):
         paths = []
         for name, content in named.items():
             path = tmp_path / f"{name}.json"
-            path.write_text(
-                content if isinstance(content, str) else json.dumps(content)
-            )
+            path.write_text(content if isinstance(content, str) else json.dumps(content))
             paths.append(str(path))
         return paths
 
@@ -71,9 +69,7 @@ def test_kind_defaults_to_measurement_result_and_can_be_named(documents, adhoc, 
 def test_comparison_documents_are_validated(capsys):
     examples = catalog.SCHEMAS / "comparison-document" / "0.1.0" / "examples"
     files = sorted(str(path) for path in examples.glob("*.json"))
-    assert (
-        cli.main(["validate", "--kind", "comparison-document", *files]) == cli.EXIT_OK
-    )
+    assert cli.main(["validate", "--kind", "comparison-document", *files]) == cli.EXIT_OK
     assert capsys.readouterr().err.strip() == f"{len(files)}/{len(files)} valid"
 
 

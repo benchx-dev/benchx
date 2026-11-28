@@ -29,9 +29,7 @@ def test_schemas_are_valid_json_schema(kind, version, file):
 
 
 def test_result_schema_is_present():
-    assert ("measurement-result", "0.1.0") in {
-        (kind, version) for kind, version, _ in SCHEMA_FILES
-    }
+    assert ("measurement-result", "0.1.0") in {(kind, version) for kind, version, _ in SCHEMA_FILES}
 
 
 def test_lookup_is_cached():
@@ -176,10 +174,7 @@ def test_unexpected_property_is_malformed(adhoc):
     [issue] = check(adhoc)
     assert type(issue) is StructureError and issue.code is Code.MALFORMED
     assert (issue.path, issue.keyword) == ((), "additionalProperties")
-    assert (
-        issue.message
-        == "Additional properties are not allowed ('series_fingerprint' was unexpected)"
-    )
+    assert issue.message == "Additional properties are not allowed ('series_fingerprint' was unexpected)"
 
 
 @pytest.mark.parametrize(
@@ -228,9 +223,7 @@ def test_unexpected_property_is_malformed(adhoc):
             "'identity' is a required property",
         ),
         (
-            lambda d: d["coordinates"]["subject"]["components"].append(
-                {"role": "primary"}
-            ),
+            lambda d: d["coordinates"]["subject"]["components"].append({"role": "primary"}),
             ("coordinates", "subject", "components"),
             "maxContains",
             "Too many items match the given schema (expected at most 1)",
@@ -242,9 +235,7 @@ def test_unexpected_property_is_malformed(adhoc):
             "'not a uri' is not a 'uri'",
         ),
         (
-            lambda d: d["provenance"].__setitem__(
-                "started_at", "2026-09-14T10:02:31+02:00"
-            ),
+            lambda d: d["provenance"].__setitem__("started_at", "2026-09-14T10:02:31+02:00"),
             ("provenance", "started_at"),
             "pattern",
             None,

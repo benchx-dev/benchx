@@ -1,7 +1,6 @@
 """The config schema, its recommended examples, and the paths benchx keeps out of a tree's identity."""
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -26,18 +25,21 @@ def test_recommended_settings_are_ones_the_adapter_applies(path):
     assert set(adapter_block["quantities"]) <= set(adapter.QUANTITIES)
 
 
-@pytest.mark.parametrize("config, message", [
-    ({"adapter": {"suite": "s"}}, "name"),
-    ({"adapter": {"name": "pyperf", "quantities": []}}, "quantities"),
-    ({"adapter": {"name": "pyperf", "quantities": ["wall-time", "wall-time"]}}, "quantities"),
-    ({"provider": {"command": []}}, "command"),
-    ({"provider": {"command": "spin"}}, "command"),
-    ({"compare": {"profile": "history"}}, "profile"),
-    ({"compare": {"rounds": 0}}, "rounds"),
-    ({"paths": {"store": ""}}, "store"),
-    ({"project": ""}, "project"),
-    ({"adapters": {}}, "adapters"),
-])
+@pytest.mark.parametrize(
+    "config, message",
+    [
+        ({"adapter": {"suite": "s"}}, "name"),
+        ({"adapter": {"name": "pyperf", "quantities": []}}, "quantities"),
+        ({"adapter": {"name": "pyperf", "quantities": ["wall-time", "wall-time"]}}, "quantities"),
+        ({"provider": {"command": []}}, "command"),
+        ({"provider": {"command": "spin"}}, "command"),
+        ({"compare": {"profile": "history"}}, "profile"),
+        ({"compare": {"rounds": 0}}, "rounds"),
+        ({"paths": {"store": ""}}, "store"),
+        ({"project": ""}, "project"),
+        ({"adapters": {}}, "adapters"),
+    ],
+)
 def test_schema_refuses(config, message):
     errors = core.check({"schema_version": "benchx/config/0.1.0", **config}, "config")
     assert errors and message in " ".join(str(e) for e in errors)
@@ -54,6 +56,7 @@ def test_every_comparison_profile_is_one_the_config_can_name():
 
 
 # --- paths benchx writes inside a measured tree -----------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _no_ignored_paths():

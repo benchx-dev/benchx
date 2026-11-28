@@ -9,7 +9,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -27,8 +26,14 @@ LEFT_BY = 4  # seconds `bx` may take, after the signal, to have stopped its chil
 
 def start_bx(cwd, *args):
     env = {**os.environ, "PYTHONPATH": SRC + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    return subprocess.Popen([*BX, *args], cwd=cwd, env=env, start_new_session=True,
-                            stdout=subprocess.DEVNULL, stderr=open(Path(cwd) / "bx.err", "w"))
+    return subprocess.Popen(
+        [*BX, *args],
+        cwd=cwd,
+        env=env,
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=open(Path(cwd) / "bx.err", "w"),
+    )
 
 
 def send(bx, signum):
@@ -41,8 +46,9 @@ def interrupted_run(cwd, needle, signum, *args):
     status and whether the benchmark processes were gone `LEFT_BY` seconds after the signal."""
     bx = start_bx(cwd, *args)
     try:
-        assert wait_until(lambda: running(needle), 60), \
+        assert wait_until(lambda: running(needle), 60), (
             f"the benchmark never started; bx said: {(Path(cwd) / 'bx.err').read_text()[-400:]!r}"
+        )
         started = running(needle)
         assert bx.pid not in started  # the needle names the benchmark, not bx's own command line
         send(bx, signum)
@@ -65,8 +71,24 @@ def test_a_stopped_bx_leaves_no_pyperf_benchmark_running(tmp_path, pyperf_needed
     (tmp_path / "slow.py").write_text("import time\n\n\ndef bench_slow():\n    time.sleep(2)\n")
     out = tmp_path / "out"
     status, gone, left = interrupted_run(
-        tmp_path, f"{out}/artifacts/", signum, "bench", "slow.py", "bench_slow", "--no-ingest", "--out", str(out),
-        "--processes", "3", "--values", "3", "--loops", "1", "--warmups", "0")
+        tmp_path,
+        f"{out}/artifacts/",
+        signum,
+        "bench",
+        "slow.py",
+        "bench_slow",
+        "--no-ingest",
+        "--out",
+        str(out),
+        "--processes",
+        "3",
+        "--values",
+        "3",
+        "--loops",
+        "1",
+        "--warmups",
+        "0",
+    )
     assert status == -signum  # it left as an unhandled signal would
     assert gone, f"benchmark processes still running {LEFT_BY} s after {signum.name}: {left}"
 
@@ -76,12 +98,30 @@ def test_a_stopped_bx_leaves_no_asv_benchmark_running(tmp_path, pyperf_needed):
     (suite / "benchmarks").mkdir(parents=True)
     (suite / "asv.conf.json").write_text('{"version": 1, "project": "slowproj", "benchmark_dir": "benchmarks"}\n')
     (suite / "benchmarks" / "__init__.py").write_text("")
-    (suite / "benchmarks" / "bm.py").write_text("import time\n\n\nclass Slow:\n    def time_slow(self):\n"
-                                                "        time.sleep(2)\n")
+    (suite / "benchmarks" / "bm.py").write_text(
+        "import time\n\n\nclass Slow:\n    def time_slow(self):\n        time.sleep(2)\n"
+    )
     out = tmp_path / "out"
     status, gone, left = interrupted_run(
-        suite, f"{out}/artifacts/", signal.SIGINT, "bench", ".", "--adapter", "asv", "--no-ingest", "--out", str(out),
-        "--processes", "3", "--values", "3", "--warmups", "0", "--min-time", "0.001")
+        suite,
+        f"{out}/artifacts/",
+        signal.SIGINT,
+        "bench",
+        ".",
+        "--adapter",
+        "asv",
+        "--no-ingest",
+        "--out",
+        str(out),
+        "--processes",
+        "3",
+        "--values",
+        "3",
+        "--warmups",
+        "0",
+        "--min-time",
+        "0.001",
+    )
     assert status == -signal.SIGINT
     assert gone, f"benchmark processes still running {LEFT_BY} s after SIGINT: {left}"
 
@@ -97,7 +137,19 @@ def test_a_stopped_bx_leaves_no_google_benchmark_running(tmp_path, signum):
     build = make_build(tmp_path / "build", source, cases(), sleep={"BM_Slow": 60})
     out = tmp_path / "out"
     status, gone, left = interrupted_run(
-        tmp_path, f"{build}/demo-bench --benchmark_filter", signum, "bench", str(build), "--adapter", "google-benchmark", "--suite", "demo-bench",
-        "BM_Slow", "--no-ingest", "--out", str(out))
+        tmp_path,
+        f"{build}/demo-bench --benchmark_filter",
+        signum,
+        "bench",
+        str(build),
+        "--adapter",
+        "google-benchmark",
+        "--suite",
+        "demo-bench",
+        "BM_Slow",
+        "--no-ingest",
+        "--out",
+        str(out),
+    )
     assert status == -signum
     assert gone, f"benchmark processes still running {LEFT_BY} s after {signum.name}: {left}"

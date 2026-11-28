@@ -13,12 +13,12 @@ a temporary file beside it, fsynced, then renamed over it) so an acknowledgment
 means validated and durable.
 """
 
-from datetime import datetime
 import json
 import logging
 import os
 import statistics
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import core, identity
@@ -47,6 +47,7 @@ def _require_pyarrow():
 
     return pa, pq, parquet
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,8 +70,13 @@ class Store:
             return None
         started = time.monotonic()
         table = self._pq.read_table(self.path, columns=columns)
-        logger.debug("%s: read %d row(s), %s, in %.2f s", self.path, table.num_rows,
-                     ", ".join(columns) if columns else "all columns", time.monotonic() - started)
+        logger.debug(
+            "%s: read %d row(s), %s, in %.2f s",
+            self.path,
+            table.num_rows,
+            ", ".join(columns) if columns else "all columns",
+            time.monotonic() - started,
+        )
         return table
 
     def _json_rows(self) -> list[dict]:
@@ -88,27 +94,43 @@ class Store:
             for row in self._json_rows():
                 doc = json.loads(row["document"])
                 quantity = doc["measurement"]["quantity"]
-                out.append({
-                    "producer": doc["producer"]["name"],
-                    "ingest_key": doc["ingest_key"],
-                    "attempt_key": doc["attempt_key"],
-                    "payload_sha256": row["payload_sha256"],
-                    "attempt_signature": row["attempt_signature"],
-                    "store_project": row["store_project"],
-                    "quantity": quantity["name"],
-                    "unit": quantity["unit"],
-                })
+                out.append(
+                    {
+                        "producer": doc["producer"]["name"],
+                        "ingest_key": doc["ingest_key"],
+                        "attempt_key": doc["attempt_key"],
+                        "payload_sha256": row["payload_sha256"],
+                        "attempt_signature": row["attempt_signature"],
+                        "store_project": row["store_project"],
+                        "quantity": quantity["name"],
+                        "unit": quantity["unit"],
+                    }
+                )
             return out
-        table = self._table(["producer", "ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
-                             "store_project", "measurement"])
+        table = self._table(
+            [
+                "producer",
+                "ingest_key",
+                "attempt_key",
+                "payload_sha256",
+                "attempt_signature",
+                "store_project",
+                "measurement",
+            ]
+        )
         if table is None:
             return []
         producers = table.column("producer").combine_chunks().field("name").to_pylist()
         quantity = table.column("measurement").combine_chunks().field("quantity")
-        rest = table.select(["ingest_key", "attempt_key", "payload_sha256", "attempt_signature",
-                             "store_project"]).to_pylist()
-        return [dict(row, producer=p, quantity=q, unit=u) for row, p, q, u in
-                zip(rest, producers, quantity.field("name").to_pylist(), quantity.field("unit").to_pylist())]
+        rest = table.select(
+            ["ingest_key", "attempt_key", "payload_sha256", "attempt_signature", "store_project"]
+        ).to_pylist()
+        return [
+            dict(row, producer=p, quantity=q, unit=u)
+            for row, p, q, u in zip(
+                rest, producers, quantity.field("name").to_pylist(), quantity.field("unit").to_pylist()
+            )
+        ]
 
     def _documents(self, run_key=None) -> list[dict]:
         if self._json:
@@ -120,8 +142,11 @@ class Store:
         if table is None:
             return []
         run_keys = table.column("provenance").combine_chunks().field("run_key").to_pylist()
-        found = [json.loads(text) for r, text in zip(run_keys, table.column("document").to_pylist())
-                 if run_key is None or r == run_key]
+        found = [
+            json.loads(text)
+            for r, text in zip(run_keys, table.column("document").to_pylist())
+            if run_key is None or r == run_key
+        ]
         logger.debug("documents(%s): %d of %d stored document(s)", run_key, len(found), len(run_keys))
         return found
 
@@ -143,8 +168,9 @@ class Store:
                 return json.loads(text)
         return None
 
-    def head(self, n: int = 10, project: str | None = None, workload: str | None = None,
-             measurands: bool = False) -> tuple[int, list[dict]]:
+    def head(
+        self, n: int = 10, project: str | None = None, workload: str | None = None, measurands: bool = False
+    ) -> tuple[int, list[dict]]:
         """The store's size and its latest n results, newest first. Rows are in
         ingest order, since every ingest appends to the rewritten file. `project`
         keeps one store project's results; `workload` keeps those whose benchmark
@@ -156,12 +182,13 @@ class Store:
                 return 0, []
             parsed = [(i, row, json.loads(row["document"])) for i, row in enumerate(all_rows)]
             kept = [
-                (i, row, doc) for i, row, doc in parsed
+                (i, row, doc)
+                for i, row, doc in parsed
                 if (project is None or row["store_project"] == project)
                 and (workload is None or workload in doc["coordinates"]["workload"]["name"])
                 and not (measurands and doc["measurement"].get("kind", "measurand") == "condition")
             ]
-            kept = kept[max(0, len(kept) - n):]
+            kept = kept[max(0, len(kept) - n) :]
             if not kept:
                 return len(all_rows), []
             rows = []
@@ -169,51 +196,60 @@ class Store:
                 raw_obs = doc["measurement"].get("observations") or []
                 values = [o["value"] if isinstance(o, dict) else o for o in raw_obs]
                 labels_val = doc["provenance"].get("labels")
-                rows.append({
-                    "row": position,
-                    "started_at": datetime.fromisoformat(doc["provenance"]["started_at"]),
-                    "run_key": doc["provenance"]["run_key"],
-                    "project": row["store_project"],
-                    "workload": doc["coordinates"]["workload"]["name"],
-                    "quantity": doc["measurement"]["quantity"]["name"],
-                    "unit": doc["measurement"]["quantity"]["unit"],
-                    "status": doc["measurement"]["status"],
-                    "median": statistics.median(values) if values else None,
-                    "revision": doc["revision"]["key"],
-                    "labels": core.canonical(labels_val).decode() if labels_val is not None else None,
-                    "document": row["document"],
-                })
+                rows.append(
+                    {
+                        "row": position,
+                        "started_at": datetime.fromisoformat(doc["provenance"]["started_at"]),
+                        "run_key": doc["provenance"]["run_key"],
+                        "project": row["store_project"],
+                        "workload": doc["coordinates"]["workload"]["name"],
+                        "quantity": doc["measurement"]["quantity"]["name"],
+                        "unit": doc["measurement"]["quantity"]["unit"],
+                        "status": doc["measurement"]["status"],
+                        "median": statistics.median(values) if values else None,
+                        "revision": doc["revision"]["key"],
+                        "labels": core.canonical(labels_val).decode() if labels_val is not None else None,
+                        "document": row["document"],
+                    }
+                )
             return len(all_rows), rows[::-1]
-        table = self._table(["ingest_key", "revision", "coordinates", "measurement", "provenance",
-                             "store_project", "document"])
+        table = self._table(
+            ["ingest_key", "revision", "coordinates", "measurement", "provenance", "store_project", "document"]
+        )
         if table is None:
             return 0, []
         projects = table.column("store_project").to_pylist()
         names = table.column("coordinates").combine_chunks().field("workload").field("name").to_pylist()
         kinds = table.column("measurement").combine_chunks().field("kind").to_pylist()
-        kept = [i for i, (pr, name, kind) in enumerate(zip(projects, names, kinds))
-                if (project is None or pr == project) and (workload is None or workload in name)
-                and not (measurands and kind == "condition")]
-        kept = kept[max(0, len(kept) - n):]
+        kept = [
+            i
+            for i, (pr, name, kind) in enumerate(zip(projects, names, kinds))
+            if (project is None or pr == project)
+            and (workload is None or workload in name)
+            and not (measurands and kind == "condition")
+        ]
+        kept = kept[max(0, len(kept) - n) :]
         if not kept:
             return table.num_rows, []
         rows = []
         for position, row in zip(kept, table.take(kept).to_pylist()):
             values = [o["value"] for o in row["measurement"]["observations"] or []]
-            rows.append({
-                "row": position,
-                "started_at": row["provenance"]["started_at"],
-                "run_key": row["provenance"]["run_key"],
-                "project": row["store_project"],
-                "workload": row["coordinates"]["workload"]["name"],
-                "quantity": row["measurement"]["quantity"]["name"],
-                "unit": row["measurement"]["quantity"]["unit"],
-                "status": row["measurement"]["status"],
-                "median": statistics.median(values) if values else None,
-                "revision": row["revision"]["key"],
-                "labels": row["provenance"]["labels"],
-                "document": row["document"],
-            })
+            rows.append(
+                {
+                    "row": position,
+                    "started_at": row["provenance"]["started_at"],
+                    "run_key": row["provenance"]["run_key"],
+                    "project": row["store_project"],
+                    "workload": row["coordinates"]["workload"]["name"],
+                    "quantity": row["measurement"]["quantity"]["name"],
+                    "unit": row["measurement"]["quantity"]["unit"],
+                    "status": row["measurement"]["status"],
+                    "median": statistics.median(values) if values else None,
+                    "revision": row["revision"]["key"],
+                    "labels": row["provenance"]["labels"],
+                    "document": row["document"],
+                }
+            )
         return table.num_rows, rows[::-1]
 
     def entities(self, projection: Projection = identity.POLICY) -> dict[str, list[dict]]:
@@ -227,16 +263,22 @@ class Store:
 
     def series(self, workload=None, quantity=None, projection: Projection = identity.POLICY) -> list[dict]:
         rows = self.entities(projection).get("series", [])
-        return [s for s in rows if (workload is None or workload in s["workload"])
-                and (quantity is None or s["quantity"] == quantity)]
+        return [
+            s
+            for s in rows
+            if (workload is None or workload in s["workload"]) and (quantity is None or s["quantity"] == quantity)
+        ]
 
     def history(self, fingerprint_prefix: str, projection: Projection = identity.POLICY) -> list[dict]:
         """A series' points in axis order, each with the ignored facts that
         changed since the point before it (§4.3). On the revision axis they
         are listed by measurement start instead: the implementation has no revision
         graph (schema §4.1)."""
-        points = [p for p in self.entities(projection).get("series_point", [])
-                  if p["series_fingerprint"].startswith(fingerprint_prefix)]
+        points = [
+            p
+            for p in self.entities(projection).get("series_point", [])
+            if p["series_fingerprint"].startswith(fingerprint_prefix)
+        ]
         points.sort(key=lambda p: (projection.order_key(tuple(p["axis"])), p["started_at"], p["ingest_key"]))
         previous = {}
         for point in points:
@@ -275,7 +317,9 @@ class Store:
                 try:
                     table = self._parquet.results_table(accepted, derived)
                 except Exception:  # one list comprehension over the batch: an error there writes nothing
-                    logger.error("cannot convert %d result(s) to rows for %s: nothing is written", len(accepted), self.path)
+                    logger.error(
+                        "cannot convert %d result(s) to rows for %s: nothing is written", len(accepted), self.path
+                    )
                     raise
                 self._write_parquet(table)
         return outcome
@@ -298,11 +342,17 @@ class Store:
                 os.fsync(f.fileno())
             os.replace(tmp, self.path)
         except OSError as e:  # disk full, permissions: the results are still in their files
-            logger.error("cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
-                         self.path, len(new_rows), e.strerror or e, tmp)
+            logger.error(
+                "cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
+                self.path,
+                len(new_rows),
+                e.strerror or e,
+                tmp,
+            )
             raise
-        logger.debug("wrote %s: %d row(s) added to %d, %.2f s", self.path, len(new_rows), old_count,
-                     time.monotonic() - started)
+        logger.debug(
+            "wrote %s: %d row(s) added to %d, %.2f s", self.path, len(new_rows), old_count, time.monotonic() - started
+        )
 
     def _write_parquet(self, new) -> None:
         """Rewrite the Parquet store with the new rows appended, atomically."""
@@ -314,10 +364,16 @@ class Store:
         if old is not None and logger.isEnabledFor(logging.DEBUG):
             before, after = _fields(old.schema, self._pa), _fields(table.schema, self._pa)
             added = sorted(set(after) - set(before))
-            widened = sorted(f"{path}: {before[path]} to {after[path]}" for path in before if before[path] != after[path])
+            widened = sorted(
+                f"{path}: {before[path]} to {after[path]}" for path in before if before[path] != after[path]
+            )
             if added or widened:  # permissive promotion adds nested fields and widens types, not only columns
-                logger.debug("%s: the schema was promoted: added %s; widened %s", self.path, ", ".join(added) or "nothing",
-                             ", ".join(widened) or "nothing")
+                logger.debug(
+                    "%s: the schema was promoted: added %s; widened %s",
+                    self.path,
+                    ", ".join(added) or "nothing",
+                    ", ".join(widened) or "nothing",
+                )
         tmp = self.path.with_name(f".{self.path.name}.tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -326,11 +382,21 @@ class Store:
                 os.fsync(f.fileno())
             os.replace(tmp, self.path)
         except OSError as e:  # disk full, permissions: the results are still in their files
-            logger.error("cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
-                         self.path, new.num_rows, e.strerror or e, tmp)
+            logger.error(
+                "cannot write %s (%d row(s) were to be added): %s; a partial %s may be left behind",
+                self.path,
+                new.num_rows,
+                e.strerror or e,
+                tmp,
+            )
             raise
-        logger.debug("wrote %s: %d row(s) added to %d, %.2f s", self.path, new.num_rows, old.num_rows if old else 0,
-                     time.monotonic() - started)
+        logger.debug(
+            "wrote %s: %d row(s) added to %d, %.2f s",
+            self.path,
+            new.num_rows,
+            old.num_rows if old else 0,
+            time.monotonic() - started,
+        )
 
 
 def _fields(schema, pa) -> dict[str, str]:
@@ -343,6 +409,7 @@ def _fields(schema, pa) -> dict[str, str]:
                 walk(f"{prefix}.{child.name}", child.type)
         else:
             found[prefix] = str(kind)
+
     for field in schema:
         walk(field.name, field.type)
     return found
@@ -369,26 +436,56 @@ def _add_entities(entities: dict, doc: dict, project: str, projection: Projectio
     parameters = core.canonical(coordinates["workload"].get("parameters", {})).decode()
     put("project", {"key": project})
     put("source", {"project": project, "uri": doc["source"]["uri"]})
-    put("workload_variant", {"project": project, "name": coordinates["workload"]["name"],
-                             "parameters": parameters})
+    put("workload_variant", {"project": project, "name": coordinates["workload"]["name"], "parameters": parameters})
     quantity = doc["measurement"]["quantity"]
-    put("quantity", {"project": project, "name": quantity["name"], "unit": quantity["unit"],
-                     "direction": quantity.get("direction"), "deterministic": quantity.get("deterministic")})
+    put(
+        "quantity",
+        {
+            "project": project,
+            "name": quantity["name"],
+            "unit": quantity["unit"],
+            "direction": quantity.get("direction"),
+            "deterministic": quantity.get("deterministic"),
+        },
+    )
     env_identity = {"schema_version": env["schema_version"], "identity": env["identity"]}
-    put("environment", {"identity_schema": env["schema_version"],
-                        "fingerprint": core.sha256_hex(core.canonical(env_identity)),
-                        "identity": core.canonical(env["identity"]).decode()})
+    put(
+        "environment",
+        {
+            "identity_schema": env["schema_version"],
+            "fingerprint": core.sha256_hex(core.canonical(env_identity)),
+            "identity": core.canonical(env["identity"]).decode(),
+        },
+    )
     put("revision", {"source": doc["source"]["uri"], "key": doc["revision"]["key"]})
     for point in identity.points(doc, project, projection):
-        put("series", {"fingerprint": point["series_fingerprint"],
-                       "identity_schema": projection.identity_schema, "project": project,
-                       "workload": coordinates["workload"]["name"], "parameters": parameters,
-                       "quantity": quantity["name"], "unit": quantity["unit"],
-                       "estimator": core.canonical(point["estimator"]).decode(),
-                       "comparison_identity": core.canonical(point["identity"]).decode()})
-        put("series_point", {"series_fingerprint": point["series_fingerprint"],
-                             "producer": doc["producer"]["name"], "ingest_key": doc["ingest_key"],
-                             "attempt_key": doc["attempt_key"], "revision": doc["revision"]["key"],
-                             "axis": list(point["axis"]), "value": point["value"], "source": point["source"],
-                             "started_at": doc["provenance"]["started_at"], "ignored": point["ignored"],
-                             "warnings": warning_codes(doc)})
+        put(
+            "series",
+            {
+                "fingerprint": point["series_fingerprint"],
+                "identity_schema": projection.identity_schema,
+                "project": project,
+                "workload": coordinates["workload"]["name"],
+                "parameters": parameters,
+                "quantity": quantity["name"],
+                "unit": quantity["unit"],
+                "estimator": core.canonical(point["estimator"]).decode(),
+                "comparison_identity": core.canonical(point["identity"]).decode(),
+            },
+        )
+        put(
+            "series_point",
+            {
+                "series_fingerprint": point["series_fingerprint"],
+                "producer": doc["producer"]["name"],
+                "ingest_key": doc["ingest_key"],
+                "attempt_key": doc["attempt_key"],
+                "revision": doc["revision"]["key"],
+                "axis": list(point["axis"]),
+                "value": point["value"],
+                "source": point["source"],
+                "started_at": doc["provenance"]["started_at"],
+                "ignored": point["ignored"],
+                "warnings": warning_codes(doc),
+            },
+        )

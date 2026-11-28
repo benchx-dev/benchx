@@ -24,7 +24,7 @@ import rfc8785
 from .. import identity, projection
 from ..results import MemoryStore
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 _HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _PATH_UNSAFE_RE = re.compile(r'[/\\\x00:*?"<>|]+')
@@ -95,24 +95,26 @@ def run_schema():
     """Arrow schema for runs/<sha>/<node>/run.parquet."""
     pa, _ = _require_pyarrow("run.parquet")
     ts = pa.timestamp("us", tz="UTC")
-    return pa.schema([
-        ("sha", pa.string()),
-        ("parents", pa.list_(pa.string())),
-        ("author_date", ts),
-        ("committer_date", ts),
-        ("subject", pa.string()),
-        ("branch", pa.string()),
-        ("node", pa.string()),
-        ("state", pa.string()),
-        ("reason", pa.string()),
-        ("started_at", ts),
-        ("finished_at", ts),
-        ("suites_ok", pa.int32()),
-        ("suites_failed", pa.int32()),
-        ("results", pa.int32()),
-        ("ingest_problems", pa.int32()),
-        ("log", pa.string()),
-    ])
+    return pa.schema(
+        [
+            ("sha", pa.string()),
+            ("parents", pa.list_(pa.string())),
+            ("author_date", ts),
+            ("committer_date", ts),
+            ("subject", pa.string()),
+            ("branch", pa.string()),
+            ("node", pa.string()),
+            ("state", pa.string()),
+            ("reason", pa.string()),
+            ("started_at", ts),
+            ("finished_at", ts),
+            ("suites_ok", pa.int32()),
+            ("suites_failed", pa.int32()),
+            ("results", pa.int32()),
+            ("ingest_problems", pa.int32()),
+            ("log", pa.string()),
+        ]
+    )
 
 
 def write_run(
@@ -437,7 +439,7 @@ def _git_commit_info(shas: list[str], repo: Path) -> dict[str, dict]:
         if len(parts) < 3:
             break
         obj_sha, obj_type, obj_len = parts[0], parts[1], int(parts[2])
-        body = data[pos:pos + obj_len]
+        body = data[pos : pos + obj_len]
         pos += obj_len + 1  # trailing newline after object body
         if obj_type != "commit":
             continue
@@ -540,24 +542,26 @@ def synthesize_runs(
             committer_date = meta.get("committer_date") or started_at
             author_date = meta.get("author_date") or committer_date
 
-        runs.append({
-            "sha": sha,
-            "parents": parents,
-            "author_date": author_date,
-            "committer_date": committer_date,
-            "subject": subject,
-            "branch": "",
-            "node": node,
-            "state": default_state,
-            "reason": None,
-            "started_at": started_at,
-            "finished_at": finished_at,
-            "suites_ok": suites_ok,
-            "suites_failed": suites_failed,
-            "results": len(pts),
-            "ingest_problems": 0,
-            "log": "",
-        })
+        runs.append(
+            {
+                "sha": sha,
+                "parents": parents,
+                "author_date": author_date,
+                "committer_date": committer_date,
+                "subject": subject,
+                "branch": "",
+                "node": node,
+                "state": default_state,
+                "reason": None,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "suites_ok": suites_ok,
+                "suites_failed": suites_failed,
+                "results": len(pts),
+                "ingest_problems": 0,
+                "log": "",
+            }
+        )
     return runs
 
 

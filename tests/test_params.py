@@ -3,7 +3,8 @@
 import re
 from pathlib import Path
 
-from benchx.adapters import asv_runtime, base, benchx_params as params
+from benchx.adapters import asv_runtime, base
+from benchx.adapters import benchx_params as params
 
 
 def test_stable_repr_drops_a_default_address_and_nothing_else():
@@ -23,7 +24,10 @@ def test_stable_repr_drops_a_default_address_and_nothing_else():
 def test_normalize_reads_a_flat_list_or_one_list_per_parameter():
     assert params.normalize([1, 2], ["n"]) == ([[1, 2]], ["n"], [["1", "2"]])
     assert params.normalize(([10, 100], ["a", "b"]), ["n", "key"]) == (
-        [[10, 100], ["a", "b"]], ["n", "key"], [["10", "100"], ["'a'", "'b'"]])
+        [[10, 100], ["a", "b"]],
+        ["n", "key"],
+        [["10", "100"], ["'a'", "'b'"]],
+    )
     assert params.normalize([], []) == ([], [], [])
 
 
@@ -57,7 +61,11 @@ def test_a_benchmark_without_parameters_is_one_case_named_for_it():
 
 def test_a_parametrized_benchmark_is_one_case_per_combination():
     assert params.expand("m.C.time_x", IDS, None) == [
-        ("m.C.time_x-0", 0), ("m.C.time_x-1", 1), ("m.C.time_x-2", 2), ("m.C.time_x-3", 3)]
+        ("m.C.time_x-0", 0),
+        ("m.C.time_x-1", 1),
+        ("m.C.time_x-2", 2),
+        ("m.C.time_x-3", 3),
+    ]
 
 
 def test_a_filter_is_searched_in_the_name_with_its_arguments():
@@ -88,19 +96,28 @@ def test_a_filter_that_gives_the_arguments_in_the_wrong_order_is_noticed():
 
 
 def test_the_workload_of_a_case_comes_from_the_table_not_from_the_id():
-    runnable = {"cases": {"m.C.time_x-2": ("m.C.time_x", 2), "m.time_y-1": ("m.time_y", None)},
-                "benchmarks": {"m.C.time_x": {"params": IDS, "param_names": ["n", "key"]}, "m.time_y": {}}}
+    runnable = {
+        "cases": {"m.C.time_x-2": ("m.C.time_x", 2), "m.time_y-1": ("m.time_y", None)},
+        "benchmarks": {"m.C.time_x": {"params": IDS, "param_names": ["n", "key"]}, "m.time_y": {}},
+    }
     assert base.parametrized_workload("m.C.time_x-2", runnable) == ("m.C.time_x", {"n": "100", "key": "'a'"})
     assert base.parametrized_workload("m.time_y-1", runnable) == ("m.time_y", {})  # a name that looks like -1
 
 
-NAMES = ["bench_function_base.Partition.time_argpartition", "bench_function_base.Partition.time_partition",
-         "bench_function_base.Sort.time_sort", "bench_linalg.Linalg.time_norm", "bench_ufunc.UFunc.time_add"]
+NAMES = [
+    "bench_function_base.Partition.time_argpartition",
+    "bench_function_base.Partition.time_partition",
+    "bench_function_base.Sort.time_sort",
+    "bench_linalg.Linalg.time_norm",
+    "bench_ufunc.UFunc.time_add",
+]
 
 
 def test_a_slip_in_a_word_of_the_filter_finds_the_names_that_have_it():
     assert base.similar("Partiton", NAMES) == NAMES[:2]  # a class, as spelled in the names
-    assert base.similar("time_argpartiton", NAMES) == NAMES[:2]  # a method: its own first (0.97), then time_partition (0.87)
+    assert (
+        base.similar("time_argpartiton", NAMES) == NAMES[:2]
+    )  # a method: its own first (0.97), then time_partition (0.87)
     assert base.similar("bench_linalgg", NAMES) == [NAMES[3]]  # a module
     assert base.similar("partition", NAMES) == NAMES[:2]  # the case of a letter is no difference
 

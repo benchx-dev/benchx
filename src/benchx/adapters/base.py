@@ -83,7 +83,6 @@ from .. import log
 from ..core import Refusal, Rejected
 from .benchx_params import combination, search_name
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -115,12 +114,15 @@ def name_only_note(found) -> str:
     is searched, with the first benchmark's parameters, in order, and one case as it is searched."""
     first = found[0]
     names = ", ".join(info["name"] for info in found[:3])
-    return "\n".join([
-        f"the filter matches the name of a parametrized benchmark ({names}) but not its arguments.",
-        "They are searched as name(p0, p1), each as its repr, in the order of param_names:",
-        f"  {first['name']}({', '.join(first['param_names'])})",
-        "for example:",
-        f"  {search_name(first['name'], first['params'], 0)}"])
+    return "\n".join(
+        [
+            f"the filter matches the name of a parametrized benchmark ({names}) but not its arguments.",
+            "They are searched as name(p0, p1), each as its repr, in the order of param_names:",
+            f"  {first['name']}({', '.join(first['param_names'])})",
+            "for example:",
+            f"  {search_name(first['name'], first['params'], 0)}",
+        ]
+    )
 
 
 def similar(case_filter, names, limit=5, cutoff=0.75) -> list[str]:
@@ -179,8 +181,9 @@ def last_json(out: subprocess.CompletedProcess, what: str):
         return json.loads(lines[-1])
     except (IndexError, ValueError):
         found = f"its last line of output is {lines[-1][:80]!r}" if lines else "it printed nothing"
-        raise Unsupported(f"cannot read the benchmark listing of {what}: {found}, not the JSON "
-                          "the listing ends with") from None
+        raise Unsupported(
+            f"cannot read the benchmark listing of {what}: {found}, not the JSON the listing ends with"
+        ) from None
 
 
 # How long a benchmark's manager gets to tidy up after Ctrl-C before its group is killed. pyperf, given Ctrl-C on its
@@ -208,8 +211,10 @@ def kill_group(proc) -> tuple[str, str]:
         for pipe in (proc.stdout, proc.stderr):  # what arrived is in the exception, as bytes
             if pipe is not None:
                 pipe.close()
-        return tuple(data.decode(errors="backslashreplace") if isinstance(data, bytes) else data or ""
-                     for data in (holding.stdout, holding.stderr))
+        return tuple(
+            data.decode(errors="backslashreplace") if isinstance(data, bytes) else data or ""
+            for data in (holding.stdout, holding.stderr)
+        )
 
 
 def stop_group(proc, grace=STOP_GRACE_S) -> None:
@@ -232,8 +237,13 @@ def note_cases(adapter_logger, cases, case_filter, limit=40) -> list:
     """What `list_cases` found, for the log: how many, under which filter, and the first `limit` names."""
     shown = cases[:limit]
     more = f", and {len(cases) - len(shown)} more" if len(cases) > len(shown) else ""
-    adapter_logger.debug("%d case(s)%s: %s%s", len(cases), f" for the filter {case_filter!r}" if case_filter else "",
-                         ", ".join(shown), more)
+    adapter_logger.debug(
+        "%d case(s)%s: %s%s",
+        len(cases),
+        f" for the filter {case_filter!r}" if case_filter else "",
+        ", ".join(shown),
+        more,
+    )
     return cases
 
 
@@ -242,10 +252,13 @@ def note_parameters(adapter_logger, runnable, limit=40) -> None:
     strings) and the number of combinations, one case each. At most `limit` benchmarks."""
     found = [(name, info) for name, info in runnable.get("benchmarks", {}).items() if info.get("param_names")]
     for name, info in found[:limit]:
-        values = ", ".join(f"{parameter}: {', '.join(shown[:10])}{', …' if len(shown) > 10 else ''}"
-                           for parameter, shown in zip(info["param_names"], info["params"]))
-        adapter_logger.debug("%s: %d combination(s) of %s", name, math.prod(len(shown) for shown in info["params"]),
-                             values)
+        values = ", ".join(
+            f"{parameter}: {', '.join(shown[:10])}{', …' if len(shown) > 10 else ''}"
+            for parameter, shown in zip(info["param_names"], info["params"])
+        )
+        adapter_logger.debug(
+            "%s: %d combination(s) of %s", name, math.prod(len(shown) for shown in info["params"]), values
+        )
     if len(found) > limit:
         adapter_logger.debug("and %d more parametrized benchmark(s)", len(found) - limit)
 
@@ -265,7 +278,9 @@ def note_case_ended(adapter_logger, status, timeout, native_path, *, parsed, ski
         adapter_logger.debug("timed out after %g s: the process group was killed", timeout)
     if not native_path.exists():
         if not skipped:
-            adapter_logger.log(logging.WARNING if status == 0 else logging.DEBUG, "native output missing: %s", native_path)
+            adapter_logger.log(
+                logging.WARNING if status == 0 else logging.DEBUG, "native output missing: %s", native_path
+            )
     elif not parsed:
         adapter_logger.warning("native output does not parse: %s", native_path)
 
@@ -279,11 +294,17 @@ def run_bounded(args, *, timeout, what, scripts=None, temporary=(), **kwargs) ->
     `what` was being done: an order whose discovery cannot finish cannot be planned.
     `timeout` None means no limit.
     """
-    logger.debug("%s: %s (in %s, limit %s)", what, log.command(args, scripts=scripts, temporary=temporary),
-                 kwargs.get("cwd") or Path.cwd(), f"{timeout:g} s" if timeout else "none")
+    logger.debug(
+        "%s: %s (in %s, limit %s)",
+        what,
+        log.command(args, scripts=scripts, temporary=temporary),
+        kwargs.get("cwd") or Path.cwd(),
+        f"{timeout:g} s" if timeout else "none",
+    )
     started = time.monotonic()
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                            start_new_session=True, **kwargs)
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, **kwargs
+    )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as error:

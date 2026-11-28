@@ -71,9 +71,7 @@ def _order_shas(runs: list[dict]) -> dict[str, int]:
 
     # Kahn's topological sort with a min-heap keyed on (committer_date, sha):
     # parents always precede their children even when timestamps tie within one second.
-    ready: list[tuple[dt.datetime, str]] = [
-        (date_by_sha[sha], sha) for sha, deg in in_degree.items() if deg == 0
-    ]
+    ready: list[tuple[dt.datetime, str]] = [(date_by_sha[sha], sha) for sha, deg in in_degree.items() if deg == 0]
     heapq.heapify(ready)
     order: dict[str, int] = {}
     while ready:
@@ -88,9 +86,7 @@ def _order_shas(runs: list[dict]) -> dict[str, int]:
 
     # Fallback if synthetic metadata ever contains a cycle.
     if len(order) < len(all_shas):
-        remaining = sorted(
-            ((date_by_sha[sha], sha) for sha in all_shas if sha not in order)
-        )
+        remaining = sorted((date_by_sha[sha], sha) for sha in all_shas if sha not in order)
         for _, sha in remaining:
             order[sha] = len(order) + 1
     return order
@@ -102,26 +98,28 @@ def build_commits(runs: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for run in runs:
         parents = list(run.get("parents") or [])
-        rows.append({
-            "sha": run["sha"],
-            "short": short_sha(run["sha"]),
-            "parents": parents,
-            "parent": parents[0] if parents else None,
-            "author_date": run.get("author_date"),
-            "committer_date": run.get("committer_date"),
-            "subject": run.get("subject") or "",
-            "branch": run.get("branch") or "",
-            "node": run["node"],
-            "state": run.get("state") or "unknown",
-            "reason": run.get("reason"),
-            "started_at": run.get("started_at"),
-            "finished_at": run.get("finished_at"),
-            "suites_ok": int(run.get("suites_ok") or 0),
-            "suites_failed": int(run.get("suites_failed") or 0),
-            "results": int(run.get("results") or 0),
-            "commit_order": order[run["sha"]],
-            "has_log": bool(run.get("log")),
-        })
+        rows.append(
+            {
+                "sha": run["sha"],
+                "short": short_sha(run["sha"]),
+                "parents": parents,
+                "parent": parents[0] if parents else None,
+                "author_date": run.get("author_date"),
+                "committer_date": run.get("committer_date"),
+                "subject": run.get("subject") or "",
+                "branch": run.get("branch") or "",
+                "node": run["node"],
+                "state": run.get("state") or "unknown",
+                "reason": run.get("reason"),
+                "started_at": run.get("started_at"),
+                "finished_at": run.get("finished_at"),
+                "suites_ok": int(run.get("suites_ok") or 0),
+                "suites_failed": int(run.get("suites_failed") or 0),
+                "results": int(run.get("results") or 0),
+                "commit_order": order[run["sha"]],
+                "has_log": bool(run.get("log")),
+            }
+        )
     rows.sort(key=lambda r: (-r["commit_order"], r["node"]))
     return rows
 
@@ -132,29 +130,31 @@ def build_points(raw_points: list[dict], commits: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for pt in raw_points:
         c = by_pair.get((pt["sha"], pt["node"]))
-        rows.append({
-            "sha": pt["sha"],
-            "commit_order": c["commit_order"] if c else 0,
-            "committer_date": c["committer_date"] if c else pt.get("started_at"),
-            "parent": (c["parent"] or "") if c else "",
-            "node": pt["node"],
-            "suite": pt["suite"],
-            "case": pt["case"],
-            "params": pt["params"],
-            "quantity": pt["quantity"],
-            "unit": pt["unit"],
-            "direction": pt["direction"],
-            "status": pt["status"],
-            "reason": pt["reason"],
-            "estimate": pt["estimate"],
-            "mean": pt["mean"],
-            "min": pt["min"],
-            "max": pt["max"],
-            "n": int(pt["n"]),
-            "started_at": pt.get("started_at"),
-            "run_key": pt["run_key"],
-            "ingest_key": pt["ingest_key"],
-        })
+        rows.append(
+            {
+                "sha": pt["sha"],
+                "commit_order": c["commit_order"] if c else 0,
+                "committer_date": c["committer_date"] if c else pt.get("started_at"),
+                "parent": (c["parent"] or "") if c else "",
+                "node": pt["node"],
+                "suite": pt["suite"],
+                "case": pt["case"],
+                "params": pt["params"],
+                "quantity": pt["quantity"],
+                "unit": pt["unit"],
+                "direction": pt["direction"],
+                "status": pt["status"],
+                "reason": pt["reason"],
+                "estimate": pt["estimate"],
+                "mean": pt["mean"],
+                "min": pt["min"],
+                "max": pt["max"],
+                "n": int(pt["n"]),
+                "started_at": pt.get("started_at"),
+                "run_key": pt["run_key"],
+                "ingest_key": pt["ingest_key"],
+            }
+        )
     rows.sort(key=lambda r: (_series_key(r), r["commit_order"]))
     return rows
 
@@ -172,26 +172,28 @@ def build_changes(points: list[dict]) -> list[dict]:
         for prev, cur in zip(series_pts, series_pts[1:]):
             prev_est = prev["estimate"]
             rel = (cur["estimate"] / prev_est - 1.0) if prev_est > 0 else None
-            rows.append({
-                "sha": cur["sha"],
-                "commit_order": cur["commit_order"],
-                "committer_date": cur["committer_date"],
-                "parent": cur["parent"],
-                "node": cur["node"],
-                "suite": cur["suite"],
-                "case": cur["case"],
-                "params": cur["params"],
-                "quantity": cur["quantity"],
-                "unit": cur["unit"],
-                "direction": cur["direction"],
-                "estimate": cur["estimate"],
-                "prev_estimate": prev_est,
-                "prev_sha": prev["sha"],
-                "prev_order": prev["commit_order"],
-                "rel_change": rel,
-                "prev_is_parent": prev["sha"] == cur["parent"],
-                "gap": cur["commit_order"] - prev["commit_order"],
-            })
+            rows.append(
+                {
+                    "sha": cur["sha"],
+                    "commit_order": cur["commit_order"],
+                    "committer_date": cur["committer_date"],
+                    "parent": cur["parent"],
+                    "node": cur["node"],
+                    "suite": cur["suite"],
+                    "case": cur["case"],
+                    "params": cur["params"],
+                    "quantity": cur["quantity"],
+                    "unit": cur["unit"],
+                    "direction": cur["direction"],
+                    "estimate": cur["estimate"],
+                    "prev_estimate": prev_est,
+                    "prev_sha": prev["sha"],
+                    "prev_order": prev["commit_order"],
+                    "rel_change": rel,
+                    "prev_is_parent": prev["sha"] == cur["parent"],
+                    "gap": cur["commit_order"] - prev["commit_order"],
+                }
+            )
     rows.sort(key=lambda r: (_series_key(r), r["commit_order"]))
     return rows
 
@@ -209,11 +211,7 @@ def build_latest(points: list[dict]) -> list[dict]:
         newest = pts_desc[0]
         hist = [p["estimate"] for p in pts_desc]
         recent = hist[:RECENT]
-        diffs = [
-            abs(recent[i] / recent[i + 1] - 1.0)
-            for i in range(len(recent) - 1)
-            if recent[i + 1] != 0
-        ]
+        diffs = [abs(recent[i] / recent[i + 1] - 1.0) for i in range(len(recent) - 1) if recent[i + 1] != 0]
         noise = float(statistics.median(diffs)) if len(diffs) >= 2 else None
         if len(recent) > 1:
             avg = sum(recent) / len(recent)
@@ -221,27 +219,29 @@ def build_latest(points: list[dict]) -> list[dict]:
         else:
             cv = None
 
-        rows.append({
-            "suite": newest["suite"],
-            "case": newest["case"],
-            "params": newest["params"],
-            "quantity": newest["quantity"],
-            "unit": newest["unit"],
-            "direction": newest["direction"],
-            "node": newest["node"],
-            "sha": newest["sha"],
-            "commit_order": newest["commit_order"],
-            "committer_date": newest["committer_date"],
-            "points": len(pts_desc),
-            "first_order": pts_desc[-1]["commit_order"],
-            "estimate": hist[0],
-            "vs_prev": (hist[0] / recent[1] - 1.0) if len(recent) > 1 and recent[1] != 0 else None,
-            "vs_10": (hist[0] / recent[10] - 1.0) if len(recent) > 10 and recent[10] != 0 else None,
-            "vs_100": (hist[0] / hist[100] - 1.0) if len(hist) > 100 and hist[100] != 0 else None,
-            "noise": noise,
-            "cv": cv,
-            "noise_rank": 0.0,
-        })
+        rows.append(
+            {
+                "suite": newest["suite"],
+                "case": newest["case"],
+                "params": newest["params"],
+                "quantity": newest["quantity"],
+                "unit": newest["unit"],
+                "direction": newest["direction"],
+                "node": newest["node"],
+                "sha": newest["sha"],
+                "commit_order": newest["commit_order"],
+                "committer_date": newest["committer_date"],
+                "points": len(pts_desc),
+                "first_order": pts_desc[-1]["commit_order"],
+                "estimate": hist[0],
+                "vs_prev": (hist[0] / recent[1] - 1.0) if len(recent) > 1 and recent[1] != 0 else None,
+                "vs_10": (hist[0] / recent[10] - 1.0) if len(recent) > 10 and recent[10] != 0 else None,
+                "vs_100": (hist[0] / hist[100] - 1.0) if len(hist) > 100 and hist[100] != 0 else None,
+                "noise": noise,
+                "cv": cv,
+                "noise_rank": 0.0,
+            }
+        )
 
     # Standard competition rank (SQL rank() OVER (PARTITION BY suite ORDER BY noise ASC NULLS LAST)).
     by_suite: dict[str, list[dict]] = defaultdict(list)
@@ -305,9 +305,7 @@ def build_marts(
     latest_commit = None
     if newest is not None:
         latest_commit = {
-            k: (v.isoformat() if isinstance(v, dt.datetime) else v)
-            for k, v in newest.items()
-            if k != "has_log"
+            k: (v.isoformat() if isinstance(v, dt.datetime) else v) for k, v in newest.items() if k != "has_log"
         }
 
     counts = {
@@ -359,35 +357,97 @@ def _mart_schemas():
     pa, _ = _require_pyarrow("writing Parquet marts")
     ts = pa.timestamp("us", tz="UTC")
     return {
-        "commits": pa.schema([
-            ("sha", pa.string()), ("short", pa.string()), ("parents", pa.list_(pa.string())), ("parent", pa.string()),
-            ("author_date", ts), ("committer_date", ts), ("subject", pa.string()), ("branch", pa.string()),
-            ("node", pa.string()), ("state", pa.string()), ("reason", pa.string()), ("started_at", ts),
-            ("finished_at", ts), ("suites_ok", pa.int32()), ("suites_failed", pa.int32()), ("results", pa.int32()),
-            ("commit_order", pa.int32()),
-        ]),
-        "points": pa.schema([
-            ("sha", pa.string()), ("commit_order", pa.int32()), ("committer_date", ts), ("parent", pa.string()),
-            ("node", pa.string()), ("suite", pa.string()), ("case", pa.string()), ("params", pa.string()),
-            ("quantity", pa.string()), ("unit", pa.string()), ("direction", pa.string()), ("status", pa.string()),
-            ("reason", pa.string()), ("estimate", pa.float64()), ("mean", pa.float64()), ("min", pa.float64()),
-            ("max", pa.float64()), ("n", pa.int32()), ("started_at", ts), ("run_key", pa.string()),
-            ("ingest_key", pa.string()),
-        ]),
-        "changes": pa.schema([
-            ("sha", pa.string()), ("commit_order", pa.int32()), ("committer_date", ts), ("parent", pa.string()),
-            ("node", pa.string()), ("suite", pa.string()), ("case", pa.string()), ("params", pa.string()),
-            ("quantity", pa.string()), ("unit", pa.string()), ("direction", pa.string()), ("estimate", pa.float64()),
-            ("prev_estimate", pa.float64()), ("prev_sha", pa.string()), ("prev_order", pa.int32()),
-            ("rel_change", pa.float64()), ("prev_is_parent", pa.bool_()), ("gap", pa.int32()),
-        ]),
-        "latest": pa.schema([
-            ("suite", pa.string()), ("case", pa.string()), ("params", pa.string()), ("quantity", pa.string()),
-            ("unit", pa.string()), ("direction", pa.string()), ("node", pa.string()), ("sha", pa.string()),
-            ("commit_order", pa.int32()), ("committer_date", ts), ("points", pa.int32()), ("first_order", pa.int32()),
-            ("estimate", pa.float64()), ("vs_prev", pa.float64()), ("vs_10", pa.float64()), ("vs_100", pa.float64()),
-            ("noise", pa.float64()), ("cv", pa.float64()), ("noise_rank", pa.float64()),
-        ]),
+        "commits": pa.schema(
+            [
+                ("sha", pa.string()),
+                ("short", pa.string()),
+                ("parents", pa.list_(pa.string())),
+                ("parent", pa.string()),
+                ("author_date", ts),
+                ("committer_date", ts),
+                ("subject", pa.string()),
+                ("branch", pa.string()),
+                ("node", pa.string()),
+                ("state", pa.string()),
+                ("reason", pa.string()),
+                ("started_at", ts),
+                ("finished_at", ts),
+                ("suites_ok", pa.int32()),
+                ("suites_failed", pa.int32()),
+                ("results", pa.int32()),
+                ("commit_order", pa.int32()),
+            ]
+        ),
+        "points": pa.schema(
+            [
+                ("sha", pa.string()),
+                ("commit_order", pa.int32()),
+                ("committer_date", ts),
+                ("parent", pa.string()),
+                ("node", pa.string()),
+                ("suite", pa.string()),
+                ("case", pa.string()),
+                ("params", pa.string()),
+                ("quantity", pa.string()),
+                ("unit", pa.string()),
+                ("direction", pa.string()),
+                ("status", pa.string()),
+                ("reason", pa.string()),
+                ("estimate", pa.float64()),
+                ("mean", pa.float64()),
+                ("min", pa.float64()),
+                ("max", pa.float64()),
+                ("n", pa.int32()),
+                ("started_at", ts),
+                ("run_key", pa.string()),
+                ("ingest_key", pa.string()),
+            ]
+        ),
+        "changes": pa.schema(
+            [
+                ("sha", pa.string()),
+                ("commit_order", pa.int32()),
+                ("committer_date", ts),
+                ("parent", pa.string()),
+                ("node", pa.string()),
+                ("suite", pa.string()),
+                ("case", pa.string()),
+                ("params", pa.string()),
+                ("quantity", pa.string()),
+                ("unit", pa.string()),
+                ("direction", pa.string()),
+                ("estimate", pa.float64()),
+                ("prev_estimate", pa.float64()),
+                ("prev_sha", pa.string()),
+                ("prev_order", pa.int32()),
+                ("rel_change", pa.float64()),
+                ("prev_is_parent", pa.bool_()),
+                ("gap", pa.int32()),
+            ]
+        ),
+        "latest": pa.schema(
+            [
+                ("suite", pa.string()),
+                ("case", pa.string()),
+                ("params", pa.string()),
+                ("quantity", pa.string()),
+                ("unit", pa.string()),
+                ("direction", pa.string()),
+                ("node", pa.string()),
+                ("sha", pa.string()),
+                ("commit_order", pa.int32()),
+                ("committer_date", ts),
+                ("points", pa.int32()),
+                ("first_order", pa.int32()),
+                ("estimate", pa.float64()),
+                ("vs_prev", pa.float64()),
+                ("vs_10", pa.float64()),
+                ("vs_100", pa.float64()),
+                ("noise", pa.float64()),
+                ("cv", pa.float64()),
+                ("noise_rank", pa.float64()),
+            ]
+        ),
     }
 
 
@@ -403,7 +463,9 @@ def write_parquet_marts(marts: dict, data_dir: Path) -> None:
         rows = marts[name]
         if name == "commits":
             rows = [{k: v for k, v in r.items() if k != "has_log"} for r in rows]
-        table = pa.Table.from_pylist(rows, schema=schemas[name]) if rows else pa.Table.from_pylist([], schema=schemas[name])
+        table = (
+            pa.Table.from_pylist(rows, schema=schemas[name]) if rows else pa.Table.from_pylist([], schema=schemas[name])
+        )
         pq.write_table(
             table,
             data_dir / f"{name}.parquet",

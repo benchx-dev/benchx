@@ -27,9 +27,15 @@ logger = logging.getLogger(__name__)
 # with $BENCHX_ENV_ALLOWLIST (comma-separated names), and an adapter adds the
 # variables its ecosystem cares about (its ENV_ALLOWLIST).
 ENV_ALLOWLIST = (
-    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "CUDA_VISIBLE_DEVICES",
-    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LD_PRELOAD",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "CUDA_VISIBLE_DEVICES",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "LD_PRELOAD",
 )
 
 
@@ -53,8 +59,13 @@ def _run(args, cwd=None, raw=False):
         logger.debug("%s failed in %s: %s", log.command(args), cwd or Path.cwd(), e)
         return None
     except subprocess.CalledProcessError as e:
-        logger.debug("%s failed in %s: exit %d: %s", log.command(args), cwd or Path.cwd(), e.returncode,
-                     " | ".join((e.stderr or "").strip().splitlines()[:3]))
+        logger.debug(
+            "%s failed in %s: exit %d: %s",
+            log.command(args),
+            cwd or Path.cwd(),
+            e.returncode,
+            " | ".join((e.stderr or "").strip().splitlines()[:3]),
+        )
         return None
     return out.stdout.rstrip("\n") if raw else out.stdout.strip()
 
@@ -74,8 +85,10 @@ def _cpu_model():
     text = _read("/proc/cpuinfo") or ""
     match = re.search(r"^model name\s*:\s*(.+)$", text, re.MULTILINE)
     if not match and log.once("no-cpu-model"):
-        logger.debug("no CPU model found (no `model name` in /proc/cpuinfo, as on ARM Linux): left out of the "
-                     "environment identity")
+        logger.debug(
+            "no CPU model found (no `model name` in /proc/cpuinfo, as on ARM Linux): left out of the "
+            "environment identity"
+        )
     return match.group(1).strip() if match else None
 
 
@@ -87,8 +100,7 @@ def environment() -> dict:
         identity["cpu"] = model
     if cores := os.cpu_count():
         identity["cores"] = cores
-    return {"schema_version": "machine/v1", "identity": identity,
-            "system": {"architecture": platform.machine()}}
+    return {"schema_version": "machine/v1", "identity": identity, "system": {"architecture": platform.machine()}}
 
 
 def system_facts(child_env: dict, env_names=None) -> dict:
@@ -161,8 +173,7 @@ def _git_ignores(top, rel) -> bool:
     """Whether the repository's own ignore rules already leave `rel` out of `git add -A`.
     Naming such a path in an exclude pathspec makes `git add` fail, and the tree id
     with it, so a results directory the project git-ignores must not be excluded twice."""
-    return subprocess.run(["git", "check-ignore", "-q", "--", rel], cwd=top,
-                          capture_output=True).returncode == 0
+    return subprocess.run(["git", "check-ignore", "-q", "--", rel], cwd=top, capture_output=True).returncode == 0
 
 
 def git_identity(path) -> dict | None:
@@ -177,13 +188,31 @@ def git_identity(path) -> dict | None:
         return None
     own = [(rel, _git_ignores(top, rel)) for rel in _ignored_in(top)]
     excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel, git_does in own if not git_does)]
-    logger.debug("identity of %s: its tracked files only; leaves out __pycache__ and benchx's own paths %s (git's own "
-                 "ignore rules already cover %s)", top, [r for r, g in own if not g] or "(none inside it)",
-                 [r for r, g in own if g] or "none")
+    logger.debug(
+        "identity of %s: its tracked files only; leaves out __pycache__ and benchx's own paths %s (git's own "
+        "ignore rules already cover %s)",
+        top,
+        [r for r, g in own if not g] or "(none inside it)",
+        [r for r, g in own if g] or "none",
+    )
     status = _run(["git", "status", "--porcelain", "--untracked-files=no", "--", ".", *excludes], cwd=top, raw=True)
     # What is not tracked, for the log: collapse untracked directories without re-diffing tracked files or submodules.
-    listed = _run(["git", "ls-files", "--others", "--exclude-standard", *_UNTRACKED_IGNORES, "--directory",
-                   "--no-empty-directory", "--", ".", *excludes], cwd=top, raw=True)
+    listed = _run(
+        [
+            "git",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            *_UNTRACKED_IGNORES,
+            "--directory",
+            "--no-empty-directory",
+            "--",
+            ".",
+            *excludes,
+        ],
+        cwd=top,
+        raw=True,
+    )
     untracked = (listed or "").splitlines()
     # A scratch copy of the repository's own index, so the repository's index is untouched (schema §4.1): what is
     # staged (`git add`, `git mv`, `git rm --cached`) stays as staged, then the tracked files as they are now.
@@ -196,11 +225,16 @@ def git_identity(path) -> dict | None:
                 Path(index).write_bytes((Path(top) / real_index).read_bytes())
             else:
                 subprocess.run(["git", "read-tree", "HEAD"], cwd=top, env=env, check=True, capture_output=True)
-            subprocess.run(["git", "add", "-u", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True)
-            tree = subprocess.run(["git", "write-tree"], cwd=top, env=env, check=True,
-                                  capture_output=True, text=True).stdout.strip()
+            subprocess.run(
+                ["git", "add", "-u", "--", ".", *excludes], cwd=top, env=env, check=True, capture_output=True
+            )
+            tree = subprocess.run(
+                ["git", "write-tree"], cwd=top, env=env, check=True, capture_output=True, text=True
+            ).stdout.strip()
         except (OSError, subprocess.CalledProcessError) as e:
-            why_tree = " | ".join((getattr(e, "stderr", None) or b"").decode(errors="replace").strip().splitlines()[:2]) or str(e)
+            why_tree = " | ".join(
+                (getattr(e, "stderr", None) or b"").decode(errors="replace").strip().splitlines()[:2]
+            ) or str(e)
             logger.debug("git add or write-tree failed in %s: %s", top, why_tree)
             tree = None
     identity = {"path": top, "revision": head}
@@ -223,10 +257,14 @@ def note_identity_fallback(identity: dict) -> None:
     if not identity["revision"].startswith("directory-") or not log.once(("fallback", identity["path"])):
         return
     has_git = (Path(identity["path"]) / ".git").exists()
-    logger.log(logging.WARNING if has_git else logging.INFO,
-               "%s is identified by a hash of its files (method directory-hash), as %s: its revision is %s and its "
-               "state is always dirty", identity["path"], "git could not read it" if has_git else "it is not under git",
-               identity["revision"][:28])
+    logger.log(
+        logging.WARNING if has_git else logging.INFO,
+        "%s is identified by a hash of its files (method directory-hash), as %s: its revision is %s and its "
+        "state is always dirty",
+        identity["path"],
+        "git could not read it" if has_git else "it is not under git",
+        identity["revision"][:28],
+    )
 
 
 def why_no_checkout(build_dir, source_dir=None) -> str:
@@ -283,10 +321,18 @@ def benchmark_identity(suite_file, subject_source) -> dict | None:
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if head:
         committed = _run(["git", "rev-parse", f"HEAD:{suite.relative_to(Path(top).resolve()).as_posix()}"], cwd=top)
-        return {"uri": source_uri(top), "type": "git", "revision": head, "tree": tree,
-                "dirty": "clean" if committed == tree else "dirty"}
-    logger.debug("the suite %s is under no version control: a file:// source, always dirty; its series does not "
-                 "follow the suite to another machine", suite)
+        return {
+            "uri": source_uri(top),
+            "type": "git",
+            "revision": head,
+            "tree": tree,
+            "dirty": "clean" if committed == tree else "dirty",
+        }
+    logger.debug(
+        "the suite %s is under no version control: a file:// source, always dirty; its series does not "
+        "follow the suite to another machine",
+        suite,
+    )
     return {"uri": suite.parent.as_uri(), "type": "directory", "tree": tree, "dirty": "dirty"}
 
 
@@ -307,9 +353,13 @@ def directory_identity(path) -> dict | None:
     started, files, size = time.monotonic(), 0, 0
     digest = hashlib.sha1()
     ignored = tuple(_IGNORED)
-    for file in sorted(p for p in root.rglob("*") if p.is_file()
-                       and not _SKIPPED_DIRS.intersection(p.relative_to(root).parts)
-                       and not any(p.resolve().is_relative_to(i) for i in ignored)):
+    for file in sorted(
+        p
+        for p in root.rglob("*")
+        if p.is_file()
+        and not _SKIPPED_DIRS.intersection(p.relative_to(root).parts)
+        and not any(p.resolve().is_relative_to(i) for i in ignored)
+    ):
         try:
             content = file.read_bytes()
         except OSError as e:
@@ -318,8 +368,14 @@ def directory_identity(path) -> dict | None:
         name = file.relative_to(root).as_posix().encode()
         digest.update(b"%d:%s:%d:" % (len(name), name, len(content)) + content)
         files, size = files + 1, size + len(content)
-    logger.debug("hashed %d file(s), %d byte(s) of %s in %.2f s; left out: %s (always), and benchx's own paths",
-                 files, size, root, time.monotonic() - started, ", ".join(sorted(_SKIPPED_DIRS)))
+    logger.debug(
+        "hashed %d file(s), %d byte(s) of %s in %.2f s; left out: %s (always), and benchx's own paths",
+        files,
+        size,
+        root,
+        time.monotonic() - started,
+        ", ".join(sorted(_SKIPPED_DIRS)),
+    )
     tree = digest.hexdigest()
     return {"path": str(root.resolve()), "revision": f"directory-{tree}", "dirty": "dirty", "tree": tree}
 
@@ -352,15 +408,22 @@ def cmake_configuration(build_dir) -> dict:
     cache = _cmake_cache(build_dir)
     config = {}
     if not cache:
-        _once_warn(("no-cache", str(build_dir)), "no CMakeCache.txt in %s: no build configuration is recorded, so "
-                   "`build-config-unverified` has nothing behind it", build_dir)
+        _once_warn(
+            ("no-cache", str(build_dir)),
+            "no CMakeCache.txt in %s: no build configuration is recorded, so "
+            "`build-config-unverified` has nothing behind it",
+            build_dir,
+        )
     for key, name in (("CMAKE_BUILD_TYPE", "build_type"), ("CMAKE_CXX_FLAGS", "cxx_flags")):
         if cache.get(key, (None, ""))[1]:
             config[name] = cache[key][1]
     compiler_file = next(Path(build_dir).glob("CMakeFiles/*/CMakeCXXCompiler.cmake"), None)
     if cache and compiler_file is None:
-        _once_warn(("no-compiler-file", str(build_dir)), "no CMakeCXXCompiler.cmake under %s/CMakeFiles: the compiler "
-                   "is not recorded", build_dir)
+        _once_warn(
+            ("no-compiler-file", str(build_dir)),
+            "no CMakeCXXCompiler.cmake under %s/CMakeFiles: the compiler is not recorded",
+            build_dir,
+        )
     text = _read(compiler_file) if compiler_file else None
     if text:
         found = dict(re.findall(r'set\(CMAKE_CXX_COMPILER_(ID|VERSION) "([^"]*)"\)', text))
@@ -369,14 +432,23 @@ def cmake_configuration(build_dir) -> dict:
     project = cache.get("CMAKE_PROJECT_NAME", (None, ""))[1]
     if project:
         prefix = re.sub(r"[^A-Z0-9]", "_", project.upper()) + "_"
-        options = {k: v for k, (kind, v) in sorted(cache.items())
-                   if k.startswith(prefix) and kind in ("BOOL", "STRING") and "/" not in v}
+        options = {
+            k: v
+            for k, (kind, v) in sorted(cache.items())
+            if k.startswith(prefix) and kind in ("BOOL", "STRING") and "/" not in v
+        }
         if options:
             config["options"] = options
     if log.once(("cmake", str(build_dir))):
-        logger.debug("CMake configuration of %s: recorded %s; from %d cache entries, %d option(s) with the prefix of "
-                     "the project %r kept", build_dir, ", ".join(sorted(config)) or "nothing", len(cache),
-                     len(config.get("options", {})), cache.get("CMAKE_PROJECT_NAME", (None, ""))[1])
+        logger.debug(
+            "CMake configuration of %s: recorded %s; from %d cache entries, %d option(s) with the prefix of "
+            "the project %r kept",
+            build_dir,
+            ", ".join(sorted(config)) or "nothing",
+            len(cache),
+            len(config.get("options", {})),
+            cache.get("CMAKE_PROJECT_NAME", (None, ""))[1],
+        )
     return config
 
 
@@ -403,11 +475,19 @@ def setup_facts(suite_root, env) -> tuple[dict | None, str | None]:
     try:
         facts = json.loads(path.read_text())
     except (OSError, ValueError) as e:
-        _once_warn(("setup-unreadable", shown), "the setup file (%s) could not be read, so it gives the results the "
-                   "warning collector-failed: %s", shown, e)
+        _once_warn(
+            ("setup-unreadable", shown),
+            "the setup file (%s) could not be read, so it gives the results the warning collector-failed: %s",
+            shown,
+            e,
+        )
         return None, "collector-failed"
     if not isinstance(facts, dict):
-        _once_warn(("setup-not-object", shown), "the setup file (%s) holds JSON that is not an object, so it gives the "
-                   "results the warning collector-failed", shown)
+        _once_warn(
+            ("setup-not-object", shown),
+            "the setup file (%s) holds JSON that is not an object, so it gives the "
+            "results the warning collector-failed",
+            shown,
+        )
         return None, "collector-failed"
     return facts, None

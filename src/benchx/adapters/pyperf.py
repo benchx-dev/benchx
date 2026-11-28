@@ -32,16 +32,27 @@ passed, and warns `env-mismatch` when the two differ.
 import hashlib
 import json
 import logging
-import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from .. import snapshot
 from . import benchx_params
-from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
-                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
+from .base import (
+    Unsupported,
+    check_filter,
+    kill_group,
+    last_json,
+    name_only_note,
+    no_cases,
+    note_case,
+    note_case_ended,
+    note_cases,
+    note_parameters,
+    parametrized_workload,
+    run_bounded,
+    stop_group,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +104,10 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     repetitions = precision["repetitions"]
     given = {}
     if isinstance(repetitions, int):
-        problems.append("pyperf repeats at two levels; give repetitions as "
-                        "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}")
+        problems.append(
+            "pyperf repeats at two levels; give repetitions as "
+            "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}"
+        )
     else:
         for level in repetitions["levels"]:
             if level["unit"] not in ("process", "value") or level["unit"] in given:
@@ -118,8 +131,10 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     flags.append("--copy-env")
 
     applied = {
-        "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": processes},
-                                                   {"unit": "value", "n": values}]},
+        "repetitions": {
+            "mode": "fixed",
+            "levels": [{"unit": "process", "n": processes}, {"unit": "value", "n": values}],
+        },
         "calibration": calibration,
         "warmup": warmup,
         "timer": "perf_counter",
@@ -147,11 +162,13 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     python = _which_python(env)
     if python is None:
         raise Unsupported("no `python` on the PATH the benchmark would run with")
-    probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
-                        env=env)
+    probe = run_bounded(
+        [python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}", env=env
+    )
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: "
-                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
+        raise Unsupported(
+            f"pyperf is not importable by {python}: {(probe.stderr.strip().splitlines() or ['no output'])[-1]}"
+        )
     return {"python": python, "module": module.resolve(), "root": root.resolve()}
 
 
@@ -197,12 +214,18 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         where = runnable["module"].relative_to(runnable["root"])
     except ValueError:  # a suite outside the target, named by its absolute path
         where = runnable["module"]
-    out = run_bounded([runnable["python"], "-c", LISTER, str(runnable["module"]), str(PARAMS)],
-                      timeout=timeout, what=f"importing {runnable['module'].name} to list its benchmarks",
-                      env=env, cwd=runnable["root"], scripts={"LISTER": LISTER})
+    out = run_bounded(
+        [runnable["python"], "-c", LISTER, str(runnable["module"]), str(PARAMS)],
+        timeout=timeout,
+        what=f"importing {runnable['module'].name} to list its benchmarks",
+        env=env,
+        cwd=runnable["root"],
+        scripts={"LISTER": LISTER},
+    )
     if out.returncode != 0:
-        raise Unsupported(f"cannot import {runnable['module'].name}: "
-                          f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
+        raise Unsupported(
+            f"cannot import {runnable['module'].name}: {(out.stderr.strip().splitlines() or ['no output'])[-1]}"
+        )
     listing = last_json(out, runnable["module"].name)
     runnable["benchmarks"], runnable["cases"] = {}, {}  # see base.parametrized_workload
     cases, unmatched, left_out, unversioned = [], [], 0, []
@@ -227,18 +250,30 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
             runnable["cases"][case] = (name, index)
             cases.append(case)
     if left_out:
-        logger.debug("with no filter only bench_* and benchmark_* functions are cases: %d other callable(s) of %s "
-                     "were left out", left_out, where)
+        logger.debug(
+            "with no filter only bench_* and benchmark_* functions are cases: %d other callable(s) of %s were left out",
+            left_out,
+            where,
+        )
     if unversioned:  # no `version` attribute, and its source cannot be read: no benchmark_version in its results
-        logger.debug("no version for %s: an edit to it starts no new series and is not caught as a failed "
-                     "`sides-agree`", ", ".join(unversioned[:40]))
+        logger.debug(
+            "no version for %s: an edit to it starts no new series and is not caught as a failed `sides-agree`",
+            ", ".join(unversioned[:40]),
+        )
     if unmatched:
-        logger.debug("a filter that matches the name but not the arguments of %d parametrized benchmark(s): %s",
-                     len(unmatched), ", ".join(info["name"] for info in unmatched[:3]))
+        logger.debug(
+            "a filter that matches the name but not the arguments of %d parametrized benchmark(s): %s",
+            len(unmatched),
+            ", ".join(info["name"] for info in unmatched[:3]),
+        )
     if not cases:
         defaults = [info["name"] for info in listing if info["name"].startswith(DEFAULT_CASE_PREFIXES)]
-        raise no_cases(where, case_filter, defaults or [info["name"] for info in listing],
-                       [name_only_note(unmatched)] if unmatched else [])
+        raise no_cases(
+            where,
+            case_filter,
+            defaults or [info["name"] for info in listing],
+            [name_only_note(unmatched)] if unmatched else [],
+        )
     note_parameters(logger, runnable)
     return note_cases(logger, cases, case_filter)
 
@@ -248,7 +283,7 @@ workload = parametrized_workload  # the function, and its parameters as value st
 
 # The combination index is bound to a name before it is tested: `0 is not None` is a SyntaxWarning, which
 # Python prints on the stderr of every worker.
-DRIVER = '''\
+DRIVER = """\
 # Generated by benchx. Runs one function under pyperf: one case, which for a function
 # that declares params is one combination of them, passed as its arguments.
 import hashlib, json, os, sys
@@ -287,7 +322,7 @@ if index is not None:
     values, _, _ = params.normalize(getattr(func, "params", []), getattr(func, "param_names", []))
     args = params.combination(values, index)
 runner.bench_func({case!r}, func, *args)
-'''
+"""
 
 
 def run_case(runnable, case, flags, env, timeout, native_path, env_names=None, harness_verbosity=0) -> dict:
@@ -303,17 +338,40 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None, h
         stale.unlink(missing_ok=True)
     shutil.copyfile(PARAMS, params)
     function, index = runnable.get("cases", {}).get(case, (case, None))  # a case run without listing is a function
-    driver.write_text(DRIVER.format(
-        digest_key=ENV_DIGEST_KEY, worker_env=str(worker_env.resolve()), env_names=list(env_names), module=str(runnable["module"]),
-        module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case, function=function, index=index,
-        params=str(params.resolve())))
+    driver.write_text(
+        DRIVER.format(
+            digest_key=ENV_DIGEST_KEY,
+            worker_env=str(worker_env.resolve()),
+            env_names=list(env_names),
+            module=str(runnable["module"]),
+            module_dir=str(runnable["module"].parent),
+            root=str(runnable["root"]),
+            case=case,
+            function=function,
+            index=index,
+            params=str(params.resolve()),
+        )
+    )
     # Absolute: the child runs in the tree, not where the output directory was named.
-    args = [runnable["python"], str(driver.resolve()), *flags, *(["--verbose"] if harness_verbosity else []),
-            "-o", str(native_path.resolve())]
+    args = [
+        runnable["python"],
+        str(driver.resolve()),
+        *flags,
+        *(["--verbose"] if harness_verbosity else []),
+        "-o",
+        str(native_path.resolve()),
+    ]
     # Its own process group, so a timeout takes the workers down with the manager.
     note_case(logger, args, cwd=runnable["root"], timeout=timeout)
-    proc = subprocess.Popen(args, env=env, cwd=runnable["root"], text=True, start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        args,
+        env=env,
+        cwd=runnable["root"],
+        text=True,
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
         status = proc.returncode
@@ -340,10 +398,17 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None, h
     artifacts = [("driver", "text/x-python", driver), ("params-helper", "text/x-python", params)]
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
-    return {"exit_status": status, "timed_out": status is None, "stdout": stdout or "", "stderr": stderr or "",
-            "native": native, "artifacts": artifacts,
-            "worker_env": captured, "passed_env_digest": env_digest(env),
-            "benchmark_version": runnable.get("benchmarks", {}).get(function, {}).get("version")}
+    return {
+        "exit_status": status,
+        "timed_out": status is None,
+        "stdout": stdout or "",
+        "stderr": stderr or "",
+        "native": native,
+        "artifacts": artifacts,
+        "worker_env": captured,
+        "passed_env_digest": env_digest(env),
+        "benchmark_version": runnable.get("benchmarks", {}).get(function, {}).get("version"),
+    }
 
 
 def _failure_message(stderr: str) -> str:
@@ -425,8 +490,11 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
     benchmark = _benchmark(native, case)
     runs = _runs(native, benchmark) if benchmark else []
     measured = [(r, md) for r, md in runs if r.get("values")]
-    calibration = [(r, md) for r, md in runs if not r.get("values") and ("calibrate_loops" in r["metadata"]
-                                                                         or "recalibrate_loops" in r["metadata"])]
+    calibration = [
+        (r, md)
+        for r, md in runs
+        if not r.get("values") and ("calibrate_loops" in r["metadata"] or "recalibrate_loops" in r["metadata"])
+    ]
     outputs = []
     for name in quantities:
         _, quantity = QUANTITIES[name]
@@ -455,8 +523,7 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
             if len(loops) == 1:
                 procedure["inner_iterations"] = loops.pop()
             else:
-                info["inner_iterations_per_run"] = [md.get("loops", 1) * md.get("inner_loops", 1)
-                                                    for _, md in measured]
+                info["inner_iterations_per_run"] = [md.get("loops", 1) * md.get("inner_loops", 1) for _, md in measured]
             procedure["warmups_performed"] = sum(len(r.get("warmups", [])) for r, _ in measured)
             if calibration:
                 procedure["calibration_runs"] = len(calibration)
@@ -472,10 +539,14 @@ def translate(case: str, quantities: list[str], run: dict, attempted: int) -> li
 # it says when the machine started, and /proc/stat's btime drifts (WSL2), so
 # as a fact it would split one environment into several (#121).
 _SYSTEM = {
-    "cpu_config": ("cpu", "config"), "cpu_affinity": ("cpu", "affinity"),
-    "aslr": ("os", "aslr"), "platform": ("os", "platform"),
-    "python_version": ("runtime", "python"), "python_implementation": ("runtime", "implementation"),
-    "python_compiler": ("runtime", "compiler"), "python_cflags": ("runtime", "cflags"),
+    "cpu_config": ("cpu", "config"),
+    "cpu_affinity": ("cpu", "affinity"),
+    "aslr": ("os", "aslr"),
+    "platform": ("os", "platform"),
+    "python_version": ("runtime", "python"),
+    "python_implementation": ("runtime", "implementation"),
+    "python_compiler": ("runtime", "compiler"),
+    "python_cflags": ("runtime", "cflags"),
     "python_gc": ("runtime", "gc"),
 }
 
@@ -533,13 +604,19 @@ def explain_warnings(run: dict, case: str, warnings: list[str]) -> dict[str, str
         details["env-mismatch"] = f"{matched} of {len(digests)} worker(s) had the environment the manager passed"
     if "env-capture-missing" in warnings:
         written = any(kind == "worker-environment" for kind, _, _ in run.get("artifacts", []))
-        details["env-capture-missing"] = ("the worker-environment file did not parse" if written
-                                          else "no worker-environment file was written")
+        details["env-capture-missing"] = (
+            "the worker-environment file did not parse" if written else "no worker-environment file was written"
+        )
     return details
 
 
 def default_precision() -> dict:
     """pyperf's own defaults, spelled as a work-order `precision`."""
-    return {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": DEFAULTS["processes"]},
-                                                       {"unit": "value", "n": DEFAULTS["values"]}]},
-            "calibration": dict(DEFAULTS["calibration"]), "warmup": dict(DEFAULTS["warmup"])}
+    return {
+        "repetitions": {
+            "mode": "fixed",
+            "levels": [{"unit": "process", "n": DEFAULTS["processes"]}, {"unit": "value", "n": DEFAULTS["values"]}],
+        },
+        "calibration": dict(DEFAULTS["calibration"]),
+        "warmup": dict(DEFAULTS["warmup"]),
+    }

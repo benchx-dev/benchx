@@ -18,31 +18,38 @@ from .core import canonical
 from .evidence import COLUMNS, CompareError, Evidence, Row, Selection, Selector, result_ref, slot_schedule
 from .key import escape, get
 from .projection import Projection, axis_order, declared_workload, estimate, said, values
-from .snapshot import DIRTY_WARNINGS
 from .results import store_project
+from .snapshot import DIRTY_WARNINGS
 
 logger = logging.getLogger(__name__)
 
 PROFILES = {
     # UC-03: two subject trees from one run.
-    "revisions": Projection(identity.POLICY_DATA, ["/provenance/subject_tree"],
-                            profile="benchx/profile/revisions/v1",
-                            invariants=["one-run", "two-sides", "one-tree-per-side", "one-benchmark-tree"]),
+    "revisions": Projection(
+        identity.POLICY_DATA,
+        ["/provenance/subject_tree"],
+        profile="benchx/profile/revisions/v1",
+        invariants=["one-run", "two-sides", "one-tree-per-side", "one-benchmark-tree"],
+    ),
     # UC-04: one revision measured two ways. A side is what its subject
     # configuration, pinned components, and system are; the caller's label,
     # put in front of the axis per comparison, only names it.
-    "environments": Projection(identity.POLICY_DATA, ["/coordinates/subject/configuration",
-                                                      "/coordinates/subject/components",
-                                                      "/coordinates/environment/system"],
-                               profile="benchx/profile/environments/v1",
-                               paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
-                               invariants=["one-run", "two-sides", "sides-differ"]),
+    "environments": Projection(
+        identity.POLICY_DATA,
+        ["/coordinates/subject/configuration", "/coordinates/subject/components", "/coordinates/environment/system"],
+        profile="benchx/profile/environments/v1",
+        paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
+        invariants=["one-run", "two-sides", "sides-differ"],
+    ),
     # UC-02: one revision, one environment, two values of one workload parameter. Everything else
     # must agree, so the axis (the parameter) is added per comparison: see `profile_projection`.
-    "variants": Projection(identity.POLICY_DATA, [],
-                           profile="benchx/profile/variants/v1",
-                           paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
-                           invariants=["one-run", "two-sides", "one-benchmark-tree"]),
+    "variants": Projection(
+        identity.POLICY_DATA,
+        [],
+        profile="benchx/profile/variants/v1",
+        paths={"/revision/key": "match", "/provenance/subject_tree": "match"},
+        invariants=["one-run", "two-sides", "one-benchmark-tree"],
+    ),
 }
 # Profiles for which a failed attempt on either side leaves its unit without a verdict (UC-02 §10):
 # a variant that times out in the slow rounds must not be judged on the fast ones. Under the other
@@ -86,8 +93,10 @@ def profile_projection(profile: str, label: str | None = None, parameter: str | 
 
 def _run_documents(documents, run_key) -> list[dict]:
     """The measurands of one run, in a fixed order, so the same results give the same document."""
-    found = sorted((d for d in documents if d["provenance"].get("run_key") == run_key and _measurand(d)),
-                   key=lambda d: (d["producer"]["name"], d["ingest_key"]))
+    found = sorted(
+        (d for d in documents if d["provenance"].get("run_key") == run_key and _measurand(d)),
+        key=lambda d: (d["producer"]["name"], d["ingest_key"]),
+    )
     if not found:
         raise CompareError(f"no results for run {run_key!r}")
     return found
@@ -97,11 +106,17 @@ def infer_parameter(documents, run_key) -> str:
     """The workload parameter a variants comparison of this run varies, when the caller names none:
     the only parameter the run's results carry. An `-e` variable counts, since the runner records
     it as a workload parameter. Read mode only; measure mode asks before running (session)."""
-    names = sorted({name for d in _run_documents(documents, run_key)
-                    for name in (d["coordinates"]["workload"].get("parameters") or {})})
+    names = sorted(
+        {
+            name
+            for d in _run_documents(documents, run_key)
+            for name in (d["coordinates"]["workload"].get("parameters") or {})
+        }
+    )
     if not names:
-        raise CompareError("nothing to vary: no workload parameter in the results "
-                           "(declare one in `params`/`param_names`)")
+        raise CompareError(
+            "nothing to vary: no workload parameter in the results (declare one in `params`/`param_names`)"
+        )
     if len(names) > 1:
         raise CompareError(f"several workload parameters ({', '.join(names)}): give --vary NAME")
     return names[0]
@@ -131,32 +146,47 @@ class RunProfile(Selector):
         documents = _run_documents(documents, run_key)
         naming = projection.axis[0]
         varying = dotted(naming)
-        params = {"run_key": run_key, "profile": profile, "baseline": baseline, **({"label": label} if profile == "environments" and label else {}),
-                  **({"parameter": parameter} if profile == "variants" else {})}
+        params = {
+            "run_key": run_key,
+            "profile": profile,
+            "baseline": baseline,
+            **({"label": label} if profile == "environments" and label else {}),
+            **({"parameter": parameter} if profile == "variants" else {}),
+        }
         selection = Selection(
             selector={"name": self.name, "version": self.version, "params": params},
-            estimator=dict(identity.MEDIAN), identity_schema=projection.identity_schema,
-            local_only=any(d["provenance"][f] != "clean" for d in documents
-                           for f in ("subject_dirty", "benchmark_dirty")),
+            estimator=dict(identity.MEDIAN),
+            identity_schema=projection.identity_schema,
+            local_only=any(
+                d["provenance"][f] != "clean" for d in documents for f in ("subject_dirty", "benchmark_dirty")
+            ),
             inputs=[result_ref(d) for d in documents],
-            sides={"varying": varying, "baseline": baseline})
+            sides={"varying": varying, "baseline": baseline},
+        )
         if profile == "variants":
             # Variants are usually measured by one command, so say how to get an alternating run.
-            selection.advice["alternating-slots"] = ("; make one bx bench call per value, each with --run-key, "
-                                                     "--round and --slot, or run bx compare TARGET --profile variants")
+            selection.advice["alternating-slots"] = (
+                "; make one bx bench call per value, each with --run-key, "
+                "--round and --slot, or run bx compare TARGET --profile variants"
+            )
         projected = [projection.apply(d, store_project(d)) for d in documents]
         if any(p.axis[0] is None for p in projected):
             if profile == "revisions":
                 # UC-03 §10: a side with no working-tree id (its dirty state is `unknown`) cannot be named.
-                detail = (f"a result has no {varying}: its tree's dirty state is unknown, so the side cannot be told "
-                          "apart from the other or checked for a change during the run. Make every file in the "
-                          "tree readable, or git-ignore it")
+                detail = (
+                    f"a result has no {varying}: its tree's dirty state is unknown, so the side cannot be told "
+                    "apart from the other or checked for a change during the run. Make every file in the "
+                    "tree readable, or git-ignore it"
+                )
             elif profile == "variants":
-                detail = (f"a result has no workload parameter {parameter}: declare it in the benchmark's "
-                          "`params`/`param_names`")
+                detail = (
+                    f"a result has no workload parameter {parameter}: declare it in the benchmark's "
+                    "`params`/`param_names`"
+                )
             else:
-                detail = (f"a result has no {varying}: give every bx bench call --label NAME=VALUE, "
-                          "and name that label here")
+                detail = (
+                    f"a result has no {varying}: give every bx bench call --label NAME=VALUE, and name that label here"
+                )
             selection.failed.append(_failed("sides", detail))
             selection.stopped = True
             return selection
@@ -165,32 +195,44 @@ class RunProfile(Selector):
         sides = [_c(p.axis) for p in projected]
         names = {side: p.axis[0] for side, p in zip(sides, projected)}
         if profile == "revisions":
-            matches = {side for side, d in zip(sides, documents)
-                       if names[side].startswith(baseline) or d["revision"]["key"].startswith(baseline)}
+            matches = {
+                side
+                for side, d in zip(sides, documents)
+                if names[side].startswith(baseline) or d["revision"]["key"].startswith(baseline)
+            }
         else:
             matches = {side for side in names if names[side] == baseline}
         if len({_c(names[side]) for side in matches}) != 1:
-            raise CompareError(f"baseline {baseline!r} matches {len(matches)} sides of "
-                               f"{sorted(map(str, names.values()))}")
+            raise CompareError(
+                f"baseline {baseline!r} matches {len(matches)} sides of {sorted(map(str, names.values()))}"
+            )
         base = sorted(matches)[0]  # several sides of one name fail two-sides below
         # The side, not how the caller abbreviated it: one comparison, one document.
         params["baseline"] = selection.sides["baseline"] = names[base]
         if len(names) != 2:
-            selection.failed.append(_failed("two-sides", f"{len(names)} sides: "
-                                                         f"{sorted(_c(n) for n in names.values())}"))
+            selection.failed.append(
+                _failed("two-sides", f"{len(names)} sides: {sorted(_c(n) for n in names.values())}")
+            )
             selection.stopped = True
             return selection
         contender = next(side for side in names if side != base)
         selection.sides["contender"] = names[contender]
         if profile == "revisions":
-            how = ("a prefix of the side's tree id" if any(str(names[s]).startswith(baseline) for s in matches)
-                   else "a prefix of a result's revision.key")
+            how = (
+                "a prefix of the side's tree id"
+                if any(str(names[s]).startswith(baseline) for s in matches)
+                else "a prefix of a result's revision.key"
+            )
         else:
             how = "equality with the recorded value"
-        logger.info("baseline %s (asked: %s, matched by %s), contender %s", names[base], baseline, how, names[contender])
+        logger.info(
+            "baseline %s (asked: %s, matched by %s), contender %s", names[base], baseline, how, names[contender]
+        )
         _log_declarations(documents, sides, base, contender)
-        selection.sides["declared"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == side))
-                                       for role, side in zip(ROLES, (base, contender))}
+        selection.sides["declared"] = {
+            role: _declared(next(d for d, x in zip(documents, sides) if x == side))
+            for role, side in zip(ROLES, (base, contender))
+        }
         selection.slots = slot_schedule((COLUMNS["slot"].read(d), s) for d, s in zip(documents, sides))
         selection.failed.extend(self._profile_invariants(projection, documents, names, sides, base, contender, varying))
         units, disagreements = self._units(projection, documents, projected, sides, base, contender)
@@ -198,11 +240,14 @@ class RunProfile(Selector):
         strict = profile in STRICT_STATUS
         selection.units.extend(
             self._unit(projection, unit, base, contender, strict)
-            for unit in sorted(units, key=lambda u: _unit_order(_workload(u["docs"], projection.axis), u["quantity"])))
+            for unit in sorted(units, key=lambda u: _unit_order(_workload(u["docs"], projection.axis), u["quantity"]))
+        )
         ignored = collections.Counter(p for u in selection.units for p in (u.unmatched_differences or ()))
         if ignored:
-            logger.debug("facts that differ between the sides but that the identity policy ignores, so no invariant "
-                         "fails: %s", ", ".join(f"{pointer} ({n} unit(s))" for pointer, n in sorted(ignored.items())))
+            logger.debug(
+                "facts that differ between the sides but that the identity policy ignores, so no invariant fails: %s",
+                ", ".join(f"{pointer} ({n} unit(s))" for pointer, n in sorted(ignored.items())),
+            )
         return selection
 
     def _profile_invariants(self, projection, documents, names, sides, base, contender, varying) -> list[dict]:
@@ -211,13 +256,19 @@ class RunProfile(Selector):
         if "sides-differ" in check:
             a, b = (json.loads(side) for side in (base, contender))
             if all(x == y for path, x, y in zip(projection.axis, a, b) if not path.startswith("/provenance/")):
-                failed.append(_failed("sides-differ",
-                                      f"the sides differ only in their label ({varying}): nothing recorded about the "
-                                      "environment differs. Describe what differs with a context collector "
-                                      "(collectors in benchx.conf.json) or a setup file for each environment"))
+                failed.append(
+                    _failed(
+                        "sides-differ",
+                        f"the sides differ only in their label ({varying}): nothing recorded about the "
+                        "environment differs. Describe what differs with a context collector "
+                        "(collectors in benchx.conf.json) or a setup file for each environment",
+                    )
+                )
         if "one-tree-per-side" in check:
-            trees = {side: {d["provenance"].get("subject_tree") for d, x in zip(documents, sides) if x == side}
-                     for side in (base, contender)}
+            trees = {
+                side: {d["provenance"].get("subject_tree") for d, x in zip(documents, sides) if x == side}
+                for side in (base, contender)
+            }
             if any(len(t) != 1 or None in t for t in trees.values()) or trees[base] == trees[contender]:
                 failed.append(_failed("one-tree-per-side", "each side must have one tree id, and the two must differ"))
         if "one-benchmark-tree" in check:
@@ -238,8 +289,16 @@ class RunProfile(Selector):
         for d, p, s in zip(documents, projected, sides):
             quantity = d["measurement"]["quantity"]["name"]
             variant = {ptr: v for ptr, v in p.identity.items() if ptr == WORKLOAD or ptr.startswith(WORKLOAD + "/")}
-            unit = variants.setdefault((_c(variant), quantity), {"quantity": quantity, "docs": {base: [], contender: []},
-                                                                 "series": {}, "attempted": {}, "identities": []})
+            unit = variants.setdefault(
+                (_c(variant), quantity),
+                {
+                    "quantity": quantity,
+                    "docs": {base: [], contender: []},
+                    "series": {},
+                    "attempted": {},
+                    "identities": [],
+                },
+            )
             unit["docs"][s].append(d)
             fingerprint = projection.series_fingerprint(p, quantity, identity.MEDIAN)
             unit["attempted"][fingerprint] = None
@@ -255,8 +314,14 @@ class RunProfile(Selector):
             if differing and all(_BENCHMARK_VERSION.fullmatch(p) for p in differing):
                 unit["changed"] = True
             elif differing:
-                failed.append(_failed("sides-agree", f"{', '.join(differing)} differ",
-                                      workload=_workload(unit["docs"], projection.axis), quantity=quantity))
+                failed.append(
+                    _failed(
+                        "sides-agree",
+                        f"{', '.join(differing)} differ",
+                        workload=_workload(unit["docs"], projection.axis),
+                        quantity=quantity,
+                    )
+                )
                 continue
             units.append(unit)
         return units, failed
@@ -273,10 +338,17 @@ class RunProfile(Selector):
         if unit.get("changed"):
             # As in `asv compare`: the results measure different code, so none is used, and nothing is said
             # about how they differ or what went wrong in them; the unit is only listed (comparator.md §3).
-            rows = tuple(row if row.exclusion else dataclasses.replace(row, exclusion="benchmark-changed")
-                         for row in rows)
-            return Evidence(unit["series"], workload, by_side[base][0]["measurement"]["quantity"], ROLES, rows,
-                            no_verdict="benchmark-changed")
+            rows = tuple(
+                row if row.exclusion else dataclasses.replace(row, exclusion="benchmark-changed") for row in rows
+            )
+            return Evidence(
+                unit["series"],
+                workload,
+                by_side[base][0]["measurement"]["quantity"],
+                ROLES,
+                rows,
+                no_verdict="benchmark-changed",
+            )
         if strict and any(d["measurement"]["status"] in FAILED_STATUSES for docs in by_side.values() for d in docs):
             no_verdict = "side-failed"  # UC-02 §10
         elif not all(succeeded.values()):
@@ -285,9 +357,15 @@ class RunProfile(Selector):
             no_verdict = None
         first = {side: by_side[side][0] for side in (base, contender)}
         return Evidence(
-            unit["series"], workload, first[base]["measurement"]["quantity"], ROLES, rows,
+            unit["series"],
+            workload,
+            first[base]["measurement"]["quantity"],
+            ROLES,
+            rows,
             unmatched_differences=tuple(_differences(projection, succeeded[base], succeeded[contender])),
-            caveats=tuple(_caveats(by_side, base, contender)), no_verdict=no_verdict)
+            caveats=tuple(_caveats(by_side, base, contender)),
+            no_verdict=no_verdict,
+        )
 
 
 RUN_PROFILE = RunProfile()
@@ -299,8 +377,7 @@ def _row(doc: dict, side: str) -> Row:
     if measurement["status"] != "success":
         status, reason = measurement["status"], measurement.get("reason")
         why = f"{status}: {reason}" if reason else status
-        return Row(result_ref(doc), side, columns, exclusion=f"{why}: {said(doc)}" if said(doc) else why,
-                   status=status)
+        return Row(result_ref(doc), side, columns, exclusion=f"{why}: {said(doc)}" if said(doc) else why, status=status)
     batch = values(doc)
     found = estimate(identity.MEDIAN, batch)
     if found is None:  # comparator.md §3: a result without a usable estimate is excluded with its reason
@@ -331,16 +408,24 @@ def _benchmark_file(documents, names, sides) -> list[dict]:
             malformed.append(str(names[side]))
     failed = []
     if malformed:
-        failed.append(_failed("one-benchmark-tree",
-                              "malformed record: the benchmark is in the subject's tree but names another "
-                              f"source (sides {sorted(set(malformed))})"))
+        failed.append(
+            _failed(
+                "one-benchmark-tree",
+                "malformed record: the benchmark is in the subject's tree but names another "
+                f"source (sides {sorted(set(malformed))})",
+            )
+        )
     if any(separate for _, _, separate in found):
         trees = {tree for _, tree, _ in found}
         if len(trees) != 1 or not all(separate for _, _, separate in found):
-            failed.append(_failed("one-benchmark-tree",
-                                  f"a benchmark recorded apart from the subject must be one file on both sides "
-                                  f"and in every round: {len(trees)} benchmark trees "
-                                  f"({', '.join(sorted(t[:12] for t in trees))})"))
+            failed.append(
+                _failed(
+                    "one-benchmark-tree",
+                    f"a benchmark recorded apart from the subject must be one file on both sides "
+                    f"and in every round: {len(trees)} benchmark trees "
+                    f"({', '.join(sorted(t[:12] for t in trees))})",
+                )
+            )
     return failed
 
 
@@ -387,13 +472,19 @@ def _log_declarations(documents, sides, base, contender) -> None:
     for role, side in zip(ROLES, (base, contender)):
         ours = [d for d, x in zip(documents, sides) if x == side]
         first = _declared(ours[0])
-        logger.debug("the %s side's declarations come from %s %s", role, ours[0]["producer"]["name"],
-                     ours[0]["ingest_key"])
-        differing = sorted({k for d in ours[1:] for k in set(first) | set(_declared(d))
-                            if first.get(k) != _declared(d).get(k)} - {"observed_env"})
+        logger.debug(
+            "the %s side's declarations come from %s %s", role, ours[0]["producer"]["name"], ours[0]["ingest_key"]
+        )
+        differing = sorted(
+            {k for d in ours[1:] for k in set(first) | set(_declared(d)) if first.get(k) != _declared(d).get(k)}
+            - {"observed_env"}
+        )
         if differing:
-            logger.warning("the %s side's results disagree about %s: the comparison shows the first result's",
-                           role, ", ".join(differing))
+            logger.warning(
+                "the %s side's results disagree about %s: the comparison shows the first result's",
+                role,
+                ", ".join(differing),
+            )
 
 
 def _declared(document) -> dict:
@@ -427,6 +518,7 @@ def _differences(projection: Projection, a_docs, b_docs) -> list[str]:
     """What the projection does not match that differs between the sides: its
     ignored facts, and the parts of its axis after the first, which name what
     the sides differ in (schema §4.3)."""
+
     def facts(docs):
         found = []
         for d in docs:
@@ -437,7 +529,7 @@ def _differences(projection: Projection, a_docs, b_docs) -> list[str]:
     def at(fact, pointer):
         for key, value in fact.items():
             if pointer == key or pointer.startswith(key + "/"):
-                return get(value, pointer[len(key):]) if pointer != key else value
+                return get(value, pointer[len(key) :]) if pointer != key else value
         return None
 
     def seen(found, pointer):

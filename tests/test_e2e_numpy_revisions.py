@@ -67,14 +67,16 @@ def missing_project_file_entries():
 pytestmark = [
     pytest.mark.skipif(
         not (NUMPY and EXAMPLE and shutil.which("spin") and shutil.which("python")),
-        reason="end-to-end test: set BENCHX_E2E_NUMPY and BENCHX_E2E_EXAMPLE, and have spin and python on the PATH"),
+        reason="end-to-end test: set BENCHX_E2E_NUMPY and BENCHX_E2E_EXAMPLE, and have spin and python on the PATH",
+    ),
     pytest.mark.skipif(
         bool(missing_project_file_entries()),
         reason="the code under test lacks project-file entries (PR #65, PR #71): "
-               + ", ".join(sorted(missing_project_file_entries()))),
+        + ", ".join(sorted(missing_project_file_entries())),
+    ),
 ]
 
-PROBE = textwrap.dedent('''
+PROBE = textwrap.dedent("""
     import os
 
     import numpy as np
@@ -85,13 +87,14 @@ PROBE = textwrap.dedent('''
 
     def bench_noop():
         return None
-''')
+""")
 
 
 def bx(args, cwd, env):
     code = f"import sys; sys.path.insert(0, {str(PACKAGE_ROOT)!r}); from benchx.cli import main; sys.exit(main())"
-    return subprocess.run([sys.executable, "-c", code, *args], cwd=cwd, env=env,
-                          capture_output=True, text=True, timeout=3600)
+    return subprocess.run(
+        [sys.executable, "-c", code, *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=3600
+    )
 
 
 @pytest.fixture
@@ -124,8 +127,17 @@ def project(tmp_path):
     return project
 
 
-def run_compare(project, worktrees, run_key, *, numpy_dir=None, targets=None, extra=(), stale_pythonpath=None,
-                suite="bench_probe.py"):
+def run_compare(
+    project,
+    worktrees,
+    run_key,
+    *,
+    numpy_dir=None,
+    targets=None,
+    extra=(),
+    stale_pythonpath=None,
+    suite="bench_probe.py",
+):
     """`bx compare` of two targets (by default `@numpy=A @numpy=B`) with the probe suite; returns the
     finished process, the file the probe writes, and the environment it ran in."""
     probe_out = project / f"{run_key}.probe"
@@ -134,8 +146,9 @@ def run_compare(project, worktrees, run_key, *, numpy_dir=None, targets=None, ex
     if stale_pythonpath:
         env["PYTHONPATH"] = str(stale_pythonpath)
     targets = targets or [f"@numpy={ref}" for ref in REVISIONS]
-    done = bx(["compare", *targets, "--suite", str(project / suite), "--run-key", run_key, "--json",
-               *extra], project, env)
+    done = bx(
+        ["compare", *targets, "--suite", str(project / suite), "--run-key", run_key, "--json", *extra], project, env
+    )
     return done, probe_out, env
 
 
@@ -204,8 +217,9 @@ def uncommitted_edit(checkout):
 def test_a_dirty_workspace_is_compared_and_labeled_local_only(project, worktrees, built):
     """UC-03 §10: the second revision's checkout, with an uncommitted edit, is the contender (`WORKSPACE`)."""
     with uncommitted_edit(built):
-        done, probe_out, env = run_compare(project, worktrees, "e2e-dirty", numpy_dir=built,
-                                           targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"])
+        done, probe_out, env = run_compare(
+            project, worktrees, "e2e-dirty", numpy_dir=built, targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"]
+        )
         assert done.returncode == 0, done.stderr[-3000:]
         doc, probed = json.loads(done.stdout), probe_out.read_text().splitlines()
         head = bx(["head", "--table"], project, env)
@@ -226,9 +240,14 @@ def test_an_uncommitted_benchmark_file_is_compared_and_labeled_local_only(projec
     assert done.returncode == 0, done.stderr[-3000:]
     doc, probed = json.loads(done.stdout), probe_out.read_text().splitlines()
     check(doc, probed, worktrees, local_only=True)
-    assert {c for u in doc["units"] for c in u["caveats"]} == {"baseline: dirty-benchmark-tree",
-                                                                "contender: dirty-benchmark-tree"}
-    assert [line.split()[0] for line in done.stderr.splitlines() if "benchmark file" in line] == ["baseline", "contender"]
+    assert {c for u in doc["units"] for c in u["caveats"]} == {
+        "baseline: dirty-benchmark-tree",
+        "contender: dirty-benchmark-tree",
+    }
+    assert [line.split()[0] for line in done.stderr.splitlines() if "benchmark file" in line] == [
+        "baseline",
+        "contender",
+    ]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
@@ -238,8 +257,14 @@ def test_a_workspace_git_cannot_hash_is_refused_before_anything_runs(project, wo
     mode = unreadable.stat().st_mode & 0o777
     unreadable.chmod(0)
     try:  # --no-build: the provider only describes, so nothing is built either
-        done, _, _ = run_compare(project, worktrees, "e2e-unknown", numpy_dir=built, extra=["--no-build"],
-                                 targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"])
+        done, _, _ = run_compare(
+            project,
+            worktrees,
+            "e2e-unknown",
+            numpy_dir=built,
+            extra=["--no-build"],
+            targets=[f"@numpy={REVISIONS[0]}", "@numpy=WORKSPACE"],
+        )
     finally:
         unreadable.chmod(mode)
     assert done.returncode == 2, done.stderr[-3000:]
@@ -260,8 +285,9 @@ def test_numpy_spin_records_a_dirty_run_and_head_marks_it(tmp_path, built):
     git(spin, "add", "-A")
     git(spin, "commit", "-qm", "scratch copy of the example")
     build = built / "build-install"
-    env = dict(os.environ, NUMPY=str(built), BUILD=str(build),
-               PYTHONPATH=str(next(build.glob("**/site-packages"))))  # the example's own "hack"
+    env = dict(
+        os.environ, NUMPY=str(built), BUILD=str(build), PYTHONPATH=str(next(build.glob("**/site-packages")))
+    )  # the example's own "hack"
 
     def run(run_key):
         done = bx(["bench", "@numpy", "--suite", str(spin / "bench_linalg.py"), "--run-key", run_key], spin, env)

@@ -6,12 +6,11 @@ Google Benchmark runs against the fake binary, so these run anywhere.
 import argparse
 import logging
 import re
-from pathlib import Path
 
 import pytest
 
 from benchx import cli, log, snapshot
-from conftest import QUIET, NOISY, cases, make_build
+from conftest import NOISY, QUIET, cases, make_build
 from test_config import write_config
 
 GBENCH = ["--adapter", "google-benchmark", "--suite", "demo-bench"]
@@ -32,6 +31,7 @@ def bench(build, *extra, key="g1"):
 
 
 # --- the default: stderr as before, and a log beside the results
+
 
 def test_the_default_leaves_stderr_as_it_was_and_writes_the_log_in_the_run_folder(build, tmp, capsys):
     assert bench(build) == cli.EXIT_OK
@@ -92,8 +92,10 @@ def test_the_adapter_flag_over_a_same_family_file_names_both_in_the_log(build, t
 
 # --- refusals: the folder exists only once the command's own checks have passed
 
-@pytest.mark.parametrize("argv", [
-    ["--processes", "2"], ["--adapter", "pyperf", "--suite", "m.py", "--repetitions", "3"], ["--tree", "t"]])
+
+@pytest.mark.parametrize(
+    "argv", [["--processes", "2"], ["--adapter", "pyperf", "--suite", "m.py", "--repetitions", "3"], ["--tree", "t"]]
+)
 def test_a_refusal_for_a_flag_leaves_no_folder(build, tmp, argv, capsys):
     assert cli.main(["bench", str(build), *GBENCH, "--run-key", "r1", *argv]) == cli.EXIT_REFUSED
     assert "bx bench: error:" in capsys.readouterr().err
@@ -101,8 +103,10 @@ def test_a_refusal_for_a_flag_leaves_no_folder(build, tmp, argv, capsys):
 
 
 def test_a_refusal_inside_the_session_leaves_the_folder_holding_only_the_log(build, tmp, capsys):
-    assert cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone", "--run-key", "r2"]) \
+    assert (
+        cli.main(["bench", str(build), "--adapter", "google-benchmark", "--suite", "gone", "--run-key", "r2"])
         == cli.EXIT_REFUSED
+    )
     assert "suite binary not found" in capsys.readouterr().err
     assert [p.name for p in (tmp / "results" / "r2").iterdir()] == ["bx.log"]
     text = log_of(tmp, "r2")
@@ -112,7 +116,10 @@ def test_a_refusal_inside_the_session_leaves_the_folder_holding_only_the_log(bui
 
 # --- the switch: flags, and an unusable file
 
-@pytest.mark.parametrize("command", [["head"], ["bench", "x", "--adapter", "pyperf", "--suite", "s"], ["validate", "f.json"]])
+
+@pytest.mark.parametrize(
+    "command", [["head"], ["bench", "x", "--adapter", "pyperf", "--suite", "s"], ["validate", "f.json"]]
+)
 def test_a_log_file_ending_in_json_is_refused_by_every_command(command, tmp, capsys):
     assert cli.main([*command, "--log-file", "out.json"]) == cli.EXIT_REFUSED
     assert f"bx {command[0]}: error: --log-file out.json: a log file must not end in .json" in capsys.readouterr().err
@@ -156,6 +163,7 @@ def test_the_three_switch_flags_exclude_each_other():
 
 
 # --- levels
+
 
 def test_a_log_level_from_the_environment_drops_what_is_below_it(build, tmp, monkeypatch):
     monkeypatch.setenv("BENCHX_LOG_LEVEL", "info")
@@ -212,6 +220,7 @@ def test_config_show_has_the_three_rows_with_their_sources(monkeypatch, capsys):
 
 
 # --- the wrapper: crashes, exits and interrupts reach the footer
+
 
 def test_a_crash_is_a_console_error_with_its_traceback_and_a_footer(tmp, monkeypatch, capsys):
     from benchx import store as store_mod
@@ -271,6 +280,7 @@ def test_main_leaves_no_handler_behind(build):
 
 # --- the file: one line format, several-line messages, and the tree it sits in
 
+
 def test_a_message_of_several_lines_is_one_prefixed_line_and_indented_continuations(tmp):
     path = tmp / "multi.log"
     log.start_console(0)
@@ -295,8 +305,7 @@ def test_the_console_handler_writes_a_multi_line_message_verbatim(capsys):
 
 def test_the_log_file_is_left_out_of_every_tree_identity(build, tmp):
     path = tmp / "wt.log"
-    args = argparse.Namespace(log=str(path), log_level=None, argv=[], verbosity=0, verbosity_source="default",
-                              out=None)
+    args = argparse.Namespace(log=str(path), log_level=None, argv=[], verbosity=0, verbosity_source="default", out=None)
     cfg = cli._load("bench")
     try:
         started = cli._start_logging(cfg, args, None, "bench")
@@ -361,7 +370,9 @@ def test_the_log_records_the_arguments_as_parsed_and_the_environment_it_consults
     assert bench(build, "-e", "A=1", "--repetitions", "3") == cli.EXIT_OK
     lines = log_of(tmp, "g1").splitlines()
     parsed = next(l for l in lines if " DEBUG arguments as parsed: " in l)
-    assert "cmd='bench'" in parsed and "repetitions=3" in parsed and "run_key='g1'" in parsed and "env=['A=1']" in parsed
+    assert (
+        "cmd='bench'" in parsed and "repetitions=3" in parsed and "run_key='g1'" in parsed and "env=['A=1']" in parsed
+    )
     consulted = next(l for l in lines if " DEBUG environment variables consulted: " in l)
     assert f"BENCHX_HOME={tmp / 'home'};" in consulted and "BENCHX_ENV_ALLOWLIST=MY_VAR;" in consulted
     assert "BENCHX_VERBOSE not set;" in consulted and "BENCHX_SETUP_FILE not set;" in consulted
@@ -377,6 +388,7 @@ def test_the_log_names_the_config_file_when_there_is_one(build, tmp):
 
 # --- review: a refused log path leaves nothing behind; zeros are arguments; stop() leaves no state
 
+
 @pytest.mark.parametrize("name, message", [("{out}", "is a directory"), ("{out}/sub/bx.log", "cannot open")])
 def test_a_refused_log_path_in_the_output_folder_does_not_create_the_folder(name, message, build, tmp, capsys):
     assert cli.main(["bench", str(build), *GBENCH, "--out", str(tmp / "o"), "--log-file", name]) == cli.EXIT_REFUSED
@@ -385,8 +397,10 @@ def test_a_refused_log_path_in_the_output_folder_does_not_create_the_folder(name
 
 
 def test_a_log_file_directly_in_the_output_folder_creates_it(build, tmp):
-    assert cli.main(["bench", str(build), *GBENCH, "--out", str(tmp / "o"), "--log-file", "{out}/mine.log",
-                     "--no-ingest"]) == cli.EXIT_OK
+    assert (
+        cli.main(["bench", str(build), *GBENCH, "--out", str(tmp / "o"), "--log-file", "{out}/mine.log", "--no-ingest"])
+        == cli.EXIT_OK
+    )
     assert " INFO start: benchx " in (tmp / "o" / "mine.log").read_text()
 
 
@@ -421,7 +435,8 @@ def test_stop_hands_the_logger_back_to_the_root_not_to_a_fixed_level():
 
 
 def test_a_refused_comparison_does_not_print_the_store_path(tmp, capsys):
-    assert cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3"]) \
-        == cli.EXIT_REFUSED  # no adapter
+    assert (
+        cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3"]) == cli.EXIT_REFUSED
+    )  # no adapter
     err = capsys.readouterr().err
     assert "--adapter is required" in err and "store.parquet" not in err and "store.jsonl" not in err

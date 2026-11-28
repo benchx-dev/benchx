@@ -8,8 +8,7 @@ subject's own checkout, so that revision is the subject revision, the axis,
 and matching it would split every series at every commit.
 """
 
-from .projection import (Projection, normalize_remote, reported_coordinates_fingerprint,  # noqa: F401
-                         estimate, values)
+from .projection import Projection, estimate, normalize_remote, reported_coordinates_fingerprint, values  # noqa: F401
 
 # Any change to POLICY_DATA other than its description needs a new
 # identity_schema; tests/test_projection.py pins the two together.
@@ -45,8 +44,9 @@ def comparison_identity(doc: dict, project: str, projection: Projection = POLICY
 
 
 def series_fingerprint(doc: dict, project: str, estimator: dict, projection: Projection = POLICY) -> str:
-    return projection.series_fingerprint(projection.apply(doc, project), doc["measurement"]["quantity"]["name"],
-                                         estimator)
+    return projection.series_fingerprint(
+        projection.apply(doc, project), doc["measurement"]["quantity"]["name"], estimator
+    )
 
 
 def points(doc: dict, project: str, projection: Projection = POLICY, estimators=ESTIMATORS) -> list[dict]:
@@ -64,7 +64,15 @@ def points(doc: dict, project: str, projection: Projection = POLICY, estimators=
         if summary["type"] == "estimate":
             found.append((summary["estimator"], summary["value"], "producer"))
     quantity = doc["measurement"]["quantity"]["name"]
-    return [{"series_fingerprint": projection.series_fingerprint(projected, quantity, estimator),
-             "estimator": estimator, "value": value, "source": source,
-             "axis": projected.axis, "identity": projected.identity, "ignored": projected.ignored}
-            for estimator, value, source in found]
+    return [
+        {
+            "series_fingerprint": projection.series_fingerprint(projected, quantity, estimator),
+            "estimator": estimator,
+            "value": value,
+            "source": source,
+            "axis": projected.axis,
+            "identity": projected.identity,
+            "ignored": projected.ignored,
+        }
+        for estimator, value, source in found
+    ]

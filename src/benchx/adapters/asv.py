@@ -54,8 +54,21 @@ from pathlib import Path
 
 from .. import log, snapshot
 from . import benchx_params, pyperf
-from .base import (Unsupported, check_filter, kill_group, last_json, name_only_note, no_cases, note_case,
-                   note_case_ended, note_cases, note_parameters, parametrized_workload, run_bounded, stop_group)
+from .base import (
+    Unsupported,
+    check_filter,
+    kill_group,
+    last_json,
+    name_only_note,
+    no_cases,
+    note_case,
+    note_case_ended,
+    note_cases,
+    note_parameters,
+    parametrized_workload,
+    run_bounded,
+    stop_group,
+)
 
 # asv's skip warnings are shown to the user, as `bx` shows its other messages: the one
 # library module that makes console messages, until `list_cases` returns them as data.
@@ -99,16 +112,23 @@ def protocol(precision: dict) -> tuple[dict, dict]:
     problems, given = [], {}
     repetitions = precision["repetitions"]
     if isinstance(repetitions, int):
-        problems.append("pyperf repeats at two levels; give repetitions as "
-                        "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}")
+        problems.append(
+            "pyperf repeats at two levels; give repetitions as "
+            "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}"
+        )
     else:
         for level in repetitions["levels"]:
             if level["unit"] not in ("process", "value") or level["unit"] in given:
                 problems.append("pyperf repetition levels are 'process' and 'value', once each")
                 break
             given[level["unit"]] = level["n"]
-    invocation = {"processes": given.get("process", DEFAULT_ROUNDS), "values": given.get("value"),
-                  "loops": None, "min_time": None, "warmups": None}
+    invocation = {
+        "processes": given.get("process", DEFAULT_ROUNDS),
+        "values": given.get("value"),
+        "loops": None,
+        "min_time": None,
+        "warmups": None,
+    }
     calibration = precision.get("calibration")
     if calibration:
         if calibration["mode"] == "fixed":
@@ -126,8 +146,12 @@ def protocol(precision: dict) -> tuple[dict, dict]:
     levels = [{"unit": "process", "n": invocation["processes"]}]
     if invocation["values"] is not None:
         levels.append({"unit": "value", "n": invocation["values"]})
-    applied = {"repetitions": {"mode": "fixed", "levels": levels}, "timer": "perf_counter", "gc": "disabled",
-               "environment": "inherit-all"}
+    applied = {
+        "repetitions": {"mode": "fixed", "levels": levels},
+        "timer": "perf_counter",
+        "gc": "disabled",
+        "environment": "inherit-all",
+    }
     if calibration:
         applied["calibration"] = calibration
     if warmup:
@@ -172,13 +196,20 @@ def locate(target_path, suite, env, timeout=None) -> dict:
     python = _which_python(env)
     if python is None:
         raise Unsupported("no `python` on the PATH the benchmark would run with")
-    probe = run_bounded([python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}",
-                        env=env)
+    probe = run_bounded(
+        [python, "-c", "import pyperf"], timeout=timeout, what=f"importing pyperf with {python}", env=env
+    )
     if probe.returncode != 0:
-        raise Unsupported(f"pyperf is not importable by {python}: "
-                          f"{(probe.stderr.strip().splitlines() or ['no output'])[-1]}")
-    return {"python": python, "benchmark_dir": benchmark_dir, "root": root,
-            "project": _project(benchmark_dir, root), "benchmarks": {}}
+        raise Unsupported(
+            f"pyperf is not importable by {python}: {(probe.stderr.strip().splitlines() or ['no output'])[-1]}"
+        )
+    return {
+        "python": python,
+        "benchmark_dir": benchmark_dir,
+        "root": root,
+        "project": _project(benchmark_dir, root),
+        "benchmarks": {},
+    }
 
 
 def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
@@ -192,12 +223,19 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         # A copy, so the script's directory on sys.path holds nothing else (adapters/ has a pyperf.py).
         runtime = shutil.copy(RUNTIME, scratch)
         shutil.copy(PARAMS, scratch)
-        out = run_bounded([runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
-                          timeout=timeout, what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
-                          env=env, cwd=scratch, temporary=[scratch])
+        out = run_bounded(
+            [runnable["python"], runtime, "list", str(runnable["benchmark_dir"])],
+            timeout=timeout,
+            what=f"listing the asv benchmarks in {runnable['benchmark_dir']}",
+            env=env,
+            cwd=scratch,
+            temporary=[scratch],
+        )
     if out.returncode != 0:
-        raise Unsupported(f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
-                          f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}")
+        raise Unsupported(
+            f"cannot discover asv benchmarks in {runnable['benchmark_dir']}: "
+            f"{(out.stderr.strip().splitlines() or ['no output'])[-1]}"
+        )
     listing = last_json(out, str(runnable["benchmark_dir"]))
     for failure in listing["failed"]:
         say.warning(f"asv: skipped module {failure['module']}: {failure['error']}")
@@ -205,13 +243,19 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         log.harness_output(logger, f"module {failure['module']}", "traceback", failure.get("traceback"), failed=False)
         logger.debug("module %s failed to import, so its submodules were not scanned", failure["module"])
     if listing.get("left_out"):
-        logger.debug("%d benchmark(s) the suite switched off with skip_benchmark: %s%s", len(listing["left_out"]),
-                     ", ".join(listing["left_out"][:40]), ", …" if len(listing["left_out"]) > 40 else "")
+        logger.debug(
+            "%d benchmark(s) the suite switched off with skip_benchmark: %s%s",
+            len(listing["left_out"]),
+            ", ".join(listing["left_out"][:40]),
+            ", …" if len(listing["left_out"]) > 40 else "",
+        )
     cases, other, unmatched = [], {}, []
     runnable["cases"] = {}  # case id -> (benchmark name, combination index or None)
     for info in listing["benchmarks"]:
-        selected = [(case, (info["name"], index))
-                    for case, index in benchx_params.expand(info["name"], info["params"], case_filter)]
+        selected = [
+            (case, (info["name"], index))
+            for case, index in benchx_params.expand(info["name"], info["params"], case_filter)
+        ]
         if not selected:
             if benchx_params.matches_name_only(info["name"], info["params"], case_filter):
                 unmatched.append(info)
@@ -221,14 +265,18 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
             continue
         scope = info["declared"].get("setup_scope", "call")
         if scope not in SETUP_SCOPES:
-            say.warning(f"asv: skipped {info['name']}: setup_scope must be one of "
-                        f"{', '.join(map(repr, SETUP_SCOPES))}, not {scope!r}")
+            say.warning(
+                f"asv: skipped {info['name']}: setup_scope must be one of "
+                f"{', '.join(map(repr, SETUP_SCOPES))}, not {scope!r}"
+            )
             continue
         runnable["benchmarks"][info["name"]] = info
         for case, target in selected:
             if runnable["cases"].setdefault(case, target) != target:
-                raise Unsupported(f"asv benchmarks {_describe(runnable['cases'][case])} and {_describe(target)} "
-                                  f"share the case id {case!r}; give one of them another benchmark_name")
+                raise Unsupported(
+                    f"asv benchmarks {_describe(runnable['cases'][case])} and {_describe(target)} "
+                    f"share the case id {case!r}; give one of them another benchmark_name"
+                )
             cases.append(case)
     not_run = ", ".join(f"{n} {t}" for t, n in sorted(other.items()))
     if not cases:
@@ -236,12 +284,17 @@ def list_cases(runnable, case_filter, env, timeout=None) -> list[str]:
         if unmatched:
             notes.append(name_only_note(unmatched))
         if other:
-            notes.append(f"only benchmarks that are not run were selected (only time benchmarks map to wall-time): "
-                         f"{not_run}")
+            notes.append(
+                f"only benchmarks that are not run were selected (only time benchmarks map to wall-time): {not_run}"
+            )
         if listing["failed"]:
             notes.append(f"{len(listing['failed'])} module(s) failed to import")
-        raise no_cases(runnable["benchmark_dir"], case_filter,
-                       {i["name"] for i in listing["benchmarks"] if i["type"] == "time"}, notes)
+        raise no_cases(
+            runnable["benchmark_dir"],
+            case_filter,
+            {i["name"] for i in listing["benchmarks"] if i["type"] == "time"},
+            notes,
+        )
     if other:
         say.warning(f"asv: not run (only time benchmarks map to wall-time): {not_run}")
     note_parameters(logger, runnable)
@@ -276,14 +329,25 @@ def _plan(info: dict, invocation: dict) -> dict:
         loops, loops_from = 1, "setup_scope"  # every timed call sees fresh state
     elif loops is None:
         loops_from = None
-    min_time = invocation["min_time"] if invocation["min_time"] is not None else declared.get(
-        "sample_time", DEFAULT_SAMPLE_TIME)
+    min_time = (
+        invocation["min_time"]
+        if invocation["min_time"] is not None
+        else declared.get("sample_time", DEFAULT_SAMPLE_TIME)
+    )
     warmups = invocation["warmups"]
     if warmups is None:
         warmups = 0 if declared.get("warmup_time") == 0 else 1
-    return {"processes": invocation["processes"], "values": values, "values_from": source, "loops": loops,
-            "min_time": min_time, "warmups": warmups, "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT)),
-            "loops_from": loops_from, "setup_scope": scope}
+    return {
+        "processes": invocation["processes"],
+        "values": values,
+        "values_from": source,
+        "loops": loops,
+        "min_time": min_time,
+        "warmups": warmups,
+        "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT)),
+        "loops_from": loops_from,
+        "setup_scope": scope,
+    }
 
 
 def _note_plan(info: dict, invocation: dict, plan: dict) -> None:
@@ -293,33 +357,67 @@ def _note_plan(info: dict, invocation: dict, plan: dict) -> None:
     if not logger.isEnabledFor(logging.DEBUG):
         return
     declared = info["declared"]
-    sources = {"min_time": "order" if invocation["min_time"] is not None
-               else "sample_time" if "sample_time" in declared else "default",
-               "warmups": "order" if invocation["warmups"] is not None
-               else "warmup_time" if "warmup_time" in declared else "default",
-               "timeout": "timeout" if "timeout" in declared else "default"}
-    logger.debug("plan: values %s (%s), loops %s (%s), min_time %s (%s), warmups %s (%s), timeout %s (%s)",
-                 plan["values"], plan["values_from"], plan["loops"], plan["loops_from"] or "adaptive calibration",
-                 plan["min_time"], sources["min_time"], plan["warmups"], sources["warmups"], plan["timeout"],
-                 sources["timeout"])
+    sources = {
+        "min_time": "order"
+        if invocation["min_time"] is not None
+        else "sample_time"
+        if "sample_time" in declared
+        else "default",
+        "warmups": "order"
+        if invocation["warmups"] is not None
+        else "warmup_time"
+        if "warmup_time" in declared
+        else "default",
+        "timeout": "timeout" if "timeout" in declared else "default",
+    }
+    logger.debug(
+        "plan: values %s (%s), loops %s (%s), min_time %s (%s), warmups %s (%s), timeout %s (%s)",
+        plan["values"],
+        plan["values_from"],
+        plan["loops"],
+        plan["loops_from"] or "adaptive calibration",
+        plan["min_time"],
+        sources["min_time"],
+        plan["warmups"],
+        sources["warmups"],
+        plan["timeout"],
+        sources["timeout"],
+    )
     if invocation["min_time"] is not None and plan["loops"] is not None and plan["loops_from"] != "order":
-        logger.debug("the order's min_time %g s is lost: the loops are fixed at %s by %s", invocation["min_time"],
-                     plan["loops"], "a declared number" if plan["loops_from"] == "number"
-                     else "the default setup_scope of call (any benchmark with a setup hook has it)")
+        logger.debug(
+            "the order's min_time %g s is lost: the loops are fixed at %s by %s",
+            invocation["min_time"],
+            plan["loops"],
+            "a declared number"
+            if plan["loops_from"] == "number"
+            else "the default setup_scope of call (any benchmark with a setup hook has it)",
+        )
     if invocation["values"] is None and plan["values_from"] == "default" and declared.get("repeat") is not None:
-        logger.debug("repeat %r is not a form asv_runner reads here, so the default %s values are used",
-                     declared["repeat"], plan["values"])
+        logger.debug(
+            "repeat %r is not a form asv_runner reads here, so the default %s values are used",
+            declared["repeat"],
+            plan["values"],
+        )
 
 
 def _flags(plan: dict) -> list[str]:
-    flags = ["--processes", str(plan["processes"]), "--values", str(plan["values"]),
-             "--warmups", str(plan["warmups"]), "--timeout", str(math.ceil(plan["timeout"])), "--copy-env"]
+    flags = [
+        "--processes",
+        str(plan["processes"]),
+        "--values",
+        str(plan["values"]),
+        "--warmups",
+        str(plan["warmups"]),
+        "--timeout",
+        str(math.ceil(plan["timeout"])),
+        "--copy-env",
+    ]
     if plan["loops"] is not None:
         return flags + ["--loops", str(plan["loops"])]
     return flags + ["--min-time", str(plan["min_time"])]
 
 
-DRIVER = '''\
+DRIVER = """\
 # Generated by benchx. Runs one asv benchmark case under pyperf.
 import hashlib, json, os, sys
 from pathlib import Path
@@ -379,7 +477,7 @@ try:
     runner.bench_time_func({case!r}, bench.time_func())
 finally:
     bench.teardown()
-'''
+"""
 
 
 def _read_json(path: Path):
@@ -411,17 +509,42 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
         stale.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         skipped, facts = Path(scratch, "skipped.json"), Path(scratch, "facts.json")
-        driver.write_text(DRIVER.format(
-            runtime=str(runtime.resolve()), digest_key=pyperf.ENV_DIGEST_KEY, worker_env=str(worker_env.resolve()),
-            env_names=list(env_names), benchmark_dir=str(runnable["benchmark_dir"]), module=info["module"],
-            attr=info["attr"], index=index, case=case, has_cache=bool(info["setup_cache_key"]),
-            skipped=str(skipped), facts=str(facts), project=runnable["project"] or ""))
-        args = [runnable["python"], str(driver.resolve()), *_flags(plan), *(["--verbose"] if harness_verbosity else []),
-                "-o", str(native_path.resolve())]  # the workers are pyperf's: its --verbose
+        driver.write_text(
+            DRIVER.format(
+                runtime=str(runtime.resolve()),
+                digest_key=pyperf.ENV_DIGEST_KEY,
+                worker_env=str(worker_env.resolve()),
+                env_names=list(env_names),
+                benchmark_dir=str(runnable["benchmark_dir"]),
+                module=info["module"],
+                attr=info["attr"],
+                index=index,
+                case=case,
+                has_cache=bool(info["setup_cache_key"]),
+                skipped=str(skipped),
+                facts=str(facts),
+                project=runnable["project"] or "",
+            )
+        )
+        args = [
+            runnable["python"],
+            str(driver.resolve()),
+            *_flags(plan),
+            *(["--verbose"] if harness_verbosity else []),
+            "-o",
+            str(native_path.resolve()),
+        ]  # the workers are pyperf's: its --verbose
         # Its own process group, so a timeout takes the workers down with the manager.
         note_case(logger, args, cwd=scratch, timeout=timeout)
-        proc = subprocess.Popen(args, env=env, cwd=scratch, text=True, start_new_session=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(
+            args,
+            env=env,
+            cwd=scratch,
+            text=True,
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
             status = proc.returncode
@@ -439,16 +562,26 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
         native_path.write_text(json.dumps(native, indent=1) + "\n")
     asv = {"benchmark": info, "case": case, "plan": plan, "skipped": skip, **observed}
     sidecar.write_text(json.dumps(asv, indent=1) + "\n")
-    artifacts = [("driver", "text/x-python", driver), ("asv-runtime", "text/x-python", runtime),
-                 ("params-helper", "text/x-python", params), ("asv-case", "application/json", sidecar)]
+    artifacts = [
+        ("driver", "text/x-python", driver),
+        ("asv-runtime", "text/x-python", runtime),
+        ("params-helper", "text/x-python", params),
+        ("asv-case", "application/json", sidecar),
+    ]
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
     # A worker over the benchmark's own timeout: pyperf's manager gives up with 124.
     worker_timeout = status == PYPERF_TIMEOUT_EXIT and "timed out after" in (stdout or "").lower()
-    return {"exit_status": status, "timed_out": status is None or worker_timeout,
-            "stdout": stdout or "", "stderr": stderr or "",
-            "native": {**(native or {"benchmarks": []}), "benchx_asv": asv}, "artifacts": artifacts,
-            "worker_env": _read_json(worker_env), "passed_env_digest": pyperf.env_digest(env)}
+    return {
+        "exit_status": status,
+        "timed_out": status is None or worker_timeout,
+        "stdout": stdout or "",
+        "stderr": stderr or "",
+        "native": {**(native or {"benchmarks": []}), "benchx_asv": asv},
+        "artifacts": artifacts,
+        "worker_env": _read_json(worker_env),
+        "passed_env_digest": pyperf.env_digest(env),
+    }
 
 
 explain_warnings = pyperf.explain_warnings  # the workers are pyperf's
@@ -466,9 +599,16 @@ def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict
         asv["setup_scope"] = plan["setup_scope"]
     if version:
         asv["benchmark_version"] = version
-    return {**applied, "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": plan["processes"]},
-                                                                   {"unit": "value", "n": plan["values"]}]},
-            "calibration": calibration, "warmup": warmup, "asv": asv}
+    return {
+        **applied,
+        "repetitions": {
+            "mode": "fixed",
+            "levels": [{"unit": "process", "n": plan["processes"]}, {"unit": "value", "n": plan["values"]}],
+        },
+        "calibration": calibration,
+        "warmup": warmup,
+        "asv": asv,
+    }
 
 
 def case_protocol(applied: dict, run: dict, case: str) -> dict:
@@ -493,10 +633,15 @@ def translate(case: str, quantities: list[str], run: dict, attempted_: int) -> l
     plan = asv["plan"]
     planned = plan["processes"] * plan["values"]
     if asv.get("skipped") is not None:
-        return [{"quantity": QUANTITIES[name][1],
-                 "measurement": {"status": "skipped", "reason": "harness.skipped"},
-                 "procedure": {"attempted_repetitions": planned, "completed_repetitions": 0},
-                 "info": {"message": asv["skipped"]["reason"]}} for name in quantities]
+        return [
+            {
+                "quantity": QUANTITIES[name][1],
+                "measurement": {"status": "skipped", "reason": "harness.skipped"},
+                "procedure": {"attempted_repetitions": planned, "completed_repetitions": 0},
+                "info": {"message": asv["skipped"]["reason"]},
+            }
+            for name in quantities
+        ]
     return pyperf.translate(case, quantities, run, planned)
 
 

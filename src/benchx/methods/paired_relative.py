@@ -24,8 +24,10 @@ def _continued_fraction(a: float, b: float, x: float) -> float:
     d = 1 / (d if abs(d) > tiny else tiny)
     h = d
     for m in range(1, 1000):
-        for numerator in (m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
-                          -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))):
+        for numerator in (
+            m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
+            -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1)),
+        ):
             d = 1 + numerator * d
             d = 1 / (d if abs(d) > tiny else tiny)
             c = 1 + numerator / c
@@ -94,8 +96,11 @@ class PairedRelative(Method):
             "noise_kind": {"const": "standard-error"},
             "noise_source": {"const": "paired-rounds"},
             "degrees_of_freedom": {"type": "integer", "minimum": 1},
-            "multiplier": {"description": "The t quantile at degrees_of_freedom with the two-sided tail of "
-                                          "a normal at k sigma", "type": "number", "minimum": 0},
+            "multiplier": {
+                "description": "The t quantile at degrees_of_freedom with the two-sided tail of a normal at k sigma",
+                "type": "number",
+                "minimum": 0,
+            },
             "threshold": {"description": "multiplier times the noise", "type": "number", "minimum": 0},
         },
     }
@@ -109,14 +114,24 @@ class PairedRelative(Method):
                 excluded.extend((row, "unpaired") for row in (*baseline, *contender))
         used = tuple(row for pair in pairs for row in pair)
         label = f"{workload_label(evidence.workload)} [{evidence.quantity['name']}]"
-        one_sided = [(r, "baseline" if baseline else "contender") for r, (baseline, contender)
-                     in zip(layout.coords.get("round", ()), layout.cells) if bool(baseline) != bool(contender)]
+        one_sided = [
+            (r, "baseline" if baseline else "contender")
+            for r, (baseline, contender) in zip(layout.coords.get("round", ()), layout.cells)
+            if bool(baseline) != bool(contender)
+        ]
         if one_sided and evidence.no_verdict not in NOT_COMPARABLE:
-            logger.debug("%s: %d round(s) paired, %d dropped for a success on one side only (%s)", label,
-                         len(layout.cells) - len(one_sided), len(one_sided),
-                         "; ".join(f"round {r} has {side} only" for r, side in one_sided))
-        details = {"rounds": sum(1 for baseline, contender in layout.cells if baseline and contender),
-                   "noise_kind": "standard-error", "noise_source": "paired-rounds"}
+            logger.debug(
+                "%s: %d round(s) paired, %d dropped for a success on one side only (%s)",
+                label,
+                len(layout.cells) - len(one_sided),
+                len(one_sided),
+                "; ".join(f"round {r} has {side} only" for r, side in one_sided),
+            )
+        details = {
+            "rounds": sum(1 for baseline, contender in layout.cells if baseline and contender),
+            "noise_kind": "standard-error",
+            "noise_source": "paired-rounds",
+        }
 
         def indeterminate(reason):
             return Assessment("indeterminate", reason=reason, used=used, excluded=tuple(excluded), details=details)
@@ -141,15 +156,27 @@ class PairedRelative(Method):
         times = multiplier(config["k"], df)
         threshold = times * noise
         details.update(noise=noise, degrees_of_freedom=df, multiplier=times, threshold=threshold)
-        verdict = ("no-change-detected" if abs(effect) <= threshold
-                   else change_label(effect, evidence.quantity.get("direction")))
-        return Assessment(verdict, effect={"measure": "relative", "value": effect}, used=used,
-                          excluded=tuple(excluded), details=details)
+        verdict = (
+            "no-change-detected"
+            if abs(effect) <= threshold
+            else change_label(effect, evidence.quantity.get("direction"))
+        )
+        return Assessment(
+            verdict,
+            effect={"measure": "relative", "value": effect},
+            used=used,
+            excluded=tuple(excluded),
+            details=details,
+        )
 
     def configured(self, config):
         if config["min_rounds"] < MIN_PAIRS:
-            logger.warning("min_rounds %d is below %d, the fewest rounds a verdict needs: %d is used",
-                           config["min_rounds"], MIN_PAIRS, MIN_PAIRS)
+            logger.warning(
+                "min_rounds %d is below %d, the fewest rounds a verdict needs: %d is used",
+                config["min_rounds"],
+                MIN_PAIRS,
+                MIN_PAIRS,
+            )
 
     def log_facts(self, unit, config):
         details = unit["details"]
@@ -157,8 +184,11 @@ class PairedRelative(Method):
         if "reference_estimate" in details:
             facts.append(f"reference {details['reference_estimate']:.6g}")
         if "effect" in unit:
-            facts += [f"effect {unit['effect']['value']:+.2%}", f"noise {details['noise']:.2%}",
-                      f"threshold {details['threshold']:.2%} ({details['multiplier']:.3g} x noise)"]
+            facts += [
+                f"effect {unit['effect']['value']:+.2%}",
+                f"noise {details['noise']:.2%}",
+                f"threshold {details['threshold']:.2%} ({details['multiplier']:.3g} x noise)",
+            ]
         if unit.get("reason") == "insufficient-rounds":
             facts.append(f"{max(config['min_rounds'], MIN_PAIRS)} paired rounds required")
         return facts

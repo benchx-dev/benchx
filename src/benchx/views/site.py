@@ -14,7 +14,8 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from . import inputs, marts as marts_mod, payloads
+from . import inputs, payloads
+from . import marts as marts_mod
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_FILES = (
@@ -161,9 +162,7 @@ def build_site(
         runs, raw_points, ingest_problems = inputs.read_runs_dir(runs_dir)
     elif results_paths is not None:
         source = "results"
-        runs, raw_points, ingest_problems, outcome = inputs.read_results(
-            list(results_paths), repo=repo
-        )
+        runs, raw_points, ingest_problems, outcome = inputs.read_results(list(results_paths), repo=repo)
     else:
         source = "store"
         runs, raw_points, ingest_problems = inputs.read_store(store_path, repo=repo)

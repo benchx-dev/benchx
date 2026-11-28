@@ -61,3 +61,19 @@ branch = true
 [tool.coverage.report]
 skip_covered = true
 sort = "cover"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length is enforced by `ruff format`
+    "E741",  # short variable names like `l` in comprehensions
+    "B905",  # zip() without explicit strict=
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["E402"]  # imports after pytest.importorskip()

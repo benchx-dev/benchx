@@ -45,9 +45,7 @@ def test_byte_order_mark_is_rejected(write):
 @pytest.mark.parametrize("text", ["[]", "1", '"x"', "null"])
 def test_top_level_must_be_object(write, text):
     issue = error(write(text))
-    assert (
-        type(issue) is ReadError and issue.message == "top level must be a JSON object"
-    )
+    assert type(issue) is ReadError and issue.message == "top level must be a JSON object"
 
 
 def test_unpaired_surrogate(write):
