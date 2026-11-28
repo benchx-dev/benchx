@@ -13,11 +13,11 @@ Conventions:
   page keeps it, as a prompt).
 - python fences: executed in one namespace shared by the whole file.
 - A language followed by `noexec` (```sh noexec) is not executed.
+- The page has a fence without its `noexec` and `exit=1`: the site's fence parser takes neither.
 - A sh/bash fence that is meant to fail says so: ```sh exit=1. The block must end with exactly
   that status (a 0 fails the run as well as any other status), its output goes into the page as
   for any block, and the run goes on. The fence is one script run with -e, so the status is that
-  of the first command that fails and the commands after it do not run: put it last. The page
-  has the fence without its `exit=1`: the site's fence parser does not take a key=value there.
+  of the first command that fails and the commands after it do not run: put it last.
   Python fences have no such marker: one that raises fails the run.
 - A sh/bash fence that ends with status 0 must also leave no failed result in the example's
   store: `bx bench` exits 0 when a case fails, but it stores the result with its status. The
@@ -120,14 +120,15 @@ def expected_status(attributes: list[str], language: str) -> int:
 
 
 def page_fence(fence_lines: list[str], token) -> list[str]:
-    """The lines of a fence as they go into the page: without its `exit=N`.
+    """The lines of a fence as they go into the page: without its `exit=N` and its `noexec`.
 
-    The site's fence parser (pymdownx.superfences) does not accept an unquoted key=value after the
-    language: it shows the fence as text, with the markup that follows it. The README keeps
-    `exit=N`, since that is what the runner reads; the page has no use for it.
+    The site's fence parser (pymdownx.superfences) does not accept a bare word or an unquoted key=value
+    after the language: it shows the fence as text, and pairs the closing fence with the next opening one,
+    so the markup that follows goes with it. The README keeps them, since that is what the runner reads;
+    the page has no use for them.
     """
     parts = token.info.strip().split()
-    kept = [part for part in parts if not part.startswith("exit=")]
+    kept = [part for part in parts if not part.startswith("exit=") and part != "noexec"]
 
     if len(kept) == len(parts):
         return fence_lines

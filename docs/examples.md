@@ -37,6 +37,8 @@ in this repository.
 
 - [`pyperf-suite`](examples/pyperf-suite.md) -- timing a suite of Python functions with
   `bx bench`, the local store, and `bx series` / `bx history`.
+- [`matmul-params`](examples/matmul-params.md) — one benchmark function with several parameter
+  combinations (sizes, numpy and torch), and a numpy-vs-torch comparison with `bx compare`.
 
 ## Additional, cookbook-style examples
 

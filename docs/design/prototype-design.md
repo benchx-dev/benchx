@@ -25,7 +25,7 @@ bx compare --run KEY --profile revisions|environments|variants --baseline VALUE
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
-           [--adapter pyperf|google-benchmark]                  # default: adapter.name
+           [--adapter pyperf|google-benchmark]                  # default: adapter.name, else pyperf
            --suite NAME [--filter REGEX] [--quantity NAMES]     # default: adapter.suite, adapter.quantities
            --rounds R [-e NAME=VALUE ...]
            [--repetitions N]                                    # google-benchmark

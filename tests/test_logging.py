@@ -421,7 +421,7 @@ def test_stop_hands_the_logger_back_to_the_root_not_to_a_fixed_level():
 
 
 def test_a_refused_comparison_does_not_print_the_store_path(tmp, capsys):
-    assert cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3"]) \
-        == cli.EXIT_REFUSED  # no adapter
+    assert cli.main(["compare", "A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "3",
+                     "--repetitions", "3"]) == cli.EXIT_REFUSED  # pyperf, the default adapter, takes no --repetitions
     err = capsys.readouterr().err
-    assert "--adapter is required" in err and "store.parquet" not in err and "store.jsonl" not in err
+    assert "pyperf takes no --repetitions" in err and "store.parquet" not in err and "store.jsonl" not in err
