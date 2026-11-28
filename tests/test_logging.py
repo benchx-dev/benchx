@@ -306,7 +306,7 @@ def test_the_console_handler_writes_a_multi_line_message_verbatim(capsys):
 def test_the_log_file_is_left_out_of_every_tree_identity(build, tmp):
     path = tmp / "wt.log"
     args = argparse.Namespace(log=str(path), log_level=None, argv=[], verbosity=0, verbosity_source="default", out=None)
-    cfg = cli._load("bench")
+    cfg = cli._load()
     try:
         started = cli._start_logging(cfg, args, None, "bench")
         assert started.log_file == path.resolve() and path.resolve() in snapshot._IGNORED

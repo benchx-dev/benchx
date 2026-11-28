@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import adapters, core
 from .core import loader
+from .errors import BenchxError
 
 CONFIG_FILE = "benchx.conf.json"
 # Files of the format this one replaced. They are not read; finding one is an error, so
@@ -59,7 +60,7 @@ def _default_store_in(directory: Path) -> Path:
     return parquet_path if _has_pyarrow() else jsonl_path
 
 
-class ConfigError(Exception):
+class ConfigError(BenchxError):
     """The configuration is unusable, or a required value is missing; the message says why."""
 
 

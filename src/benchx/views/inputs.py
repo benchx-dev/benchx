@@ -22,6 +22,7 @@ from pathlib import Path
 import rfc8785
 
 from .. import identity, projection
+from ..errors import BenchxError
 from ..results import MemoryStore
 
 UTC = dt.UTC
@@ -31,7 +32,7 @@ _PATH_UNSAFE_RE = re.compile(r'[/\\\x00:*?"<>|]+')
 _DOTS_RUN_RE = re.compile(r"\.\.+")
 
 
-class ViewError(Exception):
+class ViewError(BenchxError):
     """The view inputs could not be read or built."""
 
 

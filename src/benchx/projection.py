@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from .core import sha256_hex
 from .core.hashing import canonical
+from .errors import BenchxError
 from .key import Key, axis_order, canonical_uri, escape, get, normalize_remote  # noqa: F401
 
 # The reported coordinates (schema §4.3), which every role applies to, and the
@@ -26,7 +27,7 @@ LABELS = "/provenance/labels/"
 CODE = ("/revision/key", "/provenance/subject_tree")
 
 
-class ProjectionError(Exception):
+class ProjectionError(BenchxError):
     """A projection that breaks a rule of §4.3."""
 
 

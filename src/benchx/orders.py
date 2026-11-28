@@ -10,13 +10,14 @@ import uuid
 from datetime import UTC, datetime
 
 from . import core
+from .errors import BenchxError
 
 SCHEMA_VERSION = core.catalog.WORK_ORDER
 REQUESTER = {"kind": "workbench", "name": "bx"}
 CASE_TIMEOUT_S, ORDER_TIMEOUT_S = 60, 600
 
 
-class OrderError(Exception):
+class OrderError(BenchxError):
     """The order does not satisfy its schema or rules; the message says why."""
 
 

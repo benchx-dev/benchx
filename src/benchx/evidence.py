@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .core import canonical
+from .errors import BenchxError
 from .key import Key
 
 SIDE = "side"
@@ -28,7 +29,7 @@ COLUMNS = {
 }
 
 
-class CompareError(Exception):
+class CompareError(BenchxError):
     """The request itself cannot be answered, such as an unknown baseline."""
 
 

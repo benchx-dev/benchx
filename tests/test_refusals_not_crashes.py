@@ -241,3 +241,32 @@ def test_missing_format_checker_in_custom_schemas_is_refused(tmp_path, adhoc, mo
         assert "bx compare: error:" in err and "no-such-custom-format" in err and "Traceback" not in err
     finally:
         catalog.clear_cache()
+
+
+# ---- uniform error hierarchy and CLI refusal formatting
+
+
+def test_domain_errors_subclass_benchx_error():
+    from benchx import config, evidence, orders, projection, target, views
+    from benchx.errors import BenchxError, SessionError, UsageError
+
+    for exc_type in (
+        UsageError,
+        SessionError,
+        config.ConfigError,
+        orders.OrderError,
+        target.TargetError,
+        evidence.CompareError,
+        projection.ProjectionError,
+        views.ViewError,
+    ):
+        assert issubclass(exc_type, BenchxError)
+
+
+def test_compare_and_target_refusals_use_uniform_cli_error_prefix(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["compare", "--run", "missing", "--profile", "revisions", "--baseline", "abc"]) == cli.EXIT_REFUSED
+    assert "bx compare: error: no results for run 'missing'" in capsys.readouterr().err
+
+    assert cli.main(["target", "describe", "@missing"]) == cli.EXIT_REFUSED
+    assert 'bx target: error: @missing needs "provider"' in capsys.readouterr().err
