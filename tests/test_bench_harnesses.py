@@ -145,7 +145,7 @@ def test_precision_and_quantity_are_the_harnesss(build, tmp):
     (["BUILD", *GBENCH, "--processes", "2"], "google-benchmark takes no --processes"),
     (["BUILD", *GBENCH, "--loops", "5"], "google-benchmark takes no --loops"),
     (["BUILD", "--suite", "mod.py", "--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
-    (["BUILD", "--suite", "mod.py"], "--adapter is required"),
+    (["BUILD", "--suite", "mod.py", "--repetitions", "3"], "pyperf takes no --repetitions"),  # no --adapter: pyperf
     (["BUILD", *GBENCH, "--filter", "Quiet", QUIET], "case names or --filter"),
     (["BUILD", *GBENCH, "--tree", "t"], "--tree belongs to"),
     (["BUILD", "--adapter", "google-benchmark"], "--suite is required"),

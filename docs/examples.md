@@ -37,6 +37,10 @@ in this repository.
 
 - [`pyperf-suite`](examples/pyperf-suite.md) -- timing a suite of Python functions with
   `bx bench`, the local store, and `bx series` / `bx history`.
+- [`matmul-params`](examples/matmul-params.md) — one benchmark function with several parameter
+  combinations (sizes, numpy and torch), and a numpy-vs-torch comparison with `bx compare`.
+- [`pandas-asv`](examples/pandas-asv.md) -- cross-environment comparison run of a specific benchmark
+  from the pandas ASV suite, under two pandas versions. Also shows how to run existing ASV benchmarks.
 
 ## Additional, cookbook-style examples
 
@@ -45,8 +49,6 @@ Standalone, runnable examples of local usage live in a separate repository,
 
 - `examples/numpy-venvs` — cross-environment comparison across two virtual
   environments ([UC-04](use-cases/UC-04-cross-env.md)).
-- `examples/pandas-asv` -- cross-environment comparison run of a specific benchmark
-  from the pandas ASV suite. Also shows how to run existing ASV benchmarks.
 - `examples/arrow/demo/run.sh` — CMake + Google Benchmark walkthrough covering
   comparison profiles on a small C++ suite.
 - `examples/arrow/archery-local` — target provider walkthrough
