@@ -1,24 +1,35 @@
 name: docs
 
+# Runs the examples, builds the documentation site from their output, and deploys it.
+#
+#   examples  one leg per example, a job of its own in the PR's list of checks, named
+#             "<example> (README)": it executes examples/<example>/README.md with
+#             tools/execute_markdown.py, against this checkout of benchx, and uploads
+#             docs-<example>, the page that the site shows. A failing example is a red check.
+#   build     needs every example. Puts the pages in docs/generated/examples/, builds the site (strict).
+#   deploy    needs build. Only for a push to main, or a run by hand on main.
+#
+# It runs for every pull request. A push to main deploys only when it changes one of the paths
+# below: the pages show the output of benchx, so the package and what it depends on count. To add
+# an example, see examples/README.md.
+
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
-      - "src/benchx/schemas/**"
+      - "src/benchx/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - "tools/gen_docs.py"
+      - "tools/execute_markdown.py"
+      - "examples/**"
       - "zensical.toml"
       - "README.md"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "docs/**"
-      - "src/benchx/schemas/**"
-      - "tools/gen_docs.py"
-      - "zensical.toml"
-      - "README.md"
-      - ".github/workflows/docs.yml"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,15 +39,102 @@ permissions:
   contents: read
 
 jobs:
+  examples:
+    name: ${{ matrix.example }} (README)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [pyperf-suite]
+    env:
+      EXAMPLE: ${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # The examples run plain `python` and `bx`, and the benchmark workers use the same
+      # `python`, so the environment goes on the PATH. benchx is installed in editable mode, which
+      # is where it reads its schemas from. The `test` extra brings pyperf and the runner's
+      # markdown-it-py; the `parquet` extra is for the stores of the examples, which are Parquet.
+      - name: Install benchx
+        run: |
+          uv python install 3.13
+          uv sync --extra parquet --extra test --python 3.13
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Show what is under test
+        run: |
+          echo "python: $(python --version) ($(command -v python))"
+          echo "bx: $(command -v bx)"
+          echo "benchx: $(python -c 'import benchx; print(benchx.__file__)')"
+          echo "pyperf: $(python -c 'import pyperf; print(pyperf.__version__)')"
+          echo "commit: $(git rev-parse --short HEAD)"
+
+      # From the root of the checkout, so that annotations carry a path relative to the
+      # repository and the page does not show the runner's paths. The page and the logs go
+      # outside the checkout.
+      - name: Execute examples/${{ matrix.example }}/README.md
+        run: |
+          python tools/execute_markdown.py \
+            --source "examples/$EXAMPLE/README.md" \
+            --output "$RUNNER_TEMP/pages/$EXAMPLE.md" \
+            --logs "$RUNNER_TEMP/logs/$EXAMPLE"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: logs-${{ matrix.example }}
+          path: ${{ runner.temp }}/logs/${{ matrix.example }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the example's output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: results-${{ matrix.example }}
+          path: examples/${{ matrix.example }}/out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The contract with `build`: docs-<example> holds <example>.md.
+      - name: Upload the page
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-${{ matrix.example }}
+          path: ${{ runner.temp }}/pages/${{ matrix.example }}.md
+          if-no-files-found: error
+          retention-days: 14
+
   build:
+    needs: examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
 
-      - name: Generate derived pages (landing page, benchx page, schema reference)
-        run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py
+      # generated/<example>.md, one page for each docs-<example> artifact of this run.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: docs-*
+          path: generated
+          merge-multiple: true
+
+      # --executed: every example in examples/ must have its executed page, or this stops.
+      - name: Generate derived pages (landing page, schema reference, example pages)
+        run: uv run --python 3.12 --with-requirements docs/requirements.txt python tools/gen_docs.py --executed generated
 
       - name: Build site
         run: uv run --python 3.12 --with-requirements docs/requirements.txt zensical build --strict --clean
@@ -46,7 +144,7 @@ jobs:
           path: site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:

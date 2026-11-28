@@ -30,14 +30,19 @@ so that core `benchx` remains cloud-free and CI-vendor-neutral:
    machine catalog, and thin caller workflows. Use `benchx-arrow` as a minimal
    template when setting up continuous benchmarking for another project.
 
-## Local worked examples
+## Worked examples of local benchmarking
 
-Standalone, runnable local examples live in
-[`benchx-dev/benchx_examples`](https://github.com/benchx-dev/benchx_examples)
-and are exercised by CI:
+The sources of these examples live in [`examples/`](https://github.com/benchx-dev/benchx/tree/main/examples)
+in this repository.
 
-- `examples/pyperf-suite` — timing a Python function suite with `pyperf`
-  (`bx bench` and replaying orders with `bx run`).
+- [`pyperf-suite`](examples/pyperf-suite.md) -- timing a suite of Python functions with
+  `bx bench`, the local store, and `bx series` / `bx history`.
+
+## Additional, cookbook-style examples
+
+Standalone, runnable examples of local usage live in a separate repository,
+[`benchx-dev/benchx_examples`](https://github.com/benchx-dev/benchx_examples):
+
 - `examples/numpy-venvs` — cross-environment comparison across two virtual
   environments ([UC-04](use-cases/UC-04-cross-env.md)).
 - `examples/pandas-asv` -- cross-environment comparison run of a specific benchmark

@@ -196,8 +196,7 @@ function without readable source has no version.
 functions: the module's git checkout is the target, its path the suite, and the
 functions are exact case names. `bx run` is the layer underneath: it executes a finished
 order, so `bx run results/KEY/orders/order.json` replays any bench run.
-`examples/pyperf-suite` in [benchx_examples](https://github.com/benchx-dev/benchx_examples)
-is a runnable walk-through.
+[`examples/pyperf-suite`](examples/pyperf-suite.md) is a runnable walk-through.
 
 Environments that cannot share a process, such as two venvs with different numpy versions, are
 measured by separate `bx bench` calls that share a `--run-key`; `--label NAME=VALUE`, `--round R[/N]`
