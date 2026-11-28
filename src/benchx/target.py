@@ -24,6 +24,7 @@ from pathlib import Path
 
 from . import core, log
 from .core import loader
+from .errors import BenchxError
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ TEXT_FIELDS = ("how_built", "activation", "shell", "provider")
 MAX_FACTS_CHARS = 65536  # how_built as an object, serialized; as text it is limited to 8192
 
 
-class TargetError(Exception):
+class TargetError(BenchxError):
     """The target cannot be described; the message says why."""
 
 

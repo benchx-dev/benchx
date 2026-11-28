@@ -304,4 +304,4 @@ def test_variants_mode_selection_is_accepted(argv, message, capsys):
     """These get past mode selection; what refuses them is later (the target, the run)."""
     assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     err = capsys.readouterr().err
-    assert message in err and "bx compare: error" not in err
+    assert f"bx compare: error: {message}" in err
